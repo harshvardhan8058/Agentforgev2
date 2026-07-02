@@ -28,8 +28,8 @@ Sub-tasks marked with `*` are optional test tasks and can be skipped for a faste
 
 ## Tasks
 
-- [ ] 1. Project scaffolding and foundation configuration
-  - [ ] 1.1 Create repository layout and pinned dependency manifest
+- [x] 1. Project scaffolding and foundation configuration
+  - [x] 1.1 Create repository layout and pinned dependency manifest
     - Create the module tree exactly as in the design's "Repository / Module Layout"
       under `src/agentforge/` (`main.py`, `config/`, `api/`, `api/routers/`, `ingestion/`,
       `chunking/`, `embeddings/`, `vectorstore/`, `llm/`, `retrieval/`, `rag/`, `db/`,
@@ -43,13 +43,13 @@ Sub-tasks marked with `*` are optional test tasks and can be skipped for a faste
       values and no real credentials (Req 3.5)
     - _Requirements: 1.1, 1.3, 3.5, 13.2_
 
-  - [ ] 1.2 Implement domain models
+  - [x] 1.2 Implement domain models
     - Implement `models/domain.py` with `Document`, `Chunk`, `Embedding`, `Citation`,
       and `Grounded_Answer` dataclasses exactly as specified in the "Domain Models"
       section (including `Chunk.overlap_prev` and `Grounded_Answer.grounded`)
     - _Requirements: 1.1_
 
-  - [ ] 1.3 Implement Configuration_Manager
+  - [x] 1.3 Implement Configuration_Manager
     - Implement `config/settings.py` `Settings` (pydantic-settings `BaseSettings`) loading
       all values from environment variables, with the profile/chunking/embedding/
       retrieval/ingestion-limit fields and defaults from the design
@@ -59,23 +59,23 @@ Sub-tasks marked with `*` are optional test tasks and can be skipped for a faste
       `active_llm()`, and `active_vector_store()`
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.6, 4.5, 9.2_
 
-  - [ ]* 1.4 Write unit tests for configuration loading and validation
+  - [x]* 1.4 Write unit tests for configuration loading and validation
     - Cover env loading, required-setting validation, missing-setting abort with the
       offending name, and optional-credential behavior
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 4.5_
 
-  - [ ]* 1.5 Write property test for secret non-exposure
+  - [x]* 1.5 Write property test for secret non-exposure
     - **Property 14: Secret values are never exposed**
     - **Validates: Requirements 3.6**
 
-- [ ] 2. Database engine, repositories, and schema migrations
-  - [ ] 2.1 Implement async DB engine and repositories
+- [x] 2. Database engine, repositories, and schema migrations
+  - [x] 2.1 Implement async DB engine and repositories
     - Implement `db/engine.py` (async engine/session from `database_url`) and
       `db/repositories.py` for `documents` and `chunks` persistence (associating each
       chunk with its `document_id`)
     - _Requirements: 4.5, 7.3_
 
-  - [ ] 2.2 Implement SQL migrations and migration runner
+  - [x] 2.2 Implement SQL migrations and migration runner
     - Add `migrations/0001_enable_pgvector.sql` and `migrations/0002_create_core_tables.sql`
       per the design schema; template the `chunk_embeddings.embedding vector(N)` column to
       the configured `embedding_dimension`; add the HNSW index
@@ -83,57 +83,57 @@ Sub-tasks marked with `*` are optional test tasks and can be skipped for a faste
       failure, and reports the failing migration identifier
     - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-  - [ ]* 2.3 Write integration test for pgvector extension and migrations
+  - [x]* 2.3 Write integration test for pgvector extension and migrations
     - Verify the extension is enabled, tables are created, and the vector column matches
       the configured dimension; verify a forced migration failure reports its id
     - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-- [ ] 3. FastAPI skeleton, error handling, and health checks
-  - [ ] 3.2 Implement error envelope and exception handlers
+- [x] 3. FastAPI skeleton, error handling, and health checks
+  - [x] 3.2 Implement error envelope and exception handlers
     - Implement `api/errors.py` with the uniform `{ "error": { code, message, details } }`
       envelope, a catch-all handler returning HTTP 500 without leaking stack traces, and
       a 404 handler for unknown routes
     - _Requirements: 2.2, 2.5_
 
-  - [ ] 3.3 Implement typed request/response schemas
+  - [x] 3.3 Implement typed request/response schemas
     - Implement `api/schemas.py` Pydantic models for ingest, query, documents, and health
       responses used by every endpoint
     - _Requirements: 2.3_
 
-  - [ ] 3.4 Implement health endpoints
+  - [x] 3.4 Implement health endpoints
     - Implement `api/routers/health.py`: `GET /health/live` (always 200, no dependency
       checks) and `GET /health/ready` (checks Database + Redis connectivity, 200 when all
       up, 503 listing each unavailable dependency)
     - _Requirements: 6.1, 6.2, 6.3, 6.4_
 
-  - [ ] 3.1 Implement FastAPI app factory and router registration
+  - [x] 3.1 Implement FastAPI app factory and router registration
     - Implement `src/agentforge/main.py` app factory with lifespan startup (config load +
       migration run), exception-handler registration from `api/errors.py`, and health
       router registration so all routes are registered before serving
     - _Requirements: 2.1, 2.4_
 
-  - [ ]* 3.5 Write unit tests for 404 and 500 error envelope
+  - [x]* 3.5 Write unit tests for 404 and 500 error envelope
     - Assert unknown routes return 404 and forced unhandled exceptions return the 500
       structured envelope with no stack trace
     - _Requirements: 2.2, 2.5_
 
-  - [ ]* 3.6 Write unit tests for health endpoints
+  - [x]* 3.6 Write unit tests for health endpoints
     - Assert liveness 200; readiness 200 when deps up and 503 listing unavailable deps
     - _Requirements: 6.1, 6.2, 6.3, 6.4_
 
-- [ ] 4. Docker-based local development environment
-  - [ ] 4.1 Create Dockerfile and Docker Compose stack
+- [x] 4. Docker-based local development environment
+  - [x] 4.1 Create Dockerfile and Docker Compose stack
     - Add the API `Dockerfile` and `docker-compose.yml` defining `api`, `postgres`
       (pgvector image), and `redis` services, wired to `Configuration_Manager` settings,
       exposing the documented local API port and reporting a failed service by name
     - _Requirements: 5.1, 5.2, 5.3, 5.4_
 
-  - [ ] 4.2 Write README with local install/configure/run instructions
+  - [x] 4.2 Write README with local install/configure/run instructions
     - Document dependency install, `.env` setup, the single `docker compose up` command,
       the local port, and the test command
     - _Requirements: 1.4_
 
-  - [ ]* 4.3 Write integration test for Compose startup and reachability
+  - [x]* 4.3 Write integration test for Compose startup and reachability
     - Verify services start and the API becomes reachable within the documented window
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 14.1_
 

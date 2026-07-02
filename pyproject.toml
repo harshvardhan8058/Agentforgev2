@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentforge"
+version = "0.1.0"
+description = "AgentForge: Enterprise AI Agent Platform (Foundation + Core RAG)"
+readme = "README.md"
+requires-python = ">=3.11"
+
+# Pinned runtime dependencies (dependency manifest, Req 1.3).
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.1",
+    "sqlalchemy==2.0.36",
+    "asyncpg==0.30.0",
+    "psycopg[binary]==3.2.3",
+    "pgvector==0.3.6",
+    "chromadb==0.5.23",
+    "sentence-transformers==3.3.1",
+    "redis==5.2.1",
+    "pypdf==5.1.0",
+    "markdown==3.7",
+    "python-multipart==0.0.20",
+]
+
+[project.optional-dependencies]
+# Pinned test/development dependencies.
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "hypothesis==6.123.2",
+    "httpx==0.28.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+# Documented test command is simply `pytest` (Req 13.2).
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: tests that require live infrastructure (Postgres, Redis, Docker). Deselect with -m 'not integration'.",
+]
+# By default the standalone unit + property suite excludes infra-dependent tests.
+addopts = "-m 'not integration'"

@@ -1,3 +1,29 @@
+Metadata-Version: 2.4
+Name: agentforge
+Version: 0.1.0
+Summary: AgentForge: Enterprise AI Agent Platform (Foundation + Core RAG)
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi==0.115.6
+Requires-Dist: uvicorn[standard]==0.34.0
+Requires-Dist: pydantic==2.10.4
+Requires-Dist: pydantic-settings==2.7.1
+Requires-Dist: sqlalchemy==2.0.36
+Requires-Dist: asyncpg==0.30.0
+Requires-Dist: psycopg[binary]==3.2.3
+Requires-Dist: pgvector==0.3.6
+Requires-Dist: chromadb==0.5.23
+Requires-Dist: sentence-transformers==3.3.1
+Requires-Dist: redis==5.2.1
+Requires-Dist: pypdf==5.1.0
+Requires-Dist: markdown==3.7
+Requires-Dist: python-multipart==0.0.20
+Provides-Extra: dev
+Requires-Dist: pytest==8.3.4; extra == "dev"
+Requires-Dist: pytest-asyncio==0.25.0; extra == "dev"
+Requires-Dist: hypothesis==6.123.2; extra == "dev"
+Requires-Dist: httpx==0.28.1; extra == "dev"
+
 # AgentForge
 AgentForge: Enterprise Multi-Agent AI Platform
 
