@@ -72,13 +72,34 @@ class Settings(BaseSettings):
     database_url: str = Field(...)  # e.g. postgresql+asyncpg://user:pass@host/db
     redis_url: str = Field(...)
 
+    # --- agentic layer (Phase 3; all optional / defaulted to preserve keyless boot) ---
+    # Max reason->act->observe cycles per Agent_Run. Resolved to [1, 100] with a
+    # bounded default of 10 by the orchestrator when absent/invalid (Req 1.5, 1.6).
+    iteration_limit: int | None = None
+    # Short_Term_Memory Size_Budget as a positive token/character count (Req 6.2, 6.3).
+    memory_size_budget: int | None = None
+    # Pluggable web-search provider selection; "disabled" is the keyless default so no
+    # network request is ever made without a credential (Req 5.2, 5.4).
+    search_provider: Literal["disabled", "tavily"] = "disabled"
+
     # --- credentials (ALL optional) ---
     groq_api_key: SecretStr | None = None
     hosted_embedding_api_key: SecretStr | None = None
+    # Absence disables the Web_Search_Tool entirely (Req 5.4).
+    search_api_key: SecretStr | None = None
 
     def active_llm(self) -> str:
         """Return the active LLM provider name based on credential presence."""
         return "groq" if self.groq_api_key else "fallback"
+
+    def active_search(self) -> str:
+        """Return the active search provider name based on credential presence.
+
+        Falls back to ``"disabled"`` whenever no ``search_api_key`` is configured, so
+        the Web_Search_Tool degrades gracefully and performs no network request in the
+        keyless default (Req 5.2, 5.4).
+        """
+        return self.search_provider if self.search_api_key else "disabled"
 
     def active_vector_store(self) -> str:
         """Return the active vector store based on the selected profile."""

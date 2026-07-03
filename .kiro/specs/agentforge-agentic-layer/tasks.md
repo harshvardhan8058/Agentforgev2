@@ -46,8 +46,8 @@ Sub-tasks marked with `*` are optional test tasks and can be skipped for a faste
 
 ## Tasks
 
-- [ ] 1. Settings extensions and Phase 3 module scaffolding
-  - [ ] 1.1 Extend Settings for the agentic layer
+- [x] 1. Settings extensions and Phase 3 module scaffolding
+  - [x] 1.1 Extend Settings for the agentic layer
     - Extend `config/settings.py` `Settings` with `iteration_limit: int | None = None`,
       `memory_size_budget: int | None = None`,
       `search_provider: Literal["disabled", ...] = "disabled"`, and
@@ -58,7 +58,7 @@ Sub-tasks marked with `*` are optional test tasks and can be skipped for a faste
     - _Requirements: 1.5, 1.6, 6.2, 5.2, 5.4, 13.1_
     - _Design: New Settings (`config/settings.py`)_
 
-  - [ ] 1.2 Create the Phase 3 package layout with interface stubs
+  - [x] 1.2 Create the Phase 3 package layout with interface stubs
     - Create the module tree exactly as in the design's "Repository / Module Layout"
       under `src/agentforge/`: `agent/` (`state.py`, `orchestrator.py`, `graph.py`,
       `selection.py`), `tools/` (`base.py`, `registry.py`, `rag_tool.py`,
