@@ -26,6 +26,8 @@ dependencies = [
     "markdown==3.7",
     "python-multipart==0.0.20",
     "groq==0.13.1",
+    "langgraph==1.2.7",
+    "langchain-core==1.4.8",
 ]
 
 [project.optional-dependencies]

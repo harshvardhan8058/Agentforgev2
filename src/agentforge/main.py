@@ -17,11 +17,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from agentforge.api.errors import register_exception_handlers
+from agentforge.api.routers import agent as agent_router
+from agentforge.api.routers import conversations as conversations_router
 from agentforge.api.routers import documents as documents_router
 from agentforge.api.routers import health as health_router
 from agentforge.api.routers import ingest as ingest_router
 from agentforge.api.routers import query as query_router
-from agentforge.config.container import build_app_context
+from agentforge.config.container import build_agent_context, build_app_context
 from agentforge.config.settings import Settings, load_settings
 from agentforge.db.engine import create_engine, create_session_factory
 from agentforge.db.migrations import run_migrations
@@ -69,6 +71,19 @@ async def lifespan(app: FastAPI):
             settings.active_vector_store(),
         )
 
+    # 6. Compose the Phase 3 agentic object graph (orchestrator, tools, memory,
+    #    conversation store, trace recorder, streaming service), reusing the RAG
+    #    AppContext. Tests may pre-inject a keyless context, which is respected here.
+    if getattr(app.state, "agent_context", None) is None:
+        app.state.agent_context = build_agent_context(
+            settings, app=app.state.app_context
+        )
+        logger.info(
+            "Agent context ready (search=%s, iteration_limit=%s)",
+            settings.active_search(),
+            app.state.agent_context.orchestrator.iteration_limit,
+        )
+
     try:
         yield
     finally:
@@ -101,6 +116,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(ingest_router.router)
     app.include_router(query_router.router)
     app.include_router(documents_router.router)
+    # Phase 3 agentic-layer routers.
+    app.include_router(conversations_router.router)
+    app.include_router(agent_router.router)
 
     return app
 

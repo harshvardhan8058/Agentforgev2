@@ -1,0 +1,81 @@
+{
+  "pbtResults": {
+    "2.3 Write property test for registry register/resolve/list round-trip": {
+      "status": "passed",
+      "lastRunTimestamp": 1783114484044
+    },
+    "2.4 Write property test for duplicate tool-name rejection": {
+      "status": "passed",
+      "lastRunTimestamp": 1783114485020
+    },
+    "3.3 Write property test for Iteration_Limit resolution": {
+      "status": "passed",
+      "lastRunTimestamp": 1783114486980
+    },
+    "5.2 Write property test for RAG_Tool answer/citation mirroring": {
+      "status": "passed",
+      "lastRunTimestamp": 1783114487980
+    },
+    "6.3 Write property test for disabled web search": {
+      "status": "passed",
+      "lastRunTimestamp": 1783114488169
+    },
+    "7.3 Write property test for the bounded loop upper bound": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115282804
+    },
+    "7.4 Write property test for iteration-counter monotonicity": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115283810
+    },
+    "7.5 Write property test for exactly-one termination reason": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115284836
+    },
+    "7.6 Write property test for successful tool dispatch": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115285958
+    },
+    "7.7 Write property test for unregistered tool containment": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115287793
+    },
+    "7.8 Write property test for argument-validation gating of invocation": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115288785
+    },
+    "7.9 Write property test for tool-execution-error containment": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115288887
+    },
+    "9.2 Write property test for the short-term size invariant + FIFO + retention": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115721894
+    },
+    "9.3 Write property test for invalid Size_Budget rejection": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115722126
+    },
+    "10.2 Write property test for long-term top-K bound and ordering": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115759200
+    },
+    "11.3 Write property test for conversation append/history ordering with auto-create": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115822754
+    },
+    "12.3 Write property test for trace completeness and ordering": {
+      "status": "passed",
+      "lastRunTimestamp": 1783115892289
+    },
+    "13.2 Write property test for streaming terminal-event and ordering guarantees": {
+      "status": "passed",
+      "lastRunTimestamp": 1783116849256
+    },
+    "14.1 Write property test for fallback determinism of answer and event sequence": {
+      "status": "passed",
+      "lastRunTimestamp": 1783116849703
+    }
+  },
+  "executionHistory": {}
+}

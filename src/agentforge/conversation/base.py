@@ -46,3 +46,12 @@ class Conversation_Store(ABC):
     def history(self, conversation_id: str) -> list[Message]:
         """Return the Messages in ascending ordinal position order (Req 8.3)."""
         raise NotImplementedError
+
+    @abstractmethod
+    def exists(self, conversation_id: str) -> bool:
+        """Return whether a Conversation with ``conversation_id`` exists.
+
+        Lets the transport layer distinguish an unknown conversation (``404``) from a
+        known-but-empty one when serving history.
+        """
+        raise NotImplementedError

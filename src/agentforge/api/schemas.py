@@ -68,3 +68,53 @@ class DocumentSummary(BaseModel):
     status: str
     chunk_count: int
     created_at: str
+
+
+# --- conversations (Phase 3) ---
+Role = Literal["user", "assistant", "tool", "system"]
+
+
+class CreateConversationResponse(BaseModel):
+    conversation_id: str
+
+
+class AppendMessageRequest(BaseModel):
+    role: Role
+    content: str = Field(..., min_length=1)
+
+
+class MessageModel(BaseModel):
+    role: str
+    content: str
+    position: int
+
+
+class ConversationHistoryResponse(BaseModel):
+    conversation_id: str
+    messages: list[MessageModel] = Field(default_factory=list)
+
+
+# --- agent (Phase 3) ---
+class AgentRunRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    conversation_id: str | None = None
+
+
+class AgentRunResponse(BaseModel):
+    run_id: str
+    conversation_id: str
+    answer: str
+    termination_reason: Literal["final-answer", "iteration-limit-reached"]
+    citations: list[CitationModel] = Field(default_factory=list)
+
+
+class TraceEntryModel(BaseModel):
+    ordinal: int
+    step_type: str
+    tool_name: str | None = None
+    outcome: str | None = None
+
+
+class TraceResponse(BaseModel):
+    run_id: str
+    entries: list[TraceEntryModel] = Field(default_factory=list)

@@ -15,11 +15,45 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:  # avoid runtime import cycles; annotations are strings via __future__.
-    from agentforge.conversation.base import Message
-    from agentforge.tools.base import Tool_Call
+# Imported at runtime (not under TYPE_CHECKING) so the dataclass type hints resolve when
+# LangGraph introspects ``AgentState`` as its state schema. Neither module imports
+# ``agent.state``, so there is no import cycle.
+from agentforge.conversation.base import Message
+from agentforge.tools.base import Tool_Call
+
+
+# The bounded default and inclusive range for the Iteration_Limit (Req 1.5, 1.6).
+DEFAULT_ITERATION_LIMIT = 10
+MIN_ITERATION_LIMIT = 1
+MAX_ITERATION_LIMIT = 100
+
+
+def resolve_iteration_limit(configured: object | None) -> tuple[int, bool]:
+    """Normalize a configured Iteration_Limit into ``(limit, invalid_flag)``.
+
+    The Agent_Orchestrator obtains the Iteration_Limit from the Configuration_Manager as
+    a positive integer in ``[1, 100]`` and normalizes it (Req 1.5, 1.6):
+
+    - An integer within ``[1, 100]`` passes through unchanged with ``invalid_flag=False``.
+    - ``None`` (absent) resolves to the default ``10`` with ``invalid_flag=False``.
+    - Anything else — a non-integer, a boolean, or an integer outside ``[1, 100]`` — is
+      rejected: the default ``10`` is applied and ``invalid_flag=True`` records that the
+      configured value was invalid.
+
+    Booleans are rejected explicitly because ``bool`` is a subclass of ``int`` in Python
+    and ``True``/``False`` are not meaningful iteration limits.
+    """
+    if configured is None:
+        return DEFAULT_ITERATION_LIMIT, False
+    if (
+        isinstance(configured, int)
+        and not isinstance(configured, bool)
+        and MIN_ITERATION_LIMIT <= configured <= MAX_ITERATION_LIMIT
+    ):
+        return configured, False
+    # Rejected: apply the bounded default and flag the invalid configuration (Req 1.6).
+    return DEFAULT_ITERATION_LIMIT, True
 
 
 class TerminationReason(str, Enum):
@@ -40,6 +74,10 @@ class Observation:
     kind: str
     tool_name: str | None
     content: str
+    # Structured payload carried from the Tool_Result (e.g. RAG citations), so the
+    # final answer can surface citations without re-invoking the tool. Empty for
+    # non-tool-result observations.
+    data: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -59,6 +97,9 @@ class AgentState:
     # Resolved bound for this run (Req 1.5); defaults to the bounded default.
     iteration_limit: int = 10
     pending_tool_call: Tool_Call | None = None
+    # Transient: the outcome produced by the act node, committed into ``observations`` by
+    # the observe node so the two nodes stay single-responsibility (Req 3.3, 11.2, 11.3).
+    pending_observation: Observation | None = None
     final_answer: str | None = None
     termination_reason: TerminationReason | None = None
     # Set when the configured limit was invalid and the default was applied (Req 1.6).
