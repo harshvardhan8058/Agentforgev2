@@ -1,0 +1,41 @@
+{
+  "pbtResults": {
+    "7.2 Write property test for fallback determinism and grounding": {
+      "status": "passed",
+      "lastRunTimestamp": 1783026894218
+    },
+    "7.4 Write property test for embedding dimension stability": {
+      "status": "passed",
+      "lastRunTimestamp": 1783026894254
+    },
+    "7.7 Write property test for vector store bound and ordering": {
+      "status": "passed",
+      "lastRunTimestamp": 1783026894262
+    },
+    "7.8 Write property test for stored-embedding chunk association": {
+      "status": "passed",
+      "lastRunTimestamp": 1783026895199
+    },
+    "8.2 Write property test for chunk maximum-size invariant": {
+      "status": "passed",
+      "lastRunTimestamp": 1783026897189
+    },
+    "8.3 Write property test for chunk overlap invariant": {
+      "status": "passed",
+      "lastRunTimestamp": 1783026898270
+    },
+    "8.4 Write property test for chunk round-trip reconstruction": {
+      "status": "passed",
+      "lastRunTimestamp": 1783026899192
+    },
+    "9.3 Write property test for chunk–document reference invariant": {
+      "status": "passed",
+      "lastRunTimestamp": 1783026900353
+    },
+    "9.4 Write property test for rejection of invalid inputs": {
+      "status": "passed",
+      "lastRunTimestamp": 1783026900598
+    }
+  },
+  "executionHistory": {}
+}

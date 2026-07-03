@@ -501,6 +501,104 @@ and reports the failing migration identifier (Req 4.2, 4.4). In the `local` prof
 vectors live in Chroma instead, but the relational `documents`/`chunks` tables are still
 created for document/chunk bookkeeping.
 
+## Key Flows
+
+The two primary runtime flows tie the components, data models, and pluggable seams
+together. Both run identically regardless of which concrete provider the
+`Configuration_Manager` selected — the difference is only which implementation sits
+behind each interface.
+
+### Flow 1 — Document Ingestion (`POST /documents`)
+
+Validate → extract → chunk → embed → store vectors → persist records. The whole
+pipeline is **atomic**: relational rows and vector writes are committed only after every
+step succeeds, so any rejection (empty, unsupported, corrupt, oversized, or embedding
+failure) persists **zero** Chunks (Req 7.3–7.7, 9.4).
+
+```mermaid
+sequenceDiagram
+    participant C as HTTP Client
+    participant API as API_Service
+    participant Ing as Ingestion_Service
+    participant Ext as Extractors (text/pdf/markdown)
+    participant Ch as Chunker
+    participant Emb as Embedding_Provider
+    participant VS as Vector_Store
+    participant DB as Postgres (documents/chunks)
+
+    C->>API: POST /documents (file)
+    API->>Ing: ingest(file, content_type)
+    Ing->>Ing: size <= 50MB? format in {text,pdf,markdown}?
+    alt rejected (size / unsupported)
+        Ing-->>API: error (413 size_limit / 415 unsupported_format)
+        API-->>C: error envelope, no chunks persisted
+    else accepted
+        Ing->>Ext: extract text (<=30s budget)
+        alt no text / extraction fails / timeout
+            Ext-->>Ing: empty or failure
+            Ing-->>API: 400 empty_document / 422 extraction_failure|timeout
+            API-->>C: error envelope, no chunks persisted
+        else text extracted
+            Ing->>Ch: chunk(text)  %% markdown normalized per markdown_mode
+            Ch-->>Ing: ordered chunks (+overlap_prev, document_id)
+            Ing->>Emb: embed_batch(chunk texts)
+            alt embedding failure
+                Emb-->>Ing: EmbeddingError
+                Ing-->>API: 500 embedding_error (rollback, no partial store)
+                API-->>C: error envelope, no chunks persisted
+            else embeddings ok
+                Ing->>VS: upsert(chunk_id, document_id, vector) per chunk
+                Ing->>DB: persist document + chunk records (commit)
+                Ing-->>API: {document_id, chunk_count, status: ingested}
+                API-->>C: 201 Created
+            end
+        end
+    end
+```
+
+### Flow 2 — Grounded Query (`POST /query`), including the keyless fallback path
+
+Resolve K → embed query → retrieve top-K → ground → answer → cite. Retrieval always
+precedes generation (Req 12.1). When no LLM credential is configured, the identical flow
+runs through the deterministic `Fallback_Provider` (Req 12.6) — no calling code changes.
+
+```mermaid
+sequenceDiagram
+    participant C as HTTP Client
+    participant API as API_Service
+    participant RAG as RAG_Service
+    participant Retr as Retriever
+    participant Emb as Embedding_Provider
+    participant VS as Vector_Store
+    participant LLM as LLM_Provider (Groq or Fallback)
+
+    C->>API: POST /query {query, top_k?}
+    API->>RAG: answer(query, top_k)
+    RAG->>RAG: k = clamp(top_k, 1, 10) (default top_k_default)
+    RAG->>Retr: retrieve(query, k)
+    Retr->>Emb: embed_text(query)
+    Emb-->>Retr: query vector
+    Retr->>VS: query(vector, k)
+    VS-->>Retr: <= k matches, descending similarity
+    Retr-->>RAG: retrieved chunks (+ chunk text from DB)
+    alt zero chunks retrieved
+        RAG-->>API: {grounded:false, citations:[], no fabrication}
+        API-->>C: 200 (no grounding available)
+    else chunks retrieved
+        RAG->>RAG: build grounding-only prompt (template + query + chunk texts)
+        alt active provider = Groq and Groq available
+            RAG->>LLM: generate(prompt)  %% Groq_Provider
+            LLM-->>RAG: completion (or LLMProviderError -> 502)
+        else no LLM credential
+            RAG->>LLM: generate(prompt)  %% Fallback_Provider (deterministic, no network)
+            LLM-->>RAG: deterministic answer from chunks
+        end
+        RAG->>RAG: attach exactly one Citation per used chunk (doc_id, chunk_id)
+        RAG-->>API: {answer, grounded:true, provider, citations}
+        API-->>C: 200 Grounded_Answer
+    end
+```
+
 ## API Endpoints
 
 All endpoints use typed Pydantic request/response models (Req 2.3). Unknown routes →

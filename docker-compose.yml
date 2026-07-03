@@ -1,0 +1,64 @@
+# Local development stack: api + postgres(pgvector) + redis (Req 5.1).
+# Start everything with: docker compose up
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Report this service by name if it fails to start.
+    container_name: agentforge-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PROFILE: ${PROFILE:-local}
+      API_PORT: ${API_PORT:-8000}
+      # Wired to the Configuration_Manager settings.
+      DATABASE_URL: postgresql+asyncpg://agentforge:agentforge@postgres:5432/agentforge
+      REDIS_URL: redis://redis:6379/0
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      HOSTED_EMBEDDING_API_KEY: ${HOSTED_EMBEDDING_API_KEY:-}
+    ports:
+      # Documented local port (Req 5.3).
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/live').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: agentforge-postgres
+    environment:
+      POSTGRES_USER: agentforge
+      POSTGRES_PASSWORD: agentforge
+      POSTGRES_DB: agentforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentforge -d agentforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: agentforge-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
