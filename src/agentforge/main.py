@@ -17,7 +17,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from agentforge.api.errors import register_exception_handlers
+from agentforge.api.routers import documents as documents_router
 from agentforge.api.routers import health as health_router
+from agentforge.api.routers import ingest as ingest_router
+from agentforge.api.routers import query as query_router
+from agentforge.config.container import build_app_context
 from agentforge.config.settings import Settings, load_settings
 from agentforge.db.engine import create_engine, create_session_factory
 from agentforge.db.migrations import run_migrations
@@ -54,6 +58,17 @@ async def lifespan(app: FastAPI):
         if applied:
             logger.info("Applied migrations: %s", ", ".join(applied))
 
+    # 5. Compose the RAG object graph (providers, vector store, services) once and
+    #    share it with every request via app.state. Tests may pre-inject a context
+    #    built from keyless in-memory doubles, which is respected here.
+    if getattr(app.state, "app_context", None) is None:
+        app.state.app_context = build_app_context(settings)
+        logger.info(
+            "Application context ready (llm=%s, vector_store=%s)",
+            settings.active_llm(),
+            settings.active_vector_store(),
+        )
+
     try:
         yield
     finally:
@@ -80,8 +95,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Register error envelope handlers (404 / 500 / validation) before serving.
     register_exception_handlers(app)
 
-    # Register component routers before serving (Req 2.4).
+    # Register component routers before serving (Req 2.1, 2.4). All Phase 1 + Phase 2
+    # routes are registered here, before the app accepts any request.
     app.include_router(health_router.router)
+    app.include_router(ingest_router.router)
+    app.include_router(query_router.router)
+    app.include_router(documents_router.router)
 
     return app
 

@@ -142,67 +142,67 @@ Sub-tasks marked with `*` are optional test tasks and can be skipped for a faste
     Phase 1 tests pass, and the app boots with zero credentials. Ensure all tests pass,
     ask the user if questions arise.
 
-- [ ] 6. Define pluggable interfaces (Phase 2 seams)
-  - [ ] 6.1 Define the Embedding_Provider interface
+- [x] 6. Define pluggable interfaces (Phase 2 seams)
+  - [x] 6.1 Define the Embedding_Provider interface
     - Implement `embeddings/base.py` abstract `Embedding_Provider` with `dimension`,
       `embed_text`, and `embed_batch`, plus an `EmbeddingError`
     - _Requirements: 1.2, 9.1_
 
-  - [ ] 6.2 Define the Vector_Store interface
+  - [x] 6.2 Define the Vector_Store interface
     - Implement `vectorstore/base.py` abstract `Vector_Store` (`upsert`, `query`,
       `delete_document`, `count`) and the `StoredMatch` dataclass
     - _Requirements: 1.2, 10.1_
 
-  - [ ] 6.3 Define the LLM_Provider interface
+  - [x] 6.3 Define the LLM_Provider interface
     - Implement `llm/base.py` abstract `LLM_Provider` with `name` and `generate`, the
       `GenerationResult` dataclass, and an `LLMProviderError`
     - _Requirements: 1.2, 11.1_
 
-  - [ ]* 6.4 Write smoke tests asserting interfaces are abstract
+  - [x]* 6.4 Write smoke tests asserting interfaces are abstract
     - Assert each base class cannot be instantiated and defines the required abstract
       methods
     - _Requirements: 1.2, 10.1, 11.1_
 
-- [ ] 7. Implement keyless local default providers
-  - [ ] 7.1 Implement the Fallback_Provider
+- [x] 7. Implement keyless local default providers
+  - [x] 7.1 Implement the Fallback_Provider
     - Implement `llm/fallback_provider.py` producing a deterministic answer assembled
       purely from the retrieved chunks with no external call
     - _Requirements: 11.3, 11.4_
 
-  - [ ]* 7.2 Write property test for fallback determinism and grounding
+  - [x]* 7.2 Write property test for fallback determinism and grounding
     - **Property 13: Fallback generation is deterministic and grounded**
     - **Validates: Requirements 11.4, 12.6**
 
-  - [ ] 7.3 Implement SentenceTransformer_Embeddings (default local embeddings)
+  - [x] 7.3 Implement SentenceTransformer_Embeddings (default local embeddings)
     - Implement `embeddings/sentence_transformer.py` wrapping
       `sentence-transformers/all-MiniLM-L6-v2` (`dimension == 384`), running on CPU with
       no key; raise `EmbeddingError` on failure without storing a partial embedding
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 14.4_
 
-  - [ ]* 7.4 Write property test for embedding dimension stability
+  - [x]* 7.4 Write property test for embedding dimension stability
     - **Property 6: Embedding dimension is fixed and stable**
     - **Validates: Requirements 9.1, 9.3**
 
-  - [ ]* 7.5 Write unit test for embedding generation failure
+  - [x]* 7.5 Write unit test for embedding generation failure
     - Assert failure raises `EmbeddingError` and stores no partial embedding
     - _Requirements: 9.4_
 
-  - [ ] 7.6 Implement the Chroma_Store (local vector store)
+  - [x] 7.6 Implement the Chroma_Store (local vector store)
     - Implement `vectorstore/chroma_store.py` over an embedded Chroma collection,
       associating each embedding with its chunk/document id and honoring the `query`
       bound/ordering post-conditions
     - _Requirements: 10.2, 10.4, 10.5, 10.6_
 
-  - [ ]* 7.7 Write property test for vector store bound and ordering
+  - [x]* 7.7 Write property test for vector store bound and ordering
     - **Property 7: Vector store bound and ordering**
     - **Validates: Requirements 10.5, 10.6**
 
-  - [ ]* 7.8 Write property test for stored-embedding chunk association
+  - [x]* 7.8 Write property test for stored-embedding chunk association
     - **Property 8: Stored embedding is associated with its originating Chunk**
     - **Validates: Requirements 10.4**
 
-- [ ] 8. Implement text chunking
-  - [ ] 8.1 Implement the Chunker
+- [x] 8. Implement text chunking
+  - [x] 8.1 Implement the Chunker
     - Implement `chunking/chunker.py` as a character-based sliding-window chunker with
       configurable `chunk_max_chars` and `chunk_overlap_chars`, recording per-boundary
       `overlap_prev`, preserving `document_id` and ordinal `index`, and producing exactly
@@ -210,69 +210,69 @@ Sub-tasks marked with `*` are optional test tasks and can be skipped for a faste
       strip/preserve normalization of the input text
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
 
-  - [ ]* 8.2 Write property test for chunk maximum-size invariant
+  - [x]* 8.2 Write property test for chunk maximum-size invariant
     - **Property 1: Chunk maximum-size invariant**
     - **Validates: Requirements 8.1, 8.4**
 
-  - [ ]* 8.3 Write property test for chunk overlap invariant
+  - [x]* 8.3 Write property test for chunk overlap invariant
     - **Property 2: Chunk overlap invariant**
     - **Validates: Requirements 8.2**
 
-  - [ ]* 8.4 Write property test for chunk round-trip reconstruction
+  - [x]* 8.4 Write property test for chunk round-trip reconstruction
     - **Property 3: Chunk round-trip reconstruction**
     - **Validates: Requirements 8.5, 13.4**
 
-- [ ] 9. Implement document ingestion
-  - [ ] 9.1 Implement text extractors
+- [x] 9. Implement document ingestion
+  - [x] 9.1 Implement text extractors
     - Implement `ingestion/extractors.py` for plain text, PDF, and Markdown extraction
       with the 30-second extraction budget and `markdown_mode` handling
     - _Requirements: 7.1, 7.2_
 
-  - [ ] 9.2 Implement the Ingestion_Service orchestration
+  - [x] 9.2 Implement the Ingestion_Service orchestration
     - Implement `ingestion/service.py` orchestrating validate → extract → chunk → embed →
       store vectors → persist document + chunk records; enforce 50 MB size limit and
       text/PDF/Markdown allow-list; reject empty/unsupported/corrupt/oversized/timed-out
       inputs; commit atomically so rejections persist no chunks
     - _Requirements: 7.1, 7.3, 7.4, 7.5, 7.6, 7.7, 9.4_
 
-  - [ ]* 9.3 Write property test for chunk–document reference invariant
+  - [x]* 9.3 Write property test for chunk–document reference invariant
     - **Property 4: Chunk–document reference invariant**
     - **Validates: Requirements 7.3, 8.3**
 
-  - [ ]* 9.4 Write property test for rejection of invalid inputs
+  - [x]* 9.4 Write property test for rejection of invalid inputs
     - **Property 5: Ingestion rejects invalid inputs with no persisted Chunks**
     - **Validates: Requirements 7.4, 7.5**
 
-  - [ ]* 9.5 Write unit tests for extraction failure, size, and timeout errors
+  - [x]* 9.5 Write unit tests for extraction failure, size, and timeout errors
     - Assert corrupt-file extraction failure, >50 MB size-limit rejection, and extraction
       timeout each report the correct error and persist no chunks
     - _Requirements: 7.6, 7.7, 7.1_
 
-- [ ] 10. Implement composition root and provider selection
-  - [ ] 10.1 Implement the container/composition root
+- [x] 10. Implement composition root and provider selection
+  - [x] 10.1 Implement the container/composition root
     - Implement `config/container.py` `build_llm_provider`, `build_embedding_provider`,
       and `build_vector_store` selecting implementations by credential presence and
       profile (fallback + sentence-transformer + Chroma by default), never requiring a key
     - _Requirements: 10.2, 10.3, 11.2, 11.3, 11.6_
 
-  - [ ]* 10.2 Write unit tests for provider-selection logic
+  - [x]* 10.2 Write unit tests for provider-selection logic
     - Assert local vs production and key-present vs keyless selection, and that a new
       LLM_Provider can be registered without changing the RAG_Service
     - _Requirements: 10.2, 10.3, 11.2, 11.3, 11.6_
 
-- [ ] 11. Implement retrieval and grounded RAG
-  - [ ] 11.1 Implement the Retriever
+- [x] 11. Implement retrieval and grounded RAG
+  - [x] 11.1 Implement the Retriever
     - Implement `retrieval/retriever.py` embedding the query, calling
       `Vector_Store.query(vec, k)` with `k` clamped to `[1, 10]`, and loading matched
       chunk text from the DB; never return more than `k` matches
     - _Requirements: 10.5, 12.1_
 
-  - [ ] 11.2 Implement grounding-only prompt construction
+  - [x] 11.2 Implement grounding-only prompt construction
     - Implement `rag/prompt.py` building the prompt from only a fixed template, the query,
       and retrieved chunk text
     - _Requirements: 12.4_
 
-  - [ ] 11.3 Implement the RAG_Service
+  - [x] 11.3 Implement the RAG_Service
     - Implement `rag/service.py` resolving `k` (clamped, default `top_k_default`),
       retrieving top-K chunks, returning a no-grounding answer with empty citations when
       none are found, otherwise building the grounding-only prompt, calling the active
@@ -280,86 +280,86 @@ Sub-tasks marked with `*` are optional test tasks and can be skipped for a faste
       for Groq and fallback providers
     - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6_
 
-  - [ ]* 11.4 Write property test for top-K clamping
+  - [x]* 11.4 Write property test for top-K clamping
     - **Property 9: Top-K is clamped into the valid range**
     - **Validates: Requirements 12.1**
 
-  - [ ]* 11.5 Write property test for one citation per used chunk
+  - [x]* 11.5 Write property test for one citation per used chunk
     - **Property 10: One valid Citation per used Chunk**
     - **Validates: Requirements 12.2, 12.3**
 
-  - [ ]* 11.6 Write property test for grounding-only prompt construction
+  - [x]* 11.6 Write property test for grounding-only prompt construction
     - **Property 11: Grounding-only prompt construction**
     - **Validates: Requirements 12.4**
 
-  - [ ]* 11.7 Write property test for empty-retrieval no-fabrication behavior
+  - [x]* 11.7 Write property test for empty-retrieval no-fabrication behavior
     - **Property 12: Empty retrieval yields no fabricated answer**
     - **Validates: Requirements 12.5**
 
-- [ ] 12. Implement production providers
-  - [ ] 12.1 Implement the Groq_Provider
+- [x] 12. Implement production providers
+  - [x] 12.1 Implement the Groq_Provider
     - Implement `llm/groq_provider.py` active only when `groq_api_key` is set; on API
       failure raise `LLMProviderError` identifying the provider
     - _Requirements: 11.2, 11.5_
 
-  - [ ]* 12.2 Write unit test for Groq failure handling
+  - [x]* 12.2 Write unit test for Groq failure handling
     - With a mocked failing Groq call, assert an `llm_provider_error` identifying the
       provider (no live network call)
     - _Requirements: 11.5_
 
-  - [ ] 12.3 Implement the Pgvector_Store
+  - [x] 12.3 Implement the Pgvector_Store
     - Implement `vectorstore/pgvector_store.py` using pgvector distance operators on
       `chunk_embeddings`, associating each embedding with its chunk/document id and
       honoring the `query` bound/ordering post-conditions
     - _Requirements: 10.3, 10.4, 10.5, 10.6_
 
-  - [ ]* 12.4 Write integration test for Pgvector_Store ordering and bounds
+  - [x]* 12.4 Write integration test for Pgvector_Store ordering and bounds
     - Assert descending-similarity ordering and `min(K, count)` result size
     - _Requirements: 10.3, 10.5, 10.6_
 
-- [ ] 13. Wire the API endpoints
-  - [ ] 13.1 Implement the ingest router
+- [x] 13. Wire the API endpoints
+  - [x] 13.1 Implement the ingest router
     - Implement `api/routers/ingest.py` `POST /documents` (multipart) calling the
       Ingestion_Service, returning 201 on success and the mapped 400/415/422/413 error
       codes on rejection
     - _Requirements: 2.3, 7.4, 7.5, 7.6, 7.7_
 
-  - [ ] 13.2 Implement the query router
+  - [x] 13.2 Implement the query router
     - Implement `api/routers/query.py` `POST /query` calling the RAG_Service, returning
       the grounded answer with citations, the no-context 200 case, and 502
       `llm_provider_error` on Groq failure
     - _Requirements: 2.3, 12.1, 12.2, 12.5, 11.5_
 
-  - [ ] 13.3 Implement the documents router
+  - [x] 13.3 Implement the documents router
     - Implement `api/routers/documents.py` `GET /documents` (list) and
       `DELETE /documents/{id}` (cascade delete relational + vector-store entries; 404 on
       unknown id)
     - _Requirements: 2.3_
 
-  - [ ] 13.4 Register Phase 2 routers in the app factory
+  - [x] 13.4 Register Phase 2 routers in the app factory
     - Update `src/agentforge/main.py` to register the ingest, query, and documents routers
       (wired through the composition root) so all routes are registered before serving
     - _Requirements: 2.1, 2.4_
 
-  - [ ]* 13.5 Write integration tests for the API endpoints (keyless)
+  - [x]* 13.5 Write integration tests for the API endpoints (keyless)
     - Exercise ingest → query → list → delete end to end via the app using the
       Fallback_Provider and SentenceTransformer_Embeddings
     - _Requirements: 2.3, 13.1, 13.2, 13.3_
 
-- [ ] 14. Documentation and end-to-end verification
-  - [ ] 14.1 Write the architectural decision record
+- [x] 14. Documentation and end-to-end verification
+  - [x] 14.1 Write the architectural decision record
     - Create `docs/decisions.md` capturing the rationale from the design's "Design
       Decisions & Why" (seams, fallback default, local embeddings, two profiles, optional
       credentials, chunker overlap, Markdown strip/preserve, grounding-only prompt, atomic
       ingestion)
     - _Requirements: 14.3_
 
-  - [ ] 14.2 Implement the end-to-end verification script
+  - [x] 14.2 Implement the end-to-end verification script
     - Implement `scripts/verify_e2e.py` that ingests a sample document and returns a
       Grounded_Answer using the Fallback_Provider (no credentials required)
     - _Requirements: 14.2, 14.4_
 
-  - [ ]* 14.3 Write integration test for the documented end-to-end flow
+  - [x]* 14.3 Write integration test for the documented end-to-end flow
     - Assert the readiness check passes and the ingest→answer flow returns a grounded,
       cited answer keyless
     - _Requirements: 14.1, 14.2_

@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
+# Chroma's telemetry shim emits noisy (harmless) errors even when telemetry is
+# disabled; silence it so test output stays readable.
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
+
 # Environment values used to construct a valid Settings object in tests.
 BASE_ENV = {
     "PROFILE": "local",

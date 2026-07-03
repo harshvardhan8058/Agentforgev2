@@ -25,6 +25,7 @@ dependencies = [
     "pypdf==5.1.0",
     "markdown==3.7",
     "python-multipart==0.0.20",
+    "groq==0.13.1",
 ]
 
 [project.optional-dependencies]
@@ -46,6 +47,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: tests that require live infrastructure (Postgres, Redis, Docker). Deselect with -m 'not integration'.",
+    "slow: tests that load the real local embedding model (sentence-transformers).",
 ]
 # By default the standalone unit + property suite excludes infra-dependent tests.
 addopts = "-m 'not integration'"
