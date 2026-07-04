@@ -21,9 +21,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 
-from agentforge.api.deps import get_ingestion_service
+from agentforge.api.deps import get_ingestion_service, require_permission
 from agentforge.api.errors import AppError
 from agentforge.api.schemas import IngestResponse
+from agentforge.enterprise.models import Principal
+from agentforge.enterprise.rbac import Permission
 from agentforge.embeddings.base import EmbeddingError
 from agentforge.ingestion.extractors import SUPPORTED_CONTENT_TYPES
 from agentforge.ingestion.service import (
@@ -68,15 +70,18 @@ async def ingest_document(
     file: UploadFile = File(...),
     filename: str | None = Form(default=None),
     service: Ingestion_Service = Depends(get_ingestion_service),
+    principal: Principal = Depends(require_permission(Permission.INGEST_DOCUMENTS)),
 ) -> IngestResponse:
-    """Ingest an uploaded document and return its ingestion summary."""
+    """Ingest an uploaded document into the caller's org and return its summary (Req 7.3)."""
     effective_filename = filename or file.filename or "upload"
     content_type = _resolve_content_type(effective_filename, file.content_type)
     data = await file.read()
 
     try:
         result = await run_in_threadpool(
-            service.ingest, effective_filename, content_type, data
+            lambda: service.ingest(
+                effective_filename, content_type, data, org_id=principal.org_id
+            )
         )
     except SizeLimitError as exc:
         raise AppError(

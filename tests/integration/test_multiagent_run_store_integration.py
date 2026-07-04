@@ -55,28 +55,36 @@ async def test_pg_multi_agent_run_store_full_roundtrip(engine):
     dsn = _dsn()
     assert dsn is not None  # narrowed by the skip in the fixture
 
+    # A real organization is required for the org_id FK on conversations/multi_agent_runs.
+    org_id = str(uuid.uuid4())
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO organizations (id, name) VALUES (:id, 'MA Org')"),
+            {"id": org_id},
+        )
+
     # A real conversation is required for the FK on multi_agent_runs.conversation_id.
     conversation_store = PgConversation_Store(dsn)
-    conversation_id = conversation_store.create()
+    conversation_id = conversation_store.create(org_id)
 
     store = Pg_Multi_Agent_Run_Store(dsn)
 
     # create() persists a running run and returns the domain object.
-    run = store.create(conversation_id, task="write a short summary")
+    run = store.create(org_id, conversation_id, task="write a short summary")
     assert run.status == "running"
     assert run.termination_reason is None
     assert run.final_output is None
     # A fresh get() returns the same run.
-    fetched = store.get(run.id)
+    fetched = store.get(org_id, run.id)
     assert fetched is not None
     assert fetched.id == run.id
     assert fetched.task == "write a short summary"
 
     # append_message reuses the existing messages table with contiguous ordinals.
-    p0 = store.append_message(run.id, "planner", "step 1; step 2")
-    p1 = store.append_message(run.id, "writer", "draft body")
+    p0 = store.append_message(org_id, run.id, "planner", "step 1; step 2")
+    p1 = store.append_message(org_id, run.id, "writer", "draft body")
     assert (p0, p1) == (0, 1)
-    persisted_messages = store.messages(run.id)
+    persisted_messages = store.messages(org_id, run.id)
     assert [(r, c, p) for r, c, p in persisted_messages] == [
         ("planner", "step 1; step 2", 0),
         ("writer", "draft body", 1),
@@ -84,14 +92,16 @@ async def test_pg_multi_agent_run_store_full_roundtrip(engine):
 
     # record_decision assigns append-order positions per run.
     store.record_decision(
+        org_id,
         run.id,
         Approval_Decision(type=ApprovalDecisionType.REJECT, feedback="tighten"),
     )
     store.record_decision(
+        org_id,
         run.id,
         Approval_Decision(type=ApprovalDecisionType.EDIT, edited_content="revised"),
     )
-    decisions = store.decisions(run.id)
+    decisions = store.decisions(org_id, run.id)
     assert [d.type for d in decisions] == [
         ApprovalDecisionType.REJECT,
         ApprovalDecisionType.EDIT,
@@ -100,11 +110,11 @@ async def test_pg_multi_agent_run_store_full_roundtrip(engine):
     assert decisions[1].edited_content == "revised"
 
     # save_checkpoint / load_checkpoint round-trip the blackboard (latest wins).
-    store.save_checkpoint(run.id, "after_plan", {"plan": {"steps": ["a", "b"]}})
+    store.save_checkpoint(org_id, run.id, "after_plan", {"plan": {"steps": ["a", "b"]}})
     store.save_checkpoint(
-        run.id, "before_finalize", {"draft": "final", "round_count": 2}
+        org_id, run.id, "before_finalize", {"draft": "final", "round_count": 2}
     )
-    loaded = store.load_checkpoint(run.id)
+    loaded = store.load_checkpoint(org_id, run.id)
     assert loaded == ("before_finalize", {"draft": "final", "round_count": 2})
 
     # terminate persists Final_Output + termination_reason; get() hydrates them.
@@ -112,18 +122,25 @@ async def test_pg_multi_agent_run_store_full_roundtrip(engine):
         content="the summary",
         citations=[Citation(document_id="doc-1", chunk_id="chunk-1")],
     )
-    store.terminate(run.id, final, Termination_Reason.COMPLETED)
+    store.terminate(org_id, run.id, final, Termination_Reason.COMPLETED)
 
-    final_run = store.get(run.id)
+    final_run = store.get(org_id, run.id)
     assert final_run is not None
     assert final_run.status == "terminated"
     assert final_run.termination_reason is Termination_Reason.COMPLETED
     assert final_run.final_output == final
 
-    # get() on an unknown id returns None.
-    assert store.get(str(uuid.uuid4())) is None
+    # get() on an unknown id returns None; a cross-tenant get() also returns None (Req 4.6).
+    assert store.get(org_id, str(uuid.uuid4())) is None
+    other_org = str(uuid.uuid4())
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO organizations (id, name) VALUES (:id, 'Other MA Org')"),
+            {"id": other_org},
+        )
+    assert store.get(other_org, run.id) is None
 
-    # Cleanup: cascading FKs drop everything associated with the conversation/run.
+    # Cleanup: cascading FKs drop everything associated with the conversation/run/org.
     async with engine.begin() as conn:
         await conn.execute(
             text("DELETE FROM multi_agent_runs WHERE id = :id"), {"id": run.id}
@@ -131,4 +148,8 @@ async def test_pg_multi_agent_run_store_full_roundtrip(engine):
         await conn.execute(
             text("DELETE FROM conversations WHERE id = :id"),
             {"id": conversation_id},
+        )
+        await conn.execute(
+            text("DELETE FROM organizations WHERE id = ANY(:ids)"),
+            {"ids": [org_id, other_org]},
         )

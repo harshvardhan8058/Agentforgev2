@@ -25,6 +25,7 @@ from agentforge.main import create_app
 from agentforge.storage.memory_store import InMemoryDocumentStore
 from agentforge.vectorstore.chroma_store import Chroma_Store
 
+from tests.enterprise_helpers import install_enterprise_auth
 from tests.fakes import DeterministicFakeEmbeddings
 
 _DIM = 8
@@ -53,9 +54,12 @@ def client() -> TestClient:
     )
     app = create_app(settings)
     app.state.app_context = ctx
+    # Wire a keyless enterprise context + auth headers; every request authenticates as an
+    # owner in a single org, so ingested docs and queries share that tenant.
+    headers, _org_id, _ctx = install_enterprise_auth(app, settings)
     # No `with`: skip the real lifespan (migrations / DB / Redis) — the context is
     # already injected above.
-    return TestClient(app, raise_server_exceptions=False)
+    return TestClient(app, headers=headers, raise_server_exceptions=False)
 
 
 def _ingest(client: TestClient, name: str, data: bytes, content_type: str):

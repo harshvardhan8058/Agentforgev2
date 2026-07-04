@@ -52,10 +52,12 @@ class InMemorySink:
     def __init__(self) -> None:
         self.documents: dict[str, Document] = {}
         self.chunks: dict[str, list[Chunk]] = {}
+        self.org_ids: dict[str, object] = {}
 
-    def persist(self, document: Document, chunks: list[Chunk]) -> None:
+    def persist(self, org_id, document: Document, chunks: list[Chunk]) -> None:
         self.documents[document.id] = document
         self.chunks[document.id] = list(chunks)
+        self.org_ids[document.id] = org_id
 
     def chunk_count(self, document_id: str) -> int:
         return len(self.chunks.get(document_id, []))

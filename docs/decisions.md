@@ -404,3 +404,166 @@ _Scope note:_ this record covers Phases 1–4. Enterprise auth/RBAC/multi-tenanc
 cost/token analytics and evaluation frameworks, the frontend, third-party integrations,
 and cloud deployment are reserved for later phases and are enabled — but not designed —
 by the modular seams established here.
+
+
+
+---
+
+# Phase 5 — Enterprise Controls (Auth, RBAC, Multi-Tenancy, API Keys, Rate Limiting)
+
+This section records the rationale for the Phase 5 `Enterprise_Layer` (Requirement 11).
+Everything here **reuses, never reimplements** the Phase 1–4 seams: the FastAPI
+`API_Service` and its uniform `AppError` envelope, `Settings` + `load_settings` +
+`config/container.py`, Postgres + the migration runner, Redis, and every existing router
+and store. The layer is fully runnable and testable **keyless** — an in-memory
+Identity_Store + API-key store, a `NoOp_Rate_Limiter`, and a dev-generated `jwt_secret`
+back the default lane.
+
+## 25. Argon2id for password and API-key hashing
+
+Passwords and API-key secrets are hashed with **argon2id** via `argon2-cffi`. Argon2id is
+the OWASP-recommended default for new systems: it is **memory-hard**, so GPU/ASIC
+brute-force is dramatically more expensive per guess than for bcrypt or pbkdf2, and its
+cost parameters (`time_cost`, `memory_cost`, `parallelism`) are tunable per environment
+through `Settings` (`ARGON2_TIME_COST`, `ARGON2_MEMORY_COST`, `ARGON2_PARALLELISM`). The
+library's constant-time `verify` is reused for **both** consumers, so there is exactly
+one hashing seam and a plaintext comparison is never performed. Only the irreversible
+`password_hash` / `key_hash` is ever persisted — the plaintext password never leaves the
+`Auth_Service.register` call frame, and an API-key secret is returned to the caller
+**exactly once** at creation and never stored or logged.
+
+_Validates: Requirements 1.1, 1.6, 5.1, 5.2, 8.5, 11.4._
+
+## 26. JWT + a local credential store, behind the `Auth_Service` seam
+
+Local authentication (registration + login + password hashing + JWT issue/verify) is the
+simplest correct thing that ships end-to-end today. Issuance and verification live behind
+an `Auth_Service` interface whose only backing dependency is the abstract
+`Identity_Store`, so a later phase can drop in OAuth/SSO by implementing the same surface
+— **no endpoint is rewritten** and no handler knows how tokens are minted or resolved.
+Tokens are `PyJWT` HS256 with claims `sub` (user id), `org_id`, `role`, and `exp`.
+`Auth_Service.verify` returns `None` for **any** invalid token (bad signature, wrong
+secret, expired, malformed) and never raises, so the Principal_Dependency maps `None` to
+a uniform `AppError("unauthorized", 401)` and a decode failure can never be mistaken for a
+code-path bug.
+
+_Validates: Requirements 1.2, 1.4, 1.5, 9.6, 11.4._
+
+## 27. RBAC as a static role → permission map
+
+Authorization is a pure function of a single static map, `ROLE_PERMISSIONS` in
+`enterprise/rbac.py`. The four roles nest strictly `viewer ⊆ member ⊆ admin ⊆ owner` and
+every role grants `read`. `RBAC_Policy.is_authorized(role, permission)` simply tests
+membership in the mapped set, which makes it trivially testable and keeps every endpoint
+ignorant of the mapping. Endpoints declare `Depends(require_permission(Permission.X))` —
+a dependency factory that reads the map at request time — so **adding a role or a
+permission is a single-file edit** to `ROLE_PERMISSIONS` with no handler change.
+Attribute-based access control (ABAC) is more expressive, but Phase 5's requirements are
+role-centric, so the simplicity of a static map is the right trade.
+
+_Validates: Requirements 3.1, 3.2, 3.3, 3.5, 3.6, 11.2._
+
+## 28. Tenant isolation enforced at the data-access layer
+
+Handlers are the wrong place to enforce tenancy: any endpoint that forgets a check leaks
+data. Instead, every tenant-owned store method takes `org_id` as a **required** parameter
+and constrains its SQL with `WHERE org_id = :org_id` (top-level tables) or
+`AND parent.org_id = :org_id` (descendants, joined through their parent). A cross-tenant
+read/mutate/delete therefore matches **zero rows** — the store returns `None`/`[]` and the
+router raises `AppError("not_found", 404)`. Cross-tenant access is **404, never 403**,
+because a 403 would leak the fact that a resource exists in another org. Only the
+top-level tables (`documents`, `conversations`, `agent_runs`, `multi_agent_runs`) carry an
+`org_id` column (migration `0007`); descendants (`chunks`, `messages`, `trace_entries`,
+`approval_decisions`, `run_checkpoints`) inherit tenancy through their parent FK, which
+avoids two edges of truth to keep in sync while `ON DELETE CASCADE` from `organizations`
+still sweeps everything transitively.
+
+_Validates: Requirements 4.1–4.6, 7.3, 7.5, 8.2, 11.3._
+
+## 29. Reusable Principal + Authorization dependencies
+
+`get_current_principal` (in `api/deps.py`) resolves an `Authorization: Bearer <jwt>` or an
+`X-API-Key` header to a `Principal` uniformly, derives its `permissions` once from the
+role via `RBAC_Policy`, and then applies the per-principal `Rate_Limiter`.
+`require_permission(perm)` is a dependency **factory** returning a callable that raises
+`AppError("forbidden", 403)` when the principal lacks `perm`. A new endpoint adopts the
+whole enterprise contract by declaration alone — no bespoke authorization or tenancy logic
+in the handler body.
+
+_Validates: Requirements 1.4, 5.3, 7.1, 7.2, 7.6, 7.7._
+
+## 30. Organization-scoped API keys (create-once, list-metadata, revoke)
+
+An API key is an org-scoped credential for programmatic clients; its permissions derive
+from its role through the same `RBAC_Policy`, so a role/permission change propagates to
+API-key principals with no extra plumbing. The secret is `af_` + `secrets.token_urlsafe(32)`
+(~256 bits of entropy); only an indexed `key_prefix` (first 8 chars) and the argon2
+`key_hash` are persisted. Resolution narrows to the tiny prefix-indexed candidate set,
+then confirms with a constant-time `verify`; revoked keys are excluded by the
+`WHERE revoked_at IS NULL` index, so a revoked or unknown secret resolves to `None` → 401.
+The create response carries the plaintext secret **exactly once**; `list` returns metadata
+only (never the hash or the secret); and every `*_for_org` store method filters by
+`org_id`, so a cross-org list/revoke is a structural 404.
+
+_Validates: Requirements 5.1, 5.2, 5.4, 5.5, 5.6, 5.7._
+
+## 31. Keyless dev boot: generated JWT secret + NoOp limiter + in-memory stores
+
+The Phase 1–4 promise is "runs and tests keyless"; Phase 5 preserves it. When the local
+profile omits `JWT_SECRET`, `build_auth_service` generates a per-boot
+`secrets.token_urlsafe(64)` (nothing is written to disk, so each restart naturally
+invalidates outstanding dev tokens). `build_rate_limiter` selects `NoOp_Rate_Limiter`
+whenever `rate_limit_enabled` is false or no Redis client is supplied, and the composition
+root builds `InMemory_Identity_Store` + `InMemory_API_Key_Store` outside the production
+profile. In **production**, `JWT_SECRET` is required — `load_settings` raises `ConfigError`
+before startup if it is missing — and the Redis-backed limiter + Postgres stores are wired
+through the **same** seams; only the concretes differ. All Phase 5 secrets and tunables
+flow through the existing `Configuration_Manager` (`Settings`); no separate configuration
+or persistence mechanism is introduced. The `.env.example` file lists every Phase 5
+variable (`AUTH_ENABLED`, `JWT_SECRET`, `JWT_ALGORITHM`, `JWT_EXPIRY_SECONDS`,
+`ARGON2_TIME_COST`, `ARGON2_MEMORY_COST`, `ARGON2_PARALLELISM`, `RATE_LIMIT_ENABLED`,
+`RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_SECONDS`) with keyless-safe defaults.
+
+_Validates: Requirements 1.7, 1.8, 6.4, 6.5, 9.2, 10.1, 11.4._
+
+## How-to — Adding a new role or permission
+
+The RBAC layer is designed so this touches **exactly one file** and **no endpoint**:
+
+1. **Add the enum member.** In `enterprise/rbac.py`, add the value to `Role` and/or
+   `Permission` (e.g. `AUDIT = "audit"`).
+2. **Extend the map.** Add or update the entry in `ROLE_PERMISSIONS`, keeping the
+   `viewer ⊆ member ⊆ admin ⊆ owner` nesting intact (build the new set from the adjacent
+   one, as the existing `_MEMBER = _VIEWER | {...}` pattern does). A brand-new permission
+   is granted to whichever roles should hold it; a brand-new role is given a
+   `frozenset` of the permissions it grants.
+3. **Use it at the seam.** Protect an endpoint with
+   `Depends(require_permission(Permission.AUDIT))`. Because `require_permission` reads the
+   map at request time, no handler and no `Authorization_Dependency` code changes.
+4. **Add a test.** Extend the RBAC property tests (the iff-invariant and the subset
+   nesting) — they are parameterized over the enums, so they pick up the new member
+   automatically; assert the nesting still holds.
+
+No edit to any router, to `api/deps.py`, or to the `Auth_Service` is required.
+
+## How-to — Adopting auth + tenancy on a new endpoint
+
+A new endpoint inherits authentication, authorization, and tenant isolation by
+**declaration**, with no bespoke logic in the handler:
+
+1. **Declare the principal + permission.** Add
+   `principal: Principal = Depends(require_permission(Permission.X))` to the handler
+   signature. This resolves the credential (401 if missing/invalid), enforces the
+   permission (403 if the role lacks it), and applies the rate limiter — all before the
+   handler body runs.
+2. **Thread `principal.org_id` into the store.** Pass `principal.org_id` (or the
+   `get_org_id` shortcut) into the org-scoped store/service call. The store constrains
+   its query by `org_id`, so a cross-tenant resource returns `None`/`[]` and the handler
+   raises `AppError("not_found", 404)` — never a bespoke tenant check, never a 403.
+3. **On create, pass `principal.org_id`.** The store's `create` signature requires
+   `org_id`, so a resource can only be created within the caller's tenant.
+
+That is the entire contract; the store is the enforcement point, so a forgotten check can
+never leak another tenant's data.
+
+_Validates: Requirements 11.1, 11.2, 11.3, 11.4._

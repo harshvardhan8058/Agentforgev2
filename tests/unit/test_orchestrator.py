@@ -15,6 +15,7 @@ from agentforge.models.domain import Citation, Grounded_Answer
 from agentforge.tools.rag_tool import RAG_TOOL_NAME, RAG_Tool
 from agentforge.tools.registry import Tool_Registry
 from agentforge.tracing.recorder import InMemory_Trace_Recorder
+from agentforge.enterprise.tenancy import NIL_ORG_ID as ORG
 
 
 class _FakeRAGService:
@@ -53,7 +54,7 @@ def test_orchestrator_runs_end_to_end_keyless_with_rag_tool():
     assert orchestrator.iteration_limit == 10  # default applied when unconfigured
 
     # A tool-call trace entry records the RAG tool name and a successful outcome.
-    entries = trace.get_trace(state.run_id).entries
+    entries = trace.get_trace(ORG, state.run_id).entries
     tool_calls = [e for e in entries if e.step_type == "tool_call"]
     assert len(tool_calls) == 1
     assert tool_calls[0].tool_name == RAG_TOOL_NAME

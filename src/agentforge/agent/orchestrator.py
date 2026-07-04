@@ -38,6 +38,7 @@ from agentforge.agent.state import (
     resolve_iteration_limit,
 )
 from agentforge.conversation.base import Message
+from agentforge.enterprise.tenancy import set_current_org
 from agentforge.llm.base import LLM_Provider
 from agentforge.streaming.base import StreamEvent, StreamEventType
 from agentforge.tools.registry import Tool_Registry
@@ -107,6 +108,7 @@ class Agent_Orchestrator:
         conversation_context: list[Message] | None = None,
         *,
         conversation_id: str | None = None,
+        org_id=None,
     ) -> AgentState:
         """Execute a single bounded Agent_Run and return the final state (Req 1.1, 1.7).
 
@@ -114,7 +116,14 @@ class Agent_Orchestrator:
         ``recursion_limit`` backstop, and reconstructs the final state — including
         ``final_answer``, ``termination_reason``, ``observations``, and
         ``iteration_count``.
+
+        ``org_id`` publishes the acting tenant for the synchronous run so tenant-scoped
+        tools (the ``RAG_Tool``) and trace writes are constrained to that org; when
+        omitted (e.g. a multi-agent role delegating to this orchestrator) the ambient
+        tenant already in force is inherited (Req 4.2, 4.6).
         """
+        if org_id is not None:
+            set_current_org(org_id)
         initial = AgentState(
             run_id=str(uuid.uuid4()),
             conversation_id=conversation_id or str(uuid.uuid4()),
@@ -141,6 +150,7 @@ class Agent_Orchestrator:
         conversation_context: list[Message] | None = None,
         *,
         conversation_id: str | None = None,
+        org_id=None,
     ) -> Iterator[StreamEvent]:
         """Drive a bounded Agent_Run, yielding intermediate events in production order.
 
@@ -153,7 +163,13 @@ class Agent_Orchestrator:
 
         The events carry no ``sequence`` here; the ``Streaming_Service`` assigns the
         monotonic sequence as it forwards them, so ordering is preserved end-to-end.
+
+        ``org_id`` publishes the acting tenant for the streamed run (set here at the top
+        of the generator body so it is in force in the context that drives iteration), so
+        tenant-scoped tool calls and trace writes stay org-constrained (Req 4.2, 4.6).
         """
+        if org_id is not None:
+            set_current_org(org_id)
         initial = AgentState(
             run_id=str(uuid.uuid4()),
             conversation_id=conversation_id or str(uuid.uuid4()),

@@ -30,6 +30,7 @@ from agentforge.multiagent.models import (
 )
 from agentforge.multiagent.state import Blackboard_State
 from agentforge.tracing.recorder import InMemory_Trace_Recorder
+from agentforge.enterprise.tenancy import NIL_ORG_ID as ORG
 
 _ids = st.text(alphabet="abcdefghij0123456789", min_size=1, max_size=6)
 _decision_types = st.sampled_from(list(ApprovalDecisionType))
@@ -41,7 +42,7 @@ def _submit_and_assert_rejected(gate, run_id, decision, trace, held_state, expec
     with pytest.raises(RunNotAwaitingApprovalError):
         gate.submit(run_id, decision)
 
-    entries = trace.get_trace(run_id).entries
+    entries = trace.get_trace(ORG, run_id).entries
     assert len(entries) == expected_ords
     assert entries[-1].step_type == "approval_rejected"
     assert entries[-1].detail["reason"] == "run-not-awaiting-approval"
@@ -101,7 +102,7 @@ def test_decision_to_non_paused_run_is_rejected(run_id, decision_type, feedback,
         run_id=resumed_id, conversation_id="conv", task="do work"
     )
     # Pause + decision + resume entries already exist; a rejected submit appends one more.
-    prior_entries = len(trace.get_trace(resumed_id).entries)
+    prior_entries = len(trace.get_trace(ORG, resumed_id).entries)
     _submit_and_assert_rejected(
         gate,
         resumed_id,

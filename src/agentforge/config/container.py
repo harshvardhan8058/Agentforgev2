@@ -13,12 +13,21 @@ abstract interface.
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from argon2 import PasswordHasher
+
 from agentforge.agent.orchestrator import Agent_Orchestrator
 from agentforge.chunking.chunker import Chunker
-from agentforge.config.settings import Settings
+from agentforge.config.settings import ConfigError, Settings
+from agentforge.enterprise.api_keys import API_Key_Service, InMemory_API_Key_Store
+from agentforge.enterprise.auth import Auth_Service
+from agentforge.enterprise.base import API_Key_Store, Identity_Store, Rate_Limiter
+from agentforge.enterprise.identity import InMemory_Identity_Store
+from agentforge.enterprise.rate_limit import NoOp_Rate_Limiter, Redis_Rate_Limiter
+from agentforge.enterprise.rbac import RBAC_Policy
 from agentforge.conversation.base import Conversation_Store
 from agentforge.conversation.store import (
     InMemory_Conversation_Store,
@@ -554,3 +563,185 @@ def _default_role_registry(agent_orchestrator: Agent_Orchestrator) -> Agent_Role
 def _policy_is_human(policy: Approval_Policy) -> bool:
     """Return whether the approval policy requires pausing (needs a gate on the stream)."""
     return isinstance(policy, Human_In_The_Loop_Policy)
+
+
+
+# --- Enterprise layer composition (Phase 5) ---------------------------------------
+
+
+def build_rbac_policy() -> RBAC_Policy:
+    """Return the RBAC_Policy (a stateless singleton over the static role map).
+
+    A single instance is sufficient — :class:`RBAC_Policy` is a pure function of
+    ``ROLE_PERMISSIONS`` and holds no per-request state (Req 3.6, 9.5).
+    """
+    return RBAC_Policy()
+
+
+def build_identity_store(settings: Settings) -> Identity_Store:
+    """Return the Identity_Store: Postgres in production, in-memory otherwise.
+
+    Mirrors :func:`build_conversation_store`: the in-memory default keeps
+    standalone/keyless runs fully functional without a database, while the production
+    profile persists to Postgres via ``Pg_Identity_Store`` (Req 9.3, 9.5, 10.1). The
+    Postgres adapter is imported lazily so the keyless path never depends on it.
+    """
+    if settings.profile == "production":
+        from agentforge.enterprise.identity import Pg_Identity_Store  # local import
+
+        return Pg_Identity_Store(settings.database_url)
+    return InMemory_Identity_Store()
+
+
+def _build_password_hasher(settings: Settings) -> PasswordHasher:
+    """Build the argon2id hasher from settings; shared by auth + API-key services."""
+    return PasswordHasher(
+        time_cost=settings.argon2_time_cost,
+        memory_cost=settings.argon2_memory_cost,
+        parallelism=settings.argon2_parallelism,
+    )
+
+
+def build_auth_service(settings: Settings, identity: Identity_Store) -> Auth_Service:
+    """Build the Auth_Service, resolving the Token_Signing_Secret (Req 1.7, 1.8).
+
+    Secret resolution:
+
+    * ``settings.jwt_secret`` is used when present.
+    * Otherwise, in the ``local`` profile a per-boot ``secrets.token_urlsafe(64)`` is
+      generated so keyless dev boot and testing succeed (nothing is written to disk, so
+      every restart naturally invalidates outstanding dev tokens — Req 1.7, 10.1).
+    * Otherwise (production without a secret) a :class:`ConfigError` is raised
+      defensively; ``load_settings`` already guards this before startup (Req 1.8).
+
+    The argon2 ``PasswordHasher`` built here is exposed as ``auth._hasher`` and reused by
+    the API_Key_Service, so there is exactly one hashing seam with two consumers.
+    """
+    if settings.jwt_secret is not None:
+        jwt_secret = settings.jwt_secret.get_secret_value()
+    elif settings.profile == "local":
+        jwt_secret = secrets.token_urlsafe(64)  # per-boot dev secret (Req 1.7)
+    else:  # pragma: no cover - load_settings already guards this path (Req 1.8)
+        raise ConfigError(["jwt_secret"], detail="required in production profile")
+
+    return Auth_Service(
+        identity,
+        jwt_secret=jwt_secret,
+        jwt_algorithm=settings.jwt_algorithm,
+        jwt_expiry_seconds=settings.jwt_expiry_seconds,
+        password_hasher=_build_password_hasher(settings),
+    )
+
+
+def build_api_key_store(settings: Settings) -> API_Key_Store:
+    """Return the API_Key_Store: Postgres in production, in-memory otherwise."""
+    if settings.profile == "production":
+        from agentforge.enterprise.api_keys import Pg_API_Key_Store  # local import
+
+        return Pg_API_Key_Store(settings.database_url)
+    return InMemory_API_Key_Store()
+
+
+def build_api_key_service(
+    settings: Settings,
+    store: API_Key_Store | None,
+    rbac: RBAC_Policy,
+    hasher: PasswordHasher,
+) -> API_Key_Service:
+    """Build the API_Key_Service over the given (or profile-selected) store.
+
+    ``hasher`` is the **same** argon2 ``PasswordHasher`` used by the Auth_Service, so
+    passwords and API-key secrets share one constant-time verifier (Req 5.1, 5.2).
+    """
+    key_store = store if store is not None else build_api_key_store(settings)
+    return API_Key_Service(key_store, rbac, hasher)
+
+
+def build_rate_limiter(
+    settings: Settings,
+    redis,
+    *,
+    clock: Callable[[], float] | None = None,
+) -> Rate_Limiter:
+    """Return the Rate_Limiter: Redis-backed when enabled + available, else NoOp.
+
+    ``NoOp_Rate_Limiter`` is the keyless default (Req 6.5): when
+    ``rate_limit_enabled`` is ``False`` or no Redis client is supplied, no counting
+    occurs. Tests may inject a ``Fake_Clock_Rate_Limiter`` via ``build_enterprise_context``
+    overrides instead.
+    """
+    if settings.rate_limit_enabled and redis is not None:
+        kwargs: dict = {
+            "max_requests": settings.rate_limit_max,
+            "window_seconds": settings.rate_limit_window_seconds,
+        }
+        if clock is not None:
+            kwargs["clock"] = clock
+        return Redis_Rate_Limiter(redis, **kwargs)
+    return NoOp_Rate_Limiter()
+
+
+@dataclass
+class EnterpriseContext:
+    """The wired enterprise object graph the Phase 5 dependencies depend on.
+
+    Built once at startup (or injected in tests) and stored on
+    ``app.state.enterprise_context``. The FastAPI dependencies in ``api/deps.py`` read
+    the auth service, RBAC policy, API-key service, and rate limiter from here so the
+    transport layer never constructs the enterprise graph itself (Req 9.5).
+    """
+
+    settings: Settings
+    rbac: RBAC_Policy
+    identity_store: Identity_Store
+    auth_service: Auth_Service
+    api_key_store: API_Key_Store
+    api_key_service: API_Key_Service
+    rate_limiter: Rate_Limiter
+
+
+def build_enterprise_context(
+    settings: Settings,
+    *,
+    redis=None,
+    **overrides,
+) -> EnterpriseContext:
+    """Compose the Phase 5 enterprise object graph from settings.
+
+    Every collaborator may be injected via keyword ``overrides`` (tests pass keyless
+    in-memory doubles + a ``Fake_Clock_Rate_Limiter``); anything not injected is built
+    from the credential/profile-driven defaults. The argon2 hasher built by the
+    Auth_Service is shared with the API_Key_Service so both use one constant-time
+    verifier (Req 1.6, 5.2, 9.5).
+
+    Supported ``overrides`` keys (all optional): ``rbac``, ``identity_store``,
+    ``auth_service``, ``api_key_store``, ``api_key_service``, ``rate_limiter``, and
+    ``clock`` (forwarded to :func:`build_rate_limiter`).
+    """
+    rbac: RBAC_Policy = overrides.get("rbac") or build_rbac_policy()
+    identity_store: Identity_Store = (
+        overrides.get("identity_store") or build_identity_store(settings)
+    )
+    auth_service: Auth_Service = (
+        overrides.get("auth_service") or build_auth_service(settings, identity_store)
+    )
+    api_key_store: API_Key_Store = (
+        overrides.get("api_key_store") or build_api_key_store(settings)
+    )
+    # Reuse the SAME argon2 hasher the Auth_Service built (one hashing seam).
+    api_key_service: API_Key_Service = overrides.get(
+        "api_key_service"
+    ) or build_api_key_service(settings, api_key_store, rbac, auth_service._hasher)
+    rate_limiter: Rate_Limiter = overrides.get("rate_limiter") or build_rate_limiter(
+        settings, redis, clock=overrides.get("clock")
+    )
+
+    return EnterpriseContext(
+        settings=settings,
+        rbac=rbac,
+        identity_store=identity_store,
+        auth_service=auth_service,
+        api_key_store=api_key_store,
+        api_key_service=api_key_service,
+        rate_limiter=rate_limiter,
+    )

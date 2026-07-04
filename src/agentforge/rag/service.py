@@ -17,6 +17,9 @@ the ``Fallback_Provider`` (Req 12.6).
 
 from __future__ import annotations
 
+from uuid import UUID
+
+from agentforge.enterprise.tenancy import current_org
 from agentforge.llm.base import LLM_Provider
 from agentforge.models.domain import Citation, Grounded_Answer
 from agentforge.rag.prompt import build_prompt
@@ -51,12 +54,22 @@ class RAG_Service:
         requested = self._top_k_default if top_k is None else top_k
         return clamp_k(requested, self._top_k_min, self._top_k_max)
 
-    def answer(self, query: str, top_k: int | None = None) -> Grounded_Answer:
-        """Return a Grounded_Answer for ``query`` using at most K retrieved chunks."""
+    def answer(
+        self, query: str, top_k: int | None = None, *, org_id: UUID | None = None
+    ) -> Grounded_Answer:
+        """Return a Grounded_Answer for ``query`` using at most K of the tenant's chunks.
+
+        ``org_id`` defaults to the tenant in force for the current call
+        (:func:`~agentforge.enterprise.tenancy.current_org`), so the ``RAG_Tool`` — which
+        implements the fixed ``Tool_Interface`` and cannot carry ``org_id`` on its
+        surface — stays tenant-scoped when invoked inside the agent loop; the ``/query``
+        router passes ``principal.org_id`` explicitly (Req 4.2, 4.6).
+        """
+        resolved_org = org_id if org_id is not None else current_org()
         k = self.resolve_k(top_k)
 
-        # Retrieval always precedes generation (Req 12.1).
-        retrieved = self._retriever.retrieve(query, k)
+        # Retrieval always precedes generation (Req 12.1), scoped to the caller's tenant.
+        retrieved = self._retriever.retrieve(query, k, org_id=resolved_org)
 
         # No grounding: do not call the LLM, do not fabricate, no citations (Req 12.5).
         if not retrieved:

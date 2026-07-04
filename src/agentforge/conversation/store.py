@@ -19,6 +19,7 @@ ascending ordinal order (Req 8.3).
 from __future__ import annotations
 
 import uuid
+from uuid import UUID
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -41,40 +42,46 @@ class PgConversation_Store(Conversation_Store):
             _to_sqlalchemy_sync_dsn(database_url), future=True, pool_pre_ping=True
         )
 
-    def create(self) -> str:
-        """Insert a conversation row with a generated UUID and return it (Req 8.1)."""
+    def create(self, org_id: UUID) -> str:
+        """Insert a conversation row owned by ``org_id`` and return its id (Req 8.1, 4.4)."""
         conversation_id = str(uuid.uuid4())
         with self._engine.begin() as conn:
             conn.execute(
-                text("INSERT INTO conversations (id) VALUES (:id)"),
-                {"id": conversation_id},
+                text("INSERT INTO conversations (id, org_id) VALUES (:id, :org_id)"),
+                {"id": conversation_id, "org_id": str(org_id)},
             )
         return conversation_id
 
-    def append(self, conversation_id: str, role: str, content: str) -> Message:
+    def append(self, org_id: UUID, conversation_id: str, role: str, content: str) -> Message:
         """Append a message with the next ordinal, auto-creating the conversation (Req 8.2, 8.4)."""
         with self._engine.begin() as conn:
-            # Auto-create the conversation when the id is unknown (Req 8.4).
+            # Auto-create the conversation (scoped to org_id) when the id is unknown
+            # (Req 8.4). A conflicting id in ANOTHER org leaves the row untouched, so the
+            # subsequent org-scoped message insert stays tenant-correct.
             conn.execute(
                 text(
-                    "INSERT INTO conversations (id) VALUES (:id) "
+                    "INSERT INTO conversations (id, org_id) VALUES (:id, :org_id) "
                     "ON CONFLICT (id) DO NOTHING"
                 ),
-                {"id": conversation_id},
+                {"id": conversation_id, "org_id": str(org_id)},
             )
-            # Next ordinal is max(position)+1 within the conversation (Req 8.2).
+            # Next ordinal is max(position)+1 within the org's conversation (Req 8.2).
             next_position = conn.execute(
                 text(
-                    "SELECT COALESCE(MAX(position) + 1, 0) FROM messages "
-                    "WHERE conversation_id = :cid"
+                    "SELECT COALESCE(MAX(m.position) + 1, 0) FROM messages m "
+                    "JOIN conversations c ON c.id = m.conversation_id "
+                    "WHERE m.conversation_id = :cid AND c.org_id = :org_id"
                 ),
-                {"cid": conversation_id},
+                {"cid": conversation_id, "org_id": str(org_id)},
             ).scalar_one()
             conn.execute(
                 text(
                     """
                     INSERT INTO messages (id, conversation_id, role, content, position)
-                    VALUES (:id, :cid, :role, :content, :position)
+                    SELECT :id, :cid, :role, :content, :position
+                    WHERE EXISTS (
+                        SELECT 1 FROM conversations WHERE id = :cid AND org_id = :org_id
+                    )
                     """
                 ),
                 {
@@ -83,28 +90,33 @@ class PgConversation_Store(Conversation_Store):
                     "role": role,
                     "content": content,
                     "position": next_position,
+                    "org_id": str(org_id),
                 },
             )
         return Message(role=role, content=content, position=int(next_position))
 
-    def history(self, conversation_id: str) -> list[Message]:
-        """Return the conversation's messages in ascending ordinal order (Req 8.3)."""
+    def history(self, org_id: UUID, conversation_id: str) -> list[Message]:
+        """Return the org's conversation messages in ascending ordinal order (Req 8.3)."""
         with self._engine.connect() as conn:
             rows = conn.execute(
                 text(
-                    "SELECT role, content, position FROM messages "
-                    "WHERE conversation_id = :cid ORDER BY position ASC"
+                    "SELECT m.role, m.content, m.position FROM messages m "
+                    "JOIN conversations c ON c.id = m.conversation_id "
+                    "WHERE m.conversation_id = :cid AND c.org_id = :org_id "
+                    "ORDER BY m.position ASC"
                 ),
-                {"cid": conversation_id},
+                {"cid": conversation_id, "org_id": str(org_id)},
             ).fetchall()
         return [Message(role=r[0], content=r[1], position=int(r[2])) for r in rows]
 
-    def exists(self, conversation_id: str) -> bool:
-        """Return whether the conversation row exists in Postgres."""
+    def exists(self, org_id: UUID, conversation_id: str) -> bool:
+        """Return whether the conversation row exists in ``org_id``."""
         with self._engine.connect() as conn:
             found = conn.execute(
-                text("SELECT 1 FROM conversations WHERE id = :cid"),
-                {"cid": conversation_id},
+                text(
+                    "SELECT 1 FROM conversations WHERE id = :cid AND org_id = :org_id"
+                ),
+                {"cid": conversation_id, "org_id": str(org_id)},
             ).first()
         return found is not None
 
@@ -113,25 +125,28 @@ class InMemory_Conversation_Store(Conversation_Store):
     """Process-memory Conversation_Store — keyless double for tests/standalone runs."""
 
     def __init__(self) -> None:
-        self._messages: dict[str, list[Message]] = {}
+        # Keyed by (org_id, conversation_id) so cross-tenant access is impossible.
+        self._messages: dict[tuple[UUID, str], list[Message]] = {}
 
-    def create(self) -> str:
-        """Create an empty conversation with a unique id and return it (Req 8.1)."""
+    def create(self, org_id: UUID) -> str:
+        """Create an empty conversation owned by ``org_id`` with a unique id (Req 8.1, 4.4)."""
         conversation_id = str(uuid.uuid4())
-        self._messages[conversation_id] = []
+        self._messages[(org_id, conversation_id)] = []
         return conversation_id
 
-    def append(self, conversation_id: str, role: str, content: str) -> Message:
-        """Append with the next ordinal, auto-creating unknown ids (Req 8.2, 8.4)."""
-        messages = self._messages.setdefault(conversation_id, [])
+    def append(self, org_id: UUID, conversation_id: str, role: str, content: str) -> Message:
+        """Append with the next ordinal, auto-creating unknown ids in ``org_id`` (Req 8.2, 8.4)."""
+        messages = self._messages.setdefault((org_id, conversation_id), [])
         message = Message(role=role, content=content, position=len(messages))
         messages.append(message)
         return message
 
-    def history(self, conversation_id: str) -> list[Message]:
-        """Return messages in ascending ordinal order (Req 8.3)."""
-        return sorted(self._messages.get(conversation_id, []), key=lambda m: m.position)
+    def history(self, org_id: UUID, conversation_id: str) -> list[Message]:
+        """Return ``org_id``'s conversation messages in ascending ordinal order (Req 8.3)."""
+        return sorted(
+            self._messages.get((org_id, conversation_id), []), key=lambda m: m.position
+        )
 
-    def exists(self, conversation_id: str) -> bool:
-        """Return whether the conversation has been created or has messages."""
-        return conversation_id in self._messages
+    def exists(self, org_id: UUID, conversation_id: str) -> bool:
+        """Return whether the conversation exists in ``org_id``."""
+        return (org_id, conversation_id) in self._messages

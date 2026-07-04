@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from uuid import UUID
 
 
 @dataclass
@@ -30,28 +31,34 @@ class Conversation:
 
 
 class Conversation_Store(ABC):
-    """Abstract contract for persisting Conversations and Messages."""
+    """Abstract contract for persisting Conversations and Messages.
+
+    Every method is tenant-scoped by a leading ``org_id`` so a Conversation (and its
+    Messages, via the parent FK) can only be read or mutated within its owning
+    organization; cross-tenant access yields ``None`` / empty / a no-op so the router
+    surfaces ``404`` (Req 4.2, 4.3, 4.6).
+    """
 
     @abstractmethod
-    def create(self) -> str:
-        """Create a Conversation with a unique id and return it (Req 8.1)."""
+    def create(self, org_id: UUID) -> str:
+        """Create a Conversation owned by ``org_id`` with a unique id (Req 8.1, 4.4)."""
         raise NotImplementedError
 
     @abstractmethod
-    def append(self, conversation_id: str, role: str, content: str) -> Message:
+    def append(self, org_id: UUID, conversation_id: str, role: str, content: str) -> Message:
         """Append a Message with the next ordinal; auto-create unknown id (Req 8.2, 8.4)."""
         raise NotImplementedError
 
     @abstractmethod
-    def history(self, conversation_id: str) -> list[Message]:
-        """Return the Messages in ascending ordinal position order (Req 8.3)."""
+    def history(self, org_id: UUID, conversation_id: str) -> list[Message]:
+        """Return ``org_id``'s conversation Messages in ascending ordinal order (Req 8.3)."""
         raise NotImplementedError
 
     @abstractmethod
-    def exists(self, conversation_id: str) -> bool:
-        """Return whether a Conversation with ``conversation_id`` exists.
+    def exists(self, org_id: UUID, conversation_id: str) -> bool:
+        """Return whether a Conversation with ``conversation_id`` exists in ``org_id``.
 
-        Lets the transport layer distinguish an unknown conversation (``404``) from a
-        known-but-empty one when serving history.
+        Lets the transport layer distinguish an unknown/cross-tenant conversation
+        (``404``) from a known-but-empty one when serving history.
         """
         raise NotImplementedError

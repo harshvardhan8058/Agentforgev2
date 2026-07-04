@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
-from agentforge.api.deps import get_multi_agent_context
+from agentforge.api.deps import get_multi_agent_context, require_permission
 from agentforge.api.errors import AppError
 from agentforge.api.schemas import (
     ApprovalDecisionRequest,
@@ -40,6 +40,9 @@ from agentforge.api.schemas import (
     TraceEntryModel,
 )
 from agentforge.config.container import MultiAgentContext
+from agentforge.enterprise.models import Principal
+from agentforge.enterprise.rbac import Permission
+from agentforge.enterprise.tenancy import set_current_org
 from agentforge.multiagent.approval import RunNotAwaitingApprovalError
 from agentforge.multiagent.models import (
     Approval_Decision,
@@ -61,9 +64,9 @@ def _run_status_name(run: Multi_Agent_Run) -> str:
     return run.status
 
 
-def _lookup_run(ctx: MultiAgentContext, run_id: str) -> Multi_Agent_Run:
-    """Fetch the run or raise a 404 AppError via the uniform envelope (Req 9.6)."""
-    run = ctx.run_store.get(run_id)
+def _lookup_run(ctx: MultiAgentContext, org_id, run_id: str) -> Multi_Agent_Run:
+    """Fetch the caller's org run or raise a 404 (unknown or cross-tenant) (Req 9.6, 4.3)."""
+    run = ctx.run_store.get(org_id, run_id)
     if run is None:
         raise AppError(
             "not_found",
@@ -102,6 +105,7 @@ def _termination_reason_name(run: Multi_Agent_Run) -> str | None:
 async def start_multi_agent_run(
     payload: StartMultiAgentRunRequest,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
+    principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> StartMultiAgentRunResponse:
     """Start a Multi_Agent_Run, persist it, and run it synchronously to completion.
 
@@ -112,19 +116,25 @@ async def start_multi_agent_run(
     failure surfaces through the existing uniform error envelope (Req 9.1).
     """
 
+    org_id = principal.org_id
+
     def _start() -> StartMultiAgentRunResponse:
-        conversation_id = payload.conversation_id or ctx.agent.conversation_store.create()
+        conversation_id = payload.conversation_id or ctx.agent.conversation_store.create(
+            org_id
+        )
 
         try:
-            run = ctx.run_store.create(conversation_id, payload.task)
+            run = ctx.run_store.create(org_id, conversation_id, payload.task)
             # Reuse the run_store-assigned id so the orchestrator, the trace, and the
             # store record all key off the same run_id.
             final_state = ctx.orchestrator.run(
                 payload.task,
                 conversation_id=conversation_id,
                 run_id=run.id,
+                org_id=org_id,
             )
             ctx.run_store.terminate(
+                org_id,
                 run.id,
                 final_state.final_output,
                 final_state.termination_reason or Termination_Reason.ABORTED,
@@ -139,7 +149,7 @@ async def start_multi_agent_run(
             ) from exc
 
         # After ``terminate`` the persisted run has status = "terminated".
-        persisted = ctx.run_store.get(run.id) or run
+        persisted = ctx.run_store.get(org_id, run.id) or run
         return StartMultiAgentRunResponse(
             run_id=persisted.id,
             conversation_id=persisted.conversation_id,
@@ -156,14 +166,16 @@ async def start_multi_agent_run(
 async def stream_multi_agent_run(
     run_id: str,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
+    principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> StreamingResponse:
     """Stream a fresh multi-agent run for ``run_id`` over Server-Sent Events (Req 9.2).
 
-    The run's ``task`` is resolved from the run store; unknown id -> 404 via the
-    envelope. The stream ends in exactly one terminal event (``completion`` or ``error``)
-    as guaranteed by :class:`Multi_Agent_Streaming_Service`.
+    The run's ``task`` is resolved from the caller's org run store; unknown or
+    cross-tenant id -> 404 via the envelope. The stream ends in exactly one terminal
+    event (``completion`` or ``error``) as guaranteed by :class:`Multi_Agent_Streaming_Service`.
     """
-    run = await run_in_threadpool(_lookup_run, ctx, run_id)
+    org_id = principal.org_id
+    run = await run_in_threadpool(_lookup_run, ctx, org_id, run_id)
 
     def _iter():
         # The streaming service assigns its own event ids; using ``run.id`` here aligns
@@ -172,6 +184,7 @@ async def stream_multi_agent_run(
             run.task,
             conversation_id=run.conversation_id,
             run_id=run.id,
+            org_id=org_id,
         )
 
     return StreamingResponse(_iter(), media_type="text/event-stream")
@@ -188,6 +201,7 @@ async def submit_approval(
     run_id: str,
     payload: ApprovalDecisionRequest,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
+    principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> ApprovalDecisionResponse:
     """Forward an ``Approval_Decision`` to the ``Human_Approval_Gate`` (Req 9.3).
 
@@ -196,7 +210,8 @@ async def submit_approval(
       ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt
       has already been recorded in the trace by the gate (Req 5.5).
     """
-    run = await run_in_threadpool(_lookup_run, ctx, run_id)
+    org_id = principal.org_id
+    run = await run_in_threadpool(_lookup_run, ctx, org_id, run_id)
 
     decision = Approval_Decision(
         type=ApprovalDecisionType(payload.type),
@@ -205,6 +220,8 @@ async def submit_approval(
     )
 
     def _submit() -> ApprovalDecisionResponse:
+        # Publish the acting tenant so the gate's trace writes are org-scoped (Req 4.6).
+        set_current_org(org_id)
         try:
             resumed_state = ctx.gate.submit(run_id, decision)
         except RunNotAwaitingApprovalError as exc:
@@ -216,7 +233,7 @@ async def submit_approval(
 
         # Persist the decision on the run_store audit trail (Req 10.3).
         try:
-            ctx.run_store.record_decision(run_id, decision)
+            ctx.run_store.record_decision(org_id, run_id, decision)
         except Exception:  # noqa: BLE001 - audit is best-effort; the gate has resumed
             pass
 
@@ -224,6 +241,7 @@ async def submit_approval(
         # persist the terminal outcome and reflect it in the response.
         if resumed_state.termination_reason is not None:
             ctx.run_store.terminate(
+                org_id,
                 run_id,
                 resumed_state.final_output,
                 resumed_state.termination_reason,
@@ -235,7 +253,7 @@ async def submit_approval(
             )
 
         # Otherwise the run has resumed and is running (or awaiting a next checkpoint).
-        current = ctx.run_store.get(run_id) or run
+        current = ctx.run_store.get(org_id, run_id) or run
         return ApprovalDecisionResponse(
             run_id=run_id,
             status=_run_status_name(current),
@@ -255,15 +273,19 @@ async def submit_approval(
 async def get_multi_agent_run(
     run_id: str,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
+    principal: Principal = Depends(require_permission(Permission.READ)),
 ) -> MultiAgentRunResult:
     """Return the ordered trace + result for a Multi_Agent_Run (Req 9.4).
 
-    Unknown ``run_id`` -> 404 via the envelope (Req 9.6). When the run has terminated but
-    its ``Final_Output`` and ``Termination_Reason`` cannot be retrieved together, a
-    ``unavailable`` error is returned via the envelope (Req 9.5).
+    Unknown or cross-tenant ``run_id`` -> 404 via the envelope (Req 9.6, 4.3). When the
+    run has terminated but its ``Final_Output`` and ``Termination_Reason`` cannot be
+    retrieved together, a ``unavailable`` error is returned via the envelope (Req 9.5).
     """
-    run = await run_in_threadpool(_lookup_run, ctx, run_id)
-    trace = await run_in_threadpool(ctx.agent.trace_recorder.get_trace, run_id)
+    org_id = principal.org_id
+    run = await run_in_threadpool(_lookup_run, ctx, org_id, run_id)
+    trace = await run_in_threadpool(
+        ctx.agent.trace_recorder.get_trace, org_id, run_id
+    )
 
     if run.status == "terminated" and (
         run.termination_reason is None or run.final_output is None

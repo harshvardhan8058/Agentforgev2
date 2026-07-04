@@ -28,6 +28,7 @@ from agentforge.multiagent.models import (
     Plan,
     Termination_Reason,
 )
+from agentforge.enterprise.tenancy import current_org
 from agentforge.multiagent.state import Blackboard_State
 from agentforge.tracing.base import Trace_Recorder
 
@@ -163,6 +164,7 @@ class Human_Approval_Gate:
 
         if self._trace is not None:
             self._trace.record(
+                current_org(),
                 state.run_id,
                 step_type="approval_pause",
                 detail={"checkpoint": checkpoint},
@@ -201,6 +203,7 @@ class Human_Approval_Gate:
         if loaded is None:
             if self._trace is not None:
                 self._trace.record(
+                    current_org(),
                     run_id,
                     step_type="approval_rejected",
                     detail={
@@ -244,11 +247,13 @@ class Human_Approval_Gate:
 
         if self._trace is not None:
             self._trace.record(
+                current_org(),
                 run_id,
                 step_type="approval_decision",
                 detail={"type": decision.type.value, "checkpoint": checkpoint},
             )
             self._trace.record(
+                current_org(),
                 run_id,
                 step_type="approval_resume",
                 detail={"checkpoint": checkpoint},

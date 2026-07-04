@@ -18,15 +18,18 @@ from fastapi import FastAPI
 
 from agentforge.api.errors import register_exception_handlers
 from agentforge.api.routers import agent as agent_router
+from agentforge.api.routers import auth as auth_router
 from agentforge.api.routers import conversations as conversations_router
 from agentforge.api.routers import documents as documents_router
 from agentforge.api.routers import health as health_router
 from agentforge.api.routers import ingest as ingest_router
 from agentforge.api.routers import multi_agent as multi_agent_router
+from agentforge.api.routers import orgs as orgs_router
 from agentforge.api.routers import query as query_router
 from agentforge.config.container import (
     build_agent_context,
     build_app_context,
+    build_enterprise_context,
     build_multi_agent_context,
 )
 from agentforge.config.settings import Settings, load_settings
@@ -103,6 +106,22 @@ async def lifespan(app: FastAPI):
             app.state.multi_agent_context.orchestrator.max_revisions,
         )
 
+    # 8. Compose the Phase 5 enterprise object graph (auth service, identity store, RBAC
+    #    policy, API-key service, and rate limiter) so the reusable Principal +
+    #    Authorization dependencies can resolve credentials on every request. Built once
+    #    at startup, backed by the existing Redis for rate limiting; tests may pre-inject
+    #    a keyless context (in-memory identity/api-key stores + Fake_Clock/NoOp limiter),
+    #    which is respected here (Req 9.5, 10.1).
+    if getattr(app.state, "enterprise_context", None) is None:
+        app.state.enterprise_context = build_enterprise_context(
+            settings, redis=app.state.redis
+        )
+        logger.info(
+            "Enterprise context ready (auth_enabled=%s, rate_limit_enabled=%s)",
+            settings.auth_enabled,
+            settings.rate_limit_enabled,
+        )
+
     try:
         yield
     finally:
@@ -140,6 +159,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(agent_router.router)
     # Phase 4 multi-agent router.
     app.include_router(multi_agent_router.router)
+    # Phase 5 enterprise routers (auth + orgs/members/teams/api-keys).
+    app.include_router(auth_router.router)
+    app.include_router(orgs_router.router)
 
     return app
 

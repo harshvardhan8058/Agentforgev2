@@ -12,6 +12,7 @@ from hypothesis import given
 from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
 
+from agentforge.enterprise.tenancy import NIL_ORG_ID as ORG
 from agentforge.multiagent.store import InMemory_Multi_Agent_Run_Store
 
 # The four built-in roles plus a demonstration of the add-a-role seam. The store is
@@ -38,14 +39,14 @@ def test_multiagent_message_persistence_roundtrip(messages):
     Validates: Requirements 10.2
     """
     store = InMemory_Multi_Agent_Run_Store()
-    run = store.create(conversation_id="conv-1", task="task")
+    run = store.create(ORG, conversation_id="conv-1", task="task")
 
     for expected_position, (role_id, content) in enumerate(messages):
-        assigned = store.append_message(run.id, role_id, content)
+        assigned = store.append_message(ORG, run.id, role_id, content)
         # ``append_message`` returns the ordinal it assigned, contiguous from 0.
         assert assigned == expected_position
 
-    persisted = store.messages(run.id)
+    persisted = store.messages(ORG, run.id)
 
     # Exactly the appended messages, in append order, with contiguous ascending ordinals.
     assert [position for _, _, position in persisted] == list(range(len(messages)))

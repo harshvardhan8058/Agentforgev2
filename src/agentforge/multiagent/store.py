@@ -27,6 +27,7 @@ import copy
 import threading
 import uuid
 from abc import ABC, abstractmethod
+from uuid import UUID
 
 from agentforge.models.domain import Citation
 from agentforge.multiagent.models import (
@@ -39,31 +40,40 @@ from agentforge.multiagent.models import (
 
 
 class Multi_Agent_Run_Store(ABC):
-    """Persists the Multi_Agent_Run lifecycle (Req 10.1-10.5)."""
+    """Persists the Multi_Agent_Run lifecycle (Req 10.1-10.5).
+
+    Every method is tenant-scoped by a leading ``org_id``: the run is owned by ``org_id``
+    and its descendants (messages, decisions, checkpoints) inherit that tenancy through
+    the run FK, so a cross-tenant ``get`` returns ``None`` and cross-tenant mutations
+    affect zero rows — the router surfaces ``404`` (Req 4.3, 4.6).
+    """
 
     @abstractmethod
-    def create(self, conversation_id: str, task: str) -> Multi_Agent_Run:
-        """Create and persist a new Multi_Agent_Run (Req 10.1)."""
+    def create(self, org_id: UUID, conversation_id: str, task: str) -> Multi_Agent_Run:
+        """Create and persist a new Multi_Agent_Run owned by ``org_id`` (Req 10.1, 4.4)."""
 
     @abstractmethod
-    def append_message(self, run_id: str, role_id: str, content: str) -> int:
+    def append_message(self, org_id: UUID, run_id: str, role_id: str, content: str) -> int:
         """Persist an agent message and return its ordinal position (Req 10.2)."""
 
     @abstractmethod
-    def record_decision(self, run_id: str, decision: Approval_Decision) -> None:
+    def record_decision(self, org_id: UUID, run_id: str, decision: Approval_Decision) -> None:
         """Persist an applied Approval_Decision in append order (Req 10.3)."""
 
     @abstractmethod
-    def save_checkpoint(self, run_id: str, checkpoint: str, blackboard: dict) -> None:
+    def save_checkpoint(
+        self, org_id: UUID, run_id: str, checkpoint: str, blackboard: dict
+    ) -> None:
         """Persist a Run_Checkpoint sufficient to resume the run (Req 10.4)."""
 
     @abstractmethod
-    def load_checkpoint(self, run_id: str) -> tuple[str, dict] | None:
+    def load_checkpoint(self, org_id: UUID, run_id: str) -> tuple[str, dict] | None:
         """Return the most recent ``(checkpoint_name, blackboard)`` for the run, or ``None``."""
 
     @abstractmethod
     def terminate(
         self,
+        org_id: UUID,
         run_id: str,
         final_output: Final_Output | None,
         reason: Termination_Reason,
@@ -71,8 +81,8 @@ class Multi_Agent_Run_Store(ABC):
         """Persist the Final_Output and Termination_Reason for the run (Req 10.5)."""
 
     @abstractmethod
-    def get(self, run_id: str) -> Multi_Agent_Run | None:
-        """Return the persisted Multi_Agent_Run, or ``None`` if unknown."""
+    def get(self, org_id: UUID, run_id: str) -> Multi_Agent_Run | None:
+        """Return ``org_id``'s Multi_Agent_Run, or ``None`` if unknown/cross-tenant."""
 
 
 # --------------------------------------------------------------------------- InMemory
@@ -88,16 +98,16 @@ class InMemory_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
     """
 
     def __init__(self) -> None:
-        self._runs: dict[str, Multi_Agent_Run] = {}
-        # Per-run parallel state: messages (ordered), decisions (ordered), checkpoints
-        # (append-only; the latest wins on load).
-        self._messages: dict[str, list[tuple[str, str, int]]] = {}
-        self._decisions: dict[str, list[Approval_Decision]] = {}
-        self._checkpoints: dict[str, list[tuple[str, dict]]] = {}
+        # Runs keyed by (org_id, run_id) so cross-tenant access is impossible. The
+        # per-run parallel state is keyed the same way.
+        self._runs: dict[tuple[UUID, str], Multi_Agent_Run] = {}
+        self._messages: dict[tuple[UUID, str], list[tuple[str, str, int]]] = {}
+        self._decisions: dict[tuple[UUID, str], list[Approval_Decision]] = {}
+        self._checkpoints: dict[tuple[UUID, str], list[tuple[str, dict]]] = {}
         self._lock = threading.Lock()
 
-    def create(self, conversation_id: str, task: str) -> Multi_Agent_Run:
-        """Insert a new Multi_Agent_Run with a unique id, status=``running`` (Req 10.1)."""
+    def create(self, org_id: UUID, conversation_id: str, task: str) -> Multi_Agent_Run:
+        """Insert a new Multi_Agent_Run owned by ``org_id``, status=``running`` (Req 10.1)."""
         run = Multi_Agent_Run(
             id=str(uuid.uuid4()),
             conversation_id=conversation_id,
@@ -105,37 +115,39 @@ class InMemory_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
             status="running",
         )
         with self._lock:
-            self._runs[run.id] = run
-            self._messages[run.id] = []
-            self._decisions[run.id] = []
-            self._checkpoints[run.id] = []
+            self._runs[(org_id, run.id)] = run
+            self._messages[(org_id, run.id)] = []
+            self._decisions[(org_id, run.id)] = []
+            self._checkpoints[(org_id, run.id)] = []
         return run
 
-    def append_message(self, run_id: str, role_id: str, content: str) -> int:
+    def append_message(self, org_id: UUID, run_id: str, role_id: str, content: str) -> int:
         """Append a (role_id, content) message; return the assigned 0-based ordinal (Req 10.2)."""
         with self._lock:
-            bucket = self._messages.setdefault(run_id, [])
+            bucket = self._messages.setdefault((org_id, run_id), [])
             position = len(bucket)
             bucket.append((role_id, content, position))
         return position
 
-    def record_decision(self, run_id: str, decision: Approval_Decision) -> None:
+    def record_decision(self, org_id: UUID, run_id: str, decision: Approval_Decision) -> None:
         """Persist an Approval_Decision in append order (Req 10.3)."""
         with self._lock:
-            self._decisions.setdefault(run_id, []).append(decision)
+            self._decisions.setdefault((org_id, run_id), []).append(decision)
 
     def save_checkpoint(
-        self, run_id: str, checkpoint: str, blackboard: dict
+        self, org_id: UUID, run_id: str, checkpoint: str, blackboard: dict
     ) -> None:
         """Persist a Run_Checkpoint (blackboard is deep-copied) (Req 10.4)."""
         snapshot = copy.deepcopy(blackboard)
         with self._lock:
-            self._checkpoints.setdefault(run_id, []).append((checkpoint, snapshot))
+            self._checkpoints.setdefault((org_id, run_id), []).append(
+                (checkpoint, snapshot)
+            )
 
-    def load_checkpoint(self, run_id: str) -> tuple[str, dict] | None:
+    def load_checkpoint(self, org_id: UUID, run_id: str) -> tuple[str, dict] | None:
         """Return the latest ``(checkpoint, blackboard)`` (deep-copied), or ``None``."""
         with self._lock:
-            history = self._checkpoints.get(run_id)
+            history = self._checkpoints.get((org_id, run_id))
             if not history:
                 return None
             checkpoint, blackboard = history[-1]
@@ -143,35 +155,36 @@ class InMemory_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
 
     def terminate(
         self,
+        org_id: UUID,
         run_id: str,
         final_output: Final_Output | None,
         reason: Termination_Reason,
     ) -> None:
         """Set the run's status/termination_reason/final_output (Req 10.5)."""
         with self._lock:
-            run = self._runs.get(run_id)
+            run = self._runs.get((org_id, run_id))
             if run is None:
                 return
             run.status = "terminated"
             run.termination_reason = reason
             run.final_output = final_output
 
-    def get(self, run_id: str) -> Multi_Agent_Run | None:
-        """Return the persisted Multi_Agent_Run, or ``None`` if unknown."""
+    def get(self, org_id: UUID, run_id: str) -> Multi_Agent_Run | None:
+        """Return ``org_id``'s Multi_Agent_Run, or ``None`` if unknown/cross-tenant."""
         with self._lock:
-            return self._runs.get(run_id)
+            return self._runs.get((org_id, run_id))
 
     # ------------------------------------------------------------------ read helpers
 
-    def messages(self, run_id: str) -> list[tuple[str, str, int]]:
+    def messages(self, org_id: UUID, run_id: str) -> list[tuple[str, str, int]]:
         """Return ``(role_id, content, position)`` messages for the run in append order."""
         with self._lock:
-            return list(self._messages.get(run_id, []))
+            return list(self._messages.get((org_id, run_id), []))
 
-    def decisions(self, run_id: str) -> list[Approval_Decision]:
+    def decisions(self, org_id: UUID, run_id: str) -> list[Approval_Decision]:
         """Return the recorded Approval_Decisions for the run in append order (Req 10.3)."""
         with self._lock:
-            return list(self._decisions.get(run_id, []))
+            return list(self._decisions.get((org_id, run_id), []))
 
 
 # --------------------------------------------------------------------------- Postgres
@@ -197,8 +210,8 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
             _to_sqlalchemy_sync_dsn(database_url), future=True, pool_pre_ping=True
         )
 
-    def create(self, conversation_id: str, task: str) -> Multi_Agent_Run:
-        """Insert a new Multi_Agent_Run row and return it (Req 10.1)."""
+    def create(self, org_id: UUID, conversation_id: str, task: str) -> Multi_Agent_Run:
+        """Insert a new Multi_Agent_Run row owned by ``org_id`` and return it (Req 10.1, 4.4)."""
         from sqlalchemy import text
 
         run_id = str(uuid.uuid4())
@@ -206,11 +219,11 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
             conn.execute(
                 text(
                     """
-                    INSERT INTO multi_agent_runs (id, conversation_id, task, status)
-                    VALUES (:id, :cid, :task, 'running')
+                    INSERT INTO multi_agent_runs (id, org_id, conversation_id, task, status)
+                    VALUES (:id, :org_id, :cid, :task, 'running')
                     """
                 ),
-                {"id": run_id, "cid": conversation_id, "task": task},
+                {"id": run_id, "org_id": str(org_id), "cid": conversation_id, "task": task},
             )
         return Multi_Agent_Run(
             id=run_id,
@@ -219,14 +232,17 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
             status="running",
         )
 
-    def append_message(self, run_id: str, role_id: str, content: str) -> int:
+    def append_message(self, org_id: UUID, run_id: str, role_id: str, content: str) -> int:
         """Append an agent message to the run's conversation, returning its ordinal (Req 10.2)."""
         from sqlalchemy import text
 
         with self._engine.begin() as conn:
             conversation_id = conn.execute(
-                text("SELECT conversation_id FROM multi_agent_runs WHERE id = :id"),
-                {"id": run_id},
+                text(
+                    "SELECT conversation_id FROM multi_agent_runs "
+                    "WHERE id = :id AND org_id = :org_id"
+                ),
+                {"id": run_id, "org_id": str(org_id)},
             ).scalar_one()
             next_position = conn.execute(
                 text(
@@ -252,11 +268,20 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
             )
         return int(next_position)
 
-    def record_decision(self, run_id: str, decision: Approval_Decision) -> None:
+    def record_decision(self, org_id: UUID, run_id: str, decision: Approval_Decision) -> None:
         """Insert a decision row with ``position = max(position)+1`` for the run (Req 10.3)."""
         from sqlalchemy import text
 
         with self._engine.begin() as conn:
+            # Guard: only record against a run owned by org_id (descendant tenancy).
+            owner = conn.execute(
+                text(
+                    "SELECT 1 FROM multi_agent_runs WHERE id = :rid AND org_id = :org_id"
+                ),
+                {"rid": run_id, "org_id": str(org_id)},
+            ).first()
+            if owner is None:
+                return
             next_position = conn.execute(
                 text(
                     "SELECT COALESCE(MAX(position) + 1, 0) FROM approval_decisions "
@@ -288,7 +313,7 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
             )
 
     def save_checkpoint(
-        self, run_id: str, checkpoint: str, blackboard: dict
+        self, org_id: UUID, run_id: str, checkpoint: str, blackboard: dict
     ) -> None:
         """Append a Run_Checkpoint snapshot; the latest row wins on load (Req 10.4)."""
         import json
@@ -296,6 +321,14 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
         from sqlalchemy import text
 
         with self._engine.begin() as conn:
+            owner = conn.execute(
+                text(
+                    "SELECT 1 FROM multi_agent_runs WHERE id = :rid AND org_id = :org_id"
+                ),
+                {"rid": run_id, "org_id": str(org_id)},
+            ).first()
+            if owner is None:
+                return
             conn.execute(
                 text(
                     """
@@ -311,7 +344,7 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
                 },
             )
 
-    def load_checkpoint(self, run_id: str) -> tuple[str, dict] | None:
+    def load_checkpoint(self, org_id: UUID, run_id: str) -> tuple[str, dict] | None:
         """Return the most recent ``(checkpoint, blackboard)`` for the run, or ``None``."""
         import json
 
@@ -321,11 +354,13 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
             row = conn.execute(
                 text(
                     """
-                    SELECT checkpoint, blackboard FROM run_checkpoints
-                    WHERE run_id = :rid ORDER BY created_at DESC, id DESC LIMIT 1
+                    SELECT cp.checkpoint, cp.blackboard FROM run_checkpoints cp
+                    JOIN multi_agent_runs r ON r.id = cp.run_id
+                    WHERE cp.run_id = :rid AND r.org_id = :org_id
+                    ORDER BY cp.created_at DESC, cp.id DESC LIMIT 1
                     """
                 ),
-                {"rid": run_id},
+                {"rid": run_id, "org_id": str(org_id)},
             ).one_or_none()
         if row is None:
             return None
@@ -335,6 +370,7 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
 
     def terminate(
         self,
+        org_id: UUID,
         run_id: str,
         final_output: Final_Output | None,
         reason: Termination_Reason,
@@ -363,19 +399,20 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
                         final_output = :final_output,
                         final_citations = CAST(:final_citations AS JSONB),
                         updated_at = now()
-                    WHERE id = :id
+                    WHERE id = :id AND org_id = :org_id
                     """
                 ),
                 {
                     "id": run_id,
+                    "org_id": str(org_id),
                     "reason": reason.value,
                     "final_output": content,
                     "final_citations": json.dumps(citations),
                 },
             )
 
-    def get(self, run_id: str) -> Multi_Agent_Run | None:
-        """Return the persisted Multi_Agent_Run, hydrating the Final_Output when set."""
+    def get(self, org_id: UUID, run_id: str) -> Multi_Agent_Run | None:
+        """Return ``org_id``'s Multi_Agent_Run, hydrating the Final_Output when set."""
         import json
 
         from sqlalchemy import text
@@ -386,10 +423,10 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
                     """
                     SELECT id, conversation_id, task, status, termination_reason,
                            final_output, final_citations
-                    FROM multi_agent_runs WHERE id = :id
+                    FROM multi_agent_runs WHERE id = :id AND org_id = :org_id
                     """
                 ),
-                {"id": run_id},
+                {"id": run_id, "org_id": str(org_id)},
             ).one_or_none()
         if row is None:
             return None
@@ -420,7 +457,7 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
 
     # ------------------------------------------------------------------ read helpers
 
-    def messages(self, run_id: str) -> list[tuple[str, str, int]]:
+    def messages(self, org_id: UUID, run_id: str) -> list[tuple[str, str, int]]:
         """Return the run's agent messages ``(role_id, content, position)`` in order."""
         from sqlalchemy import text
 
@@ -431,15 +468,15 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
                     SELECT m.role, m.content, m.position
                     FROM messages m
                     JOIN multi_agent_runs r ON r.conversation_id = m.conversation_id
-                    WHERE r.id = :rid
+                    WHERE r.id = :rid AND r.org_id = :org_id
                     ORDER BY m.position ASC
                     """
                 ),
-                {"rid": run_id},
+                {"rid": run_id, "org_id": str(org_id)},
             ).fetchall()
         return [(r[0], r[1], int(r[2])) for r in rows]
 
-    def decisions(self, run_id: str) -> list[Approval_Decision]:
+    def decisions(self, org_id: UUID, run_id: str) -> list[Approval_Decision]:
         """Return the recorded Approval_Decisions for the run in append order (Req 10.3)."""
         from sqlalchemy import text
 
@@ -447,11 +484,13 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
             rows = conn.execute(
                 text(
                     """
-                    SELECT decision_type, feedback, edited_content, position
-                    FROM approval_decisions WHERE run_id = :rid ORDER BY position ASC
+                    SELECT d.decision_type, d.feedback, d.edited_content, d.position
+                    FROM approval_decisions d
+                    JOIN multi_agent_runs r ON r.id = d.run_id
+                    WHERE d.run_id = :rid AND r.org_id = :org_id ORDER BY d.position ASC
                     """
                 ),
-                {"rid": run_id},
+                {"rid": run_id, "org_id": str(org_id)},
             ).fetchall()
         return [
             Approval_Decision(

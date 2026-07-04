@@ -35,6 +35,7 @@ from agentforge.multiagent.roles.writer import Writer_Agent
 from agentforge.multiagent.state import Blackboard_State
 from agentforge.tools.registry import Tool_Registry
 from agentforge.tracing.recorder import InMemory_Trace_Recorder
+from agentforge.enterprise.tenancy import NIL_ORG_ID as ORG
 
 
 class _AlwaysReviseCritic(Agent_Role_Interface):
@@ -108,7 +109,7 @@ def test_trace_is_complete_ordered_and_role_attributed(
     )
     state = orch.run(task)
 
-    entries = trace.get_trace(state.run_id).entries
+    entries = trace.get_trace(ORG, state.run_id).entries
 
     # Every entry corresponds to an executed role step and is attributed to a real role.
     assert entries, "trace must not be empty"

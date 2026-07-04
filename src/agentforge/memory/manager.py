@@ -61,10 +61,12 @@ class Composite_Memory_Manager(Memory_Manager):
         return self._short_term.short_term_entries()
 
     # --- long-term memory ---------------------------------------------------------
-    def persist_long_term(self, text: str, metadata: dict) -> str:
-        """Store an entry as an embedding via the existing seams (Req 7.1, 7.5)."""
-        return self._long_term.persist_long_term(text, metadata)
+    def persist_long_term(self, text: str, metadata: dict, *, org_id: object = None) -> str:
+        """Store an entry as an embedding, tagged with ``org_id`` (Req 7.1, 7.5, 4.1)."""
+        return self._long_term.persist_long_term(text, metadata, org_id=org_id)
 
-    def retrieve_long_term(self, query: str, k: int) -> list[MemoryEntry]:
-        """Return ``min(k, stored_count)`` entries by descending similarity (Req 7.2-7.4)."""
-        return self._long_term.retrieve_long_term(query, k)
+    def retrieve_long_term(
+        self, query: str, k: int, *, org_id: object = None
+    ) -> list[MemoryEntry]:
+        """Return ``min(k, stored_count)`` of ``org_id``'s entries by similarity (Req 7.2-7.4)."""
+        return self._long_term.retrieve_long_term(query, k, org_id=org_id)

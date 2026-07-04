@@ -1,0 +1,29 @@
+{
+  "pbtResults": {
+    "2.3 Write property test for the RBAC iff-invariant": {
+      "status": "passed",
+      "lastRunTimestamp": 1783203210504
+    },
+    "2.4 Write property test for role-permission subset nesting with universal read": {
+      "status": "passed",
+      "lastRunTimestamp": 1783203211514
+    },
+    "3.2 Write property test for JWT issue/verify round-trip and rejection of tampered tokens": {
+      "status": "passed",
+      "lastRunTimestamp": 1783203212514
+    },
+    "3.3 Write property test for password hash correctness and plaintext non-disclosure": {
+      "status": "passed",
+      "lastRunTimestamp": 1783203213266
+    },
+    "5.5 Write property test for the API-key lifecycle": {
+      "status": "passed",
+      "lastRunTimestamp": 1783203867889
+    },
+    "6.2 Write property test for the rate limiter's bound + per-principal isolation + rollover": {
+      "status": "passed",
+      "lastRunTimestamp": 1783203868075
+    }
+  },
+  "executionHistory": {}
+}
