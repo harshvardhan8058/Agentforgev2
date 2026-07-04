@@ -246,9 +246,161 @@ planner/researcher/writer/critic roles) are added over the same typed `AgentStat
 The `Agent_Orchestrator` class itself (which merely builds and runs the compiled graph)
 does not change — it discovers the new topology through `build_agent_graph`.
 
+# Phase 4 — Multi-Agent Collaboration & Human Approval
+
+This section extends the decision record with the rationale for the Phase 4
+`Multi_Agent_Layer` (Requirement 13). Everything in the layer **reuses, never
+reimplements** the Phase 1–3 seams: each Agent_Role runs the existing single-agent
+`Agent_Orchestrator`; grounding uses the existing `RAG_Tool`; the streaming, tracing,
+persistence, and API layers reuse `Streaming_Service`, `Trace_Recorder`,
+`Conversation_Store`, and `API_Service` unchanged.
+
+## 19. A supervisor/graph over agents-as-callers
+
+Modeling the collaboration as an explicit LangGraph `StateGraph` over a typed
+`Blackboard_State` — rather than agents that directly call one another — makes routing,
+the two bounds, the five termination reasons, and the approval checkpoints first-class
+and independently testable. It reuses the exact substrate Phase 3 established (a typed
+state plus conditional edges), so the mental model and the testing approach carry
+straight over. Agents-as-callers would bury control flow inside each role and make
+"every run terminates, and we always know why" unverifiable.
+
+_Validates: Requirements 2, 5, 13.1._
+
+## 20. Bounding both rounds and revisions
+
+Two independent counters guard two independent runaway risks. The revision loop
+(Critic ↔ Writer) can oscillate on subjective "not good enough" feedback, so it is
+bounded by `Max_Revisions`. `Max_Rounds` is a **global backstop** on total collaboration
+rounds — the multi-agent analogue of Phase 3's `Iteration_Limit` — so a future role or a
+mis-behaving policy that cycles the graph in other ways still terminates. Both bounds
+are enforced structurally in the conditional edges (increment then check), so neither
+counter can be pushed past its limit and every run provably terminates with exactly one
+`Termination_Reason` from `{completed, max-rounds-reached, max-revisions-reached,
+rejected, aborted}`.
+
+_Validates: Requirements 2.2, 2.4, 2.7, 3.1, 3.3, 3.4._
+
+## 21. Agent_Role behind an interface + registry + declarative pipeline
+
+Mirrors the "interfaces at the seams" rule from Phase 1–2 and the Phase 3 `Tool_Registry`.
+The `Multi_Agent_Orchestrator` depends only on `Agent_Role_Interface` and a **declarative
+pipeline list** (`DEFAULT_PIPELINE`, plain data). A new role is added by (1) implementing
+the interface, (2) registering it under a distinct `role_id`, and (3) listing that
+`role_id` in the pipeline order — with **no** edit to the orchestrator routing core.
+Distinct `role_id`s keep tracing, streaming, and persistence attribution unambiguous.
+
+### Adding a new Agent_Role — step-by-step guide
+
+1. **Implement `Agent_Role_Interface`** in a new module under `multiagent/roles/`
+   (e.g. `roles/summarizer.py`). Provide the three abstract members:
+   - `role_id` — a unique, stable string. The registry rejects duplicates.
+   - `instructions` — the role-scoped instructions injected into the reused
+     `Agent_Orchestrator` prompt (so the role never generates text directly).
+   - `act(state) -> Blackboard_State` — read the shared state, do this role's real work
+     by running the injected `Agent_Orchestrator`, map the result into the appropriate
+     blackboard field, and return the updated state.
+
+   A minimal working role:
+
+   ```python
+   # multiagent/roles/summarizer.py
+   from agentforge.agent.orchestrator import Agent_Orchestrator
+   from agentforge.multiagent.roles.base import Agent_Role_Interface
+   from agentforge.multiagent.state import Blackboard_State
+
+   class Summarizer_Agent(Agent_Role_Interface):
+       def __init__(self, orchestrator: Agent_Orchestrator) -> None:
+           # Reuse the SAME existing single-agent orchestrator (Req 11.1).
+           self._orchestrator = orchestrator
+
+       @property
+       def role_id(self) -> str:  return "summarizer"
+
+       @property
+       def instructions(self) -> str:
+           return "Summarize the draft in one paragraph for a busy reader."
+
+       def act(self, state: Blackboard_State) -> Blackboard_State:
+           request = f"{self.instructions}\n\nDraft:\n{state.draft.content if state.draft else ''}"
+           result = self._orchestrator.run(request, conversation_id=state.conversation_id)
+           # Attach the summary to a state field of your choice (add one to
+           # Blackboard_State if the role produces a new artifact type).
+           return state
+   ```
+
+2. **Register it in the composition root** (`config/container.py`, in
+   `_default_role_registry` or a settings-driven registry): construct the role with
+   any collaborators it needs (reuse the wired `Agent_Orchestrator` from `AgentContext`)
+   and call `registry.register(...)`. The registry rejects duplicate `role_id`s so a
+   collision fails fast.
+
+3. **List its `role_id` in the pipeline** — either edit `DEFAULT_PIPELINE` in
+   `multiagent/roles/base.py` (adds the phase globally) or supply a settings-driven
+   pipeline list when constructing the `Multi_Agent_Orchestrator`. The graph is built
+   generically from the pipeline order, so no edit to `graph.py` or `orchestrator.py`
+   is required.
+
+The `Multi_Agent_Orchestrator` class itself (which merely builds and runs the compiled
+graph) does not change — it discovers the new topology through the registry and the
+pipeline list.
+
+_Validates: Requirements 1.4, 13.2._
+
+## 22. Each role reuses the Phase 3 single-agent orchestrator
+
+Each role's real work — reasoning, tool use, memory — is exactly what the Phase 3
+`Agent_Orchestrator` already does. Running that orchestrator inside `act` (rather than
+writing a second reasoning loop) keeps behavior consistent, avoids duplicated logic, and
+preserves the keyless promise: the orchestrator already defaults to the deterministic
+`Fallback_Provider` and the disabled web search, so identical inputs produce identical
+role outputs and the whole multi-agent graph stays reproducible end-to-end. The
+Researcher gets grounding for free through the already-registered `RAG_Tool`; citations
+are produced by the existing RAG pipeline, never reimplemented in the multi-agent layer.
+
+_Validates: Requirements 1.2, 8.1, 8.4, 11.1, 11.2, 11.3, 11.4._
+
+## 23. Human-in-the-loop as an Approval_Policy over a framework-agnostic pause/resume
+
+Approval is expressed as a policy seam (`Human_In_The_Loop_Policy` vs
+`Auto_Approve_Policy`) implemented over a small pause/resume abstraction — the
+`Human_Approval_Gate` + an in-memory `Checkpoint_Store`. A pause sets the
+`awaiting_approval` flag on the blackboard, snapshots the state to the
+`Checkpoint_Store`, records an `approval_pause` trace entry, and emits an
+`approval_required` streamed event; a resume re-invokes the graph on the snapshot with
+the human decision applied.
+
+Because the gate is a **plain in-process abstraction** rather than a hard binding to
+LangGraph's interrupt/checkpointer, it stays testable independently of any real human
+approver **and** any real graph runtime: tests inject `Approval_Decision`s to exercise
+pause → resume with no external input, and the keyless `Auto_Approve_Policy` — the
+default when the configuration provides no policy — approves every checkpoint
+deterministically so runs complete end-to-end. The LangGraph-integrated variant of the
+same seam is a valid future implementation; the interface is what the orchestrator
+depends on, not the mechanism.
+
+_Validates: Requirements 5.1, 5.2, 5.4, 5.5, 5.6, 5.7, 12.5, 13.3._
+
+## 24. Multi-agent streaming preserves the Phase 3 single-terminal guarantee
+
+The `Multi_Agent_Streaming_Service` extends only the event **vocabulary**
+(`agent_started`, `plan`, `research`, `draft`, `critic_feedback`, `approval_required`,
+`completion`, `error`) — not the streaming mechanics. It reuses the Phase 3 SSE frame
+shape (`event: <type>\ndata: <json>\n\n`), assigns each event a monotonic `sequence`,
+identifies the acting `role_id` on every agent event, and wraps the whole generator body
+in a single `try`/`except` so **exactly one** terminal event is emitted per stream —
+`completion` carrying the `Final_Output` on success xor a single `error` on failure —
+after which the stream closes. `approval_required` is intentionally non-terminal: the
+stream ends after it so the run can be resumed on a separate request and re-streamed by
+a fresh call. Under the `Fallback_Provider` + `Auto_Approve_Policy`, the event sequence
+is deterministic — identical input yields identical ordered events with identical
+`role_id` attribution.
+
+_Validates: Requirements 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9._
+
 ---
 
-_Scope note:_ this record covers Phases 1–3. Multi-agent orchestration, human-approval
-workflows, enterprise auth/RBAC/multi-tenancy, cost/token analytics, the frontend,
-third-party integrations, and cloud deployment are reserved for later phases and are
-enabled — but not designed — by the modular seams established here.
+_Scope note:_ this record covers Phases 1–4. Enterprise auth/RBAC/multi-tenancy,
+cost/token analytics and evaluation frameworks, the frontend, third-party integrations,
+and cloud deployment are reserved for later phases and are enabled — but not designed —
+by the modular seams established here.

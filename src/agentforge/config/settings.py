@@ -82,6 +82,17 @@ class Settings(BaseSettings):
     # network request is ever made without a credential (Req 5.2, 5.4).
     search_provider: Literal["disabled", "tavily"] = "disabled"
 
+    # --- multi-agent layer (Phase 4; all optional / defaulted to preserve keyless boot) ---
+    # Max collaboration rounds per Multi_Agent_Run. Resolved to [1, 50] with a bounded
+    # default of 6 by the orchestrator when absent/invalid (Req 2.5, 2.6).
+    max_rounds: int | None = None
+    # Max Critic-driven revision cycles per Multi_Agent_Run. Resolved to [1, 20] with a
+    # bounded default of 3 when absent/invalid (Req 3.5, 3.6).
+    max_revisions: int | None = None
+    # Approval policy governing the Human_Approval_Gate; "auto" is the keyless default so
+    # runs complete end-to-end without external human input (Req 5.7).
+    approval_policy: Literal["auto", "human"] = "auto"
+
     # --- credentials (ALL optional) ---
     groq_api_key: SecretStr | None = None
     hosted_embedding_api_key: SecretStr | None = None

@@ -34,6 +34,24 @@ from agentforge.memory.manager import Composite_Memory_Manager
 from agentforge.rag.service import RAG_Service
 from agentforge.retrieval.retriever import Retriever
 from agentforge.storage.base import DocumentStore
+from agentforge.multiagent.approval import (
+    Approval_Policy,
+    Auto_Approve_Policy,
+    Checkpoint_Store,
+    Human_Approval_Gate,
+    Human_In_The_Loop_Policy,
+)
+from agentforge.multiagent.orchestrator import Multi_Agent_Orchestrator
+from agentforge.multiagent.roles.base import DEFAULT_PIPELINE, Agent_Role_Registry
+from agentforge.multiagent.roles.critic import Critic_Agent
+from agentforge.multiagent.roles.planner import Planner_Agent
+from agentforge.multiagent.roles.researcher import Researcher_Agent
+from agentforge.multiagent.roles.writer import Writer_Agent
+from agentforge.multiagent.store import (
+    InMemory_Multi_Agent_Run_Store,
+    Multi_Agent_Run_Store,
+)
+from agentforge.multiagent.streaming import Multi_Agent_Streaming_Service
 from agentforge.streaming.sse import SSE_Streaming_Service
 from agentforge.tools.rag_tool import RAG_Tool
 from agentforge.tools.registry import Tool_Registry
@@ -398,3 +416,141 @@ def build_agent_context(
         streaming_service=streaming,
         orchestrator=orch,
     )
+
+
+
+# --- Multi-agent layer composition (Phase 4) --------------------------------------
+
+
+def build_approval_policy(settings: Settings) -> Approval_Policy:
+    """Return the configured Approval_Policy, defaulting to Auto_Approve_Policy (Req 5.7).
+
+    ``settings.approval_policy == "human"`` selects the human-in-the-loop policy;
+    everything else (``"auto"`` or an absent value) selects the keyless auto-approve
+    default so runs complete end-to-end without external human input.
+    """
+    if getattr(settings, "approval_policy", "auto") == "human":
+        return Human_In_The_Loop_Policy()
+    return Auto_Approve_Policy()
+
+
+def build_multi_agent_run_store(settings: Settings) -> Multi_Agent_Run_Store:
+    """Return the Multi_Agent_Run_Store: Postgres in production, in-memory otherwise.
+
+    Mirrors :func:`build_conversation_store` / :func:`build_trace_recorder`: the
+    in-memory default keeps standalone/keyless runs fully functional without a database;
+    the production profile persists to Postgres via ``Pg_Multi_Agent_Run_Store``.
+    """
+    if settings.profile == "production":
+        # Local import so the keyless in-memory path never depends on SQLAlchemy/psycopg.
+        from agentforge.multiagent.store import Pg_Multi_Agent_Run_Store
+
+        return Pg_Multi_Agent_Run_Store(settings.database_url)
+    return InMemory_Multi_Agent_Run_Store()
+
+
+@dataclass
+class MultiAgentContext:
+    """The wired multi-agent object graph the Phase 4 router depends on.
+
+    Built once at startup (or injected in tests). Reuses the existing :class:`AgentContext`
+    unchanged — the same wired ``Agent_Orchestrator`` powers every Agent_Role, so no new
+    reasoning implementation is introduced (Req 11.1).
+    """
+
+    agent: AgentContext
+    role_registry: Agent_Role_Registry
+    approval_policy: Approval_Policy
+    run_store: Multi_Agent_Run_Store
+    gate: Human_Approval_Gate
+    orchestrator: Multi_Agent_Orchestrator
+    streaming_service: Multi_Agent_Streaming_Service
+
+
+def build_multi_agent_context(
+    settings: Settings,
+    agent: AgentContext | None = None,
+    **overrides,
+) -> MultiAgentContext:
+    """Compose the Phase 4 multi-agent object graph.
+
+    Mirrors :func:`build_agent_context`: every collaborator may be injected via keyword
+    ``overrides`` (tests pass keyless in-memory doubles), and anything not injected is
+    built from the credential/profile-driven defaults. The four built-in roles are all
+    registered against the **same** existing ``Agent_Orchestrator`` from the reused
+    :class:`AgentContext` (Req 11.1), so no new reasoning loop is created here.
+
+    Supported ``overrides`` keys (all optional):
+
+    * ``role_registry`` — a pre-populated :class:`Agent_Role_Registry`.
+    * ``approval_policy`` — an :class:`Approval_Policy` (overrides the setting).
+    * ``run_store`` — a :class:`Multi_Agent_Run_Store` (typically the in-memory double).
+    * ``checkpoint_store`` — a :class:`Checkpoint_Store` for the approval gate.
+    * ``gate`` — a fully-built :class:`Human_Approval_Gate`.
+    * ``orchestrator`` — a fully-built :class:`Multi_Agent_Orchestrator`.
+    * ``streaming_service`` — a fully-built :class:`Multi_Agent_Streaming_Service`.
+    """
+    agent = agent or build_agent_context(settings)
+
+    registry: Agent_Role_Registry = overrides.get("role_registry") or _default_role_registry(
+        agent.orchestrator
+    )
+
+    policy: Approval_Policy = (
+        overrides.get("approval_policy") or build_approval_policy(settings)
+    )
+    run_store: Multi_Agent_Run_Store = (
+        overrides.get("run_store") or build_multi_agent_run_store(settings)
+    )
+
+    # The gate coordinates the in-process pause/resume via an in-memory Checkpoint_Store
+    # (Task 7 seam). The run_store's ``save_checkpoint`` records the durable audit trail
+    # separately per Task 10 — both are retained since they serve different concerns.
+    checkpoint_store: Checkpoint_Store = (
+        overrides.get("checkpoint_store") or Checkpoint_Store()
+    )
+    gate: Human_Approval_Gate = overrides.get("gate") or Human_Approval_Gate(
+        policy=policy,
+        store=checkpoint_store,
+        trace=agent.trace_recorder,
+    )
+
+    orchestrator: Multi_Agent_Orchestrator = overrides.get(
+        "orchestrator"
+    ) or Multi_Agent_Orchestrator(
+        registry=registry,
+        pipeline=DEFAULT_PIPELINE,
+        max_rounds=settings.max_rounds,
+        max_revisions=settings.max_revisions,
+        trace=agent.trace_recorder,
+        gate=gate,
+    )
+
+    streaming_service: Multi_Agent_Streaming_Service = overrides.get(
+        "streaming_service"
+    ) or Multi_Agent_Streaming_Service(orchestrator, gate=gate if _policy_is_human(policy) else None)
+
+    return MultiAgentContext(
+        agent=agent,
+        role_registry=registry,
+        approval_policy=policy,
+        run_store=run_store,
+        gate=gate,
+        orchestrator=orchestrator,
+        streaming_service=streaming_service,
+    )
+
+
+def _default_role_registry(agent_orchestrator: Agent_Orchestrator) -> Agent_Role_Registry:
+    """Register the four built-in roles against the SAME single-agent orchestrator (Req 11.1)."""
+    registry = Agent_Role_Registry()
+    registry.register(Planner_Agent(agent_orchestrator))
+    registry.register(Researcher_Agent(agent_orchestrator))
+    registry.register(Writer_Agent(agent_orchestrator))
+    registry.register(Critic_Agent(agent_orchestrator))
+    return registry
+
+
+def _policy_is_human(policy: Approval_Policy) -> bool:
+    """Return whether the approval policy requires pausing (needs a gate on the stream)."""
+    return isinstance(policy, Human_In_The_Loop_Policy)
