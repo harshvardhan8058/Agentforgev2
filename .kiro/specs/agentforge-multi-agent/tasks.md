@@ -313,7 +313,7 @@ is exercised with injected `Approval_Decision`s (no real human).
     - Ensure the decisions doc renders and all wired components import cleanly. Ensure all
       tests pass, ask the user if questions arise.
 
-- [ ] 14. Final full-suite checkpoint (leave unchecked for the user)
+- [x] 14. Final full-suite checkpoint (leave unchecked for the user)
   - Run the documented test command with no external credentials configured and confirm all
     16 property tests plus unit/integration tests pass keyless (Fallback_Provider + disabled
     Web_Search_Tool + Auto_Approve_Policy; human-in-the-loop via injected decisions). Ensure
