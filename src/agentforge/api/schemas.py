@@ -7,9 +7,13 @@ routers that use them are wired in later tasks.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from agentforge.enterprise.rbac import Role as RbacRole
 
 
 # --- error envelope ---
@@ -184,3 +188,114 @@ class MultiAgentRunResult(BaseModel):
     termination_reason: TerminationReasonName | None = None
     final_output: FinalOutputModel | None = None
     trace: list[TraceEntryModel] = Field(default_factory=list)
+
+
+
+# --- enterprise: authentication (Phase 5) -----------------------------------------
+
+
+class RegisterSelfRequest(BaseModel):
+    """Self-registration body: bootstraps a new Organization + owner User (Req 1.1)."""
+
+    email: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+    org_name: str = Field(..., min_length=1)
+
+
+class LoginRequest(BaseModel):
+    """Login body: verifies credentials to issue an Access_Token (Req 1.2, 1.3)."""
+
+    email: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+
+
+class TokenResponse(BaseModel):
+    """A freshly-issued bearer Access_Token (Req 1.2)."""
+
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+
+
+# --- enterprise: organizations, members, teams (Phase 5) --------------------------
+
+
+class CreateOrgRequest(BaseModel):
+    """Body for ``POST /orgs`` — an authenticated user creates an org they own."""
+
+    name: str = Field(..., min_length=1)
+
+
+class CreateOrgResponse(BaseModel):
+    """Response carrying the newly-created Org_Id (Req 2.1)."""
+
+    org_id: UUID
+
+
+class AddMemberRequest(BaseModel):
+    """Body for ``POST /orgs/{id}/members`` — add an existing user under a Role (Req 2.2)."""
+
+    email: str = Field(..., min_length=1)
+    role: RbacRole
+
+
+class AddMemberResponse(BaseModel):
+    """Response describing the persisted Membership (Req 2.2)."""
+
+    user_id: UUID
+    org_id: UUID
+    role: RbacRole
+
+
+class CreateTeamRequest(BaseModel):
+    """Body for ``POST /orgs/{id}/teams`` — create an org-scoped Team (Req 2.3)."""
+
+    name: str = Field(..., min_length=1)
+
+
+class CreateTeamResponse(BaseModel):
+    """Response carrying the newly-created Team id (Req 2.3)."""
+
+    team_id: UUID
+    name: str
+
+
+class AddTeamMemberRequest(BaseModel):
+    """Body for ``POST /orgs/{id}/teams/{tid}/members`` — add a user by email (Req 2.4)."""
+
+    email: str = Field(..., min_length=1)
+
+
+class AddTeamMemberResponse(BaseModel):
+    """Response describing the persisted Team_Membership (Req 2.4)."""
+
+    team_id: UUID
+    user_id: UUID
+
+
+# --- enterprise: API keys (Phase 5) -----------------------------------------------
+
+
+class CreateApiKeyRequest(BaseModel):
+    """Body for ``POST /orgs/{id}/api-keys`` — issue a key granting ``role`` (Req 5.1)."""
+
+    role: RbacRole
+
+
+class CreateApiKeyResponse(BaseModel):
+    """Creation response carrying the plaintext secret **exactly once** (Req 5.1, 5.2)."""
+
+    api_key_id: UUID
+    secret: str
+    role: RbacRole
+    key_prefix: str
+
+
+class ApiKeyMetadata(BaseModel):
+    """Safe API-key metadata — never the ``key_hash`` or the plaintext secret (Req 5.4)."""
+
+    id: UUID
+    org_id: UUID
+    role: RbacRole
+    key_prefix: str
+    revoked_at: datetime | None = None
+    created_at: datetime

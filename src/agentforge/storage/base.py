@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
+from uuid import UUID
 
 from agentforge.models.domain import Chunk, Document
 
@@ -37,24 +38,30 @@ class DocumentListing:
 
 
 class DocumentStore(Protocol):
-    """Relational persistence port for documents and their chunks."""
+    """Relational persistence port for documents and their chunks.
 
-    def persist(self, document: Document, chunks: list[Chunk]) -> None:
-        """Atomically persist a document and its chunks."""
+    Every method is tenant-scoped: the leading ``org_id`` constrains the query so a
+    document (and its chunks, via the parent FK) can only ever be read or mutated within
+    its owning organization. Cross-tenant reads return ``None`` / empty and cross-tenant
+    mutations affect zero rows, so the router surfaces ``404`` — never a leak (Req 4.5, 4.6).
+    """
+
+    def persist(self, org_id: UUID, document: Document, chunks: list[Chunk]) -> None:
+        """Atomically persist a document (owned by ``org_id``) and its chunks (Req 4.4)."""
         ...
 
-    def get_chunk_texts(self, chunk_ids: list[str]) -> dict[str, str]:
-        """Return a mapping of ``chunk_id -> content`` for the given ids."""
+    def get_chunk_texts(self, org_id: UUID, chunk_ids: list[str]) -> dict[str, str]:
+        """Return ``chunk_id -> content`` for chunks whose parent document is ``org_id``'s."""
         ...
 
-    def list_documents(self) -> list[DocumentListing]:
-        """Return a summary of all stored documents."""
+    def list_documents(self, org_id: UUID) -> list[DocumentListing]:
+        """Return a summary of ``org_id``'s documents only (Req 4.2)."""
         ...
 
-    def get_document(self, document_id: str) -> Document | None:
-        """Return a document by id, or ``None`` if unknown."""
+    def get_document(self, org_id: UUID, document_id: str) -> Document | None:
+        """Return ``org_id``'s document by id, or ``None`` (incl. cross-tenant) (Req 4.3)."""
         ...
 
-    def delete_document(self, document_id: str) -> None:
-        """Delete a document and cascade to its chunks."""
+    def delete_document(self, org_id: UUID, document_id: str) -> None:
+        """Delete the document iff it belongs to ``org_id`` (else a no-op) (Req 4.3)."""
         ...

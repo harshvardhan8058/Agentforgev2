@@ -31,6 +31,7 @@ from agentforge.storage.memory_store import InMemoryDocumentStore
 from agentforge.tracing.recorder import InMemory_Trace_Recorder
 from agentforge.vectorstore.chroma_store import Chroma_Store
 
+from tests.enterprise_helpers import install_enterprise_auth
 from tests.fakes import DeterministicFakeEmbeddings
 
 _DIM = 8
@@ -65,7 +66,8 @@ def client() -> TestClient:
     app = create_app(settings)
     app.state.app_context = app_ctx
     app.state.agent_context = agent_ctx
-    return TestClient(app, raise_server_exceptions=False)
+    headers, _org_id, _ctx = install_enterprise_auth(app, settings)
+    return TestClient(app, headers=headers, raise_server_exceptions=False)
 
 
 def _ingest(client: TestClient) -> None:

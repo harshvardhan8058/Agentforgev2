@@ -15,6 +15,8 @@ Deleting a document cascades to its chunks (and embeddings) via the schema's
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
@@ -37,18 +39,20 @@ class DBDocumentStore:
             _to_sqlalchemy_sync_dsn(database_url), future=True, pool_pre_ping=True
         )
 
-    def persist(self, document: Document, chunks: list[Chunk]) -> None:
+    def persist(self, org_id: UUID, document: Document, chunks: list[Chunk]) -> None:
         with self._engine.begin() as conn:
             conn.execute(
                 text(
                     """
                     INSERT INTO documents
-                        (id, filename, content_type, size_bytes, status, created_at)
-                    VALUES (:id, :filename, :content_type, :size_bytes, :status, :created_at)
+                        (id, org_id, filename, content_type, size_bytes, status, created_at)
+                    VALUES (:id, :org_id, :filename, :content_type, :size_bytes, :status,
+                            :created_at)
                     """
                 ),
                 {
                     "id": document.id,
+                    "org_id": str(org_id),
                     "filename": document.filename,
                     "content_type": document.content_type,
                     "size_bytes": document.size_bytes,
@@ -73,17 +77,26 @@ class DBDocumentStore:
                     },
                 )
 
-    def get_chunk_texts(self, chunk_ids: list[str]) -> dict[str, str]:
+    def get_chunk_texts(self, org_id: UUID, chunk_ids: list[str]) -> dict[str, str]:
         if not chunk_ids:
             return {}
+        # Chunks inherit tenancy through their parent document: join and filter by the
+        # document's org_id so cross-tenant chunk ids never resolve to text (Req 4.6).
         with self._engine.connect() as conn:
             rows = conn.execute(
-                text("SELECT id, content FROM chunks WHERE id = ANY(:ids)"),
-                {"ids": list(chunk_ids)},
+                text(
+                    """
+                    SELECT c.id, c.content
+                    FROM chunks c
+                    JOIN documents d ON d.id = c.document_id
+                    WHERE c.id = ANY(:ids) AND d.org_id = :org_id
+                    """
+                ),
+                {"ids": list(chunk_ids), "org_id": str(org_id)},
             ).fetchall()
         return {str(r[0]): r[1] for r in rows}
 
-    def list_documents(self) -> list[DocumentListing]:
+    def list_documents(self, org_id: UUID) -> list[DocumentListing]:
         with self._engine.connect() as conn:
             rows = conn.execute(
                 text(
@@ -92,10 +105,12 @@ class DBDocumentStore:
                            d.created_at, count(c.id) AS chunk_count
                     FROM documents d
                     LEFT JOIN chunks c ON c.document_id = d.id
+                    WHERE d.org_id = :org_id
                     GROUP BY d.id
                     ORDER BY d.created_at DESC
                     """
-                )
+                ),
+                {"org_id": str(org_id)},
             ).fetchall()
         return [
             DocumentListing(
@@ -110,16 +125,16 @@ class DBDocumentStore:
             for r in rows
         ]
 
-    def get_document(self, document_id: str) -> Document | None:
+    def get_document(self, org_id: UUID, document_id: str) -> Document | None:
         with self._engine.connect() as conn:
             row = conn.execute(
                 text(
                     """
                     SELECT id, filename, content_type, size_bytes, status, created_at
-                    FROM documents WHERE id = :id
+                    FROM documents WHERE id = :id AND org_id = :org_id
                     """
                 ),
-                {"id": document_id},
+                {"id": document_id, "org_id": str(org_id)},
             ).one_or_none()
         if row is None:
             return None
@@ -132,8 +147,9 @@ class DBDocumentStore:
             created_at=row[5],
         )
 
-    def delete_document(self, document_id: str) -> None:
+    def delete_document(self, org_id: UUID, document_id: str) -> None:
         with self._engine.begin() as conn:
             conn.execute(
-                text("DELETE FROM documents WHERE id = :id"), {"id": document_id}
+                text("DELETE FROM documents WHERE id = :id AND org_id = :org_id"),
+                {"id": document_id, "org_id": str(org_id)},
             )

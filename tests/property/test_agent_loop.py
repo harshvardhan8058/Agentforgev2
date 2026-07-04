@@ -20,6 +20,8 @@ from agentforge.tools.base import Tool_Call, Tool_Interface, Tool_Result
 from agentforge.tools.registry import Tool_Registry
 from agentforge.tracing.recorder import InMemory_Trace_Recorder
 
+from agentforge.enterprise.tenancy import NIL_ORG_ID as ORG
+
 _TOOL_NAME = "loop_tool"
 
 
@@ -130,7 +132,7 @@ def test_iteration_counter_monotonic_increment_by_one(tool_steps):
     # contiguous, strictly increasing by exactly one, starting from 0 (the initial state).
     observed = [
         entry.detail["iteration_count"]
-        for entry in trace.get_trace(state.run_id).entries
+        for entry in trace.get_trace(ORG, state.run_id).entries
         if entry.step_type == "observe"
     ]
     assert observed == list(range(1, tool_steps + 1))

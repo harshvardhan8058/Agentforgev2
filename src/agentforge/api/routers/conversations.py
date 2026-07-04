@@ -15,7 +15,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, status
 from fastapi.concurrency import run_in_threadpool
 
-from agentforge.api.deps import get_conversation_store
+from agentforge.api.deps import get_conversation_store, require_permission
 from agentforge.api.errors import AppError
 from agentforge.api.schemas import (
     AppendMessageRequest,
@@ -24,6 +24,8 @@ from agentforge.api.schemas import (
     MessageModel,
 )
 from agentforge.conversation.base import Conversation_Store
+from agentforge.enterprise.models import Principal
+from agentforge.enterprise.rbac import Permission
 
 router = APIRouter(tags=["conversations"])
 
@@ -35,9 +37,10 @@ router = APIRouter(tags=["conversations"])
 )
 async def create_conversation(
     store: Conversation_Store = Depends(get_conversation_store),
+    principal: Principal = Depends(require_permission(Permission.READ)),
 ) -> CreateConversationResponse:
-    """Create a conversation with a unique id (Req 8.1)."""
-    conversation_id = await run_in_threadpool(store.create)
+    """Create a conversation owned by the caller's org (Req 8.1, 4.4)."""
+    conversation_id = await run_in_threadpool(store.create, principal.org_id)
     return CreateConversationResponse(conversation_id=conversation_id)
 
 
@@ -50,10 +53,11 @@ async def append_message(
     conversation_id: str,
     payload: AppendMessageRequest,
     store: Conversation_Store = Depends(get_conversation_store),
+    principal: Principal = Depends(require_permission(Permission.READ)),
 ) -> MessageModel:
     """Append a message with the next ordinal, auto-creating an unknown id (Req 8.2, 8.4)."""
     message = await run_in_threadpool(
-        store.append, conversation_id, payload.role, payload.content
+        store.append, principal.org_id, conversation_id, payload.role, payload.content
     )
     return MessageModel(
         role=message.role, content=message.content, position=message.position
@@ -67,16 +71,17 @@ async def append_message(
 async def get_conversation(
     conversation_id: str,
     store: Conversation_Store = Depends(get_conversation_store),
+    principal: Principal = Depends(require_permission(Permission.READ)),
 ) -> ConversationHistoryResponse:
-    """Return the conversation history ordered by position; 404 when unknown (Req 8.3)."""
-    exists = await run_in_threadpool(store.exists, conversation_id)
+    """Return the conversation history ordered by position; 404 when unknown/cross-tenant (Req 8.3, 4.3)."""
+    exists = await run_in_threadpool(store.exists, principal.org_id, conversation_id)
     if not exists:
         raise AppError(
             "not_found",
             f"conversation {conversation_id!r} was not found",
             status.HTTP_404_NOT_FOUND,
         )
-    messages = await run_in_threadpool(store.history, conversation_id)
+    messages = await run_in_threadpool(store.history, principal.org_id, conversation_id)
     return ConversationHistoryResponse(
         conversation_id=conversation_id,
         messages=[

@@ -25,6 +25,7 @@ from agentforge.api.deps import (
     get_orchestrator,
     get_streaming_service,
     get_trace_recorder,
+    require_permission,
 )
 from agentforge.api.errors import AppError
 from agentforge.api.schemas import (
@@ -35,6 +36,8 @@ from agentforge.api.schemas import (
     TraceResponse,
 )
 from agentforge.conversation.base import Conversation_Store
+from agentforge.enterprise.models import Principal
+from agentforge.enterprise.rbac import Permission
 from agentforge.streaming.base import AgentRunInput
 from agentforge.streaming.sse import SSE_Streaming_Service
 from agentforge.tracing.base import Trace_Recorder
@@ -42,9 +45,11 @@ from agentforge.tracing.base import Trace_Recorder
 router = APIRouter(tags=["agent"])
 
 
-def _resolve_conversation(store: Conversation_Store, conversation_id: str | None) -> str:
-    """Return the target conversation id, creating a new one when none is supplied."""
-    return conversation_id or store.create()
+def _resolve_conversation(
+    store: Conversation_Store, org_id, conversation_id: str | None
+) -> str:
+    """Return the target conversation id, creating one in ``org_id`` when none is supplied."""
+    return conversation_id or store.create(org_id)
 
 
 @router.post("/agent/run", response_model=AgentRunResponse)
@@ -52,20 +57,23 @@ async def run_agent(
     payload: AgentRunRequest,
     orchestrator: Agent_Orchestrator = Depends(get_orchestrator),
     store: Conversation_Store = Depends(get_conversation_store),
+    principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> AgentRunResponse:
     """Run the bounded agent loop and return its grounded result (Req 1.7, 8.5)."""
 
+    org_id = principal.org_id
+
     def _run() -> AgentRunResponse:
-        conversation_id = _resolve_conversation(store, payload.conversation_id)
-        store.append(conversation_id, "user", payload.message)
-        context = store.history(conversation_id)
+        conversation_id = _resolve_conversation(store, org_id, payload.conversation_id)
+        store.append(org_id, conversation_id, "user", payload.message)
+        context = store.history(org_id, conversation_id)
 
         state = orchestrator.run(
-            payload.message, context, conversation_id=conversation_id
+            payload.message, context, conversation_id=conversation_id, org_id=org_id
         )
         answer = state.final_answer or ""
         # Persist the final assistant message on completion (Req 8.5).
-        store.append(conversation_id, "assistant", answer)
+        store.append(org_id, conversation_id, "assistant", answer)
 
         return AgentRunResponse(
             run_id=state.run_id,
@@ -89,18 +97,21 @@ async def stream_agent(
     payload: AgentRunRequest,
     streaming: SSE_Streaming_Service = Depends(get_streaming_service),
     store: Conversation_Store = Depends(get_conversation_store),
+    principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> StreamingResponse:
-    """Stream the agent run over Server-Sent Events (Req 9.1-9.9)."""
+    """Stream the agent run over Server-Sent Events, scoped to the caller's org (Req 9.1-9.9)."""
+    org_id = principal.org_id
     conversation_id = await run_in_threadpool(
-        _resolve_conversation, store, payload.conversation_id
+        _resolve_conversation, store, org_id, payload.conversation_id
     )
-    await run_in_threadpool(store.append, conversation_id, "user", payload.message)
-    context = await run_in_threadpool(store.history, conversation_id)
+    await run_in_threadpool(store.append, org_id, conversation_id, "user", payload.message)
+    context = await run_in_threadpool(store.history, org_id, conversation_id)
 
     run_input = AgentRunInput(
         message=payload.message,
         conversation_id=conversation_id,
         conversation_context=context,
+        org_id=org_id,
     )
     return StreamingResponse(
         streaming.iter_sse_frames(run_input),
@@ -112,9 +123,10 @@ async def stream_agent(
 async def get_run_trace(
     run_id: str,
     recorder: Trace_Recorder = Depends(get_trace_recorder),
+    principal: Principal = Depends(require_permission(Permission.READ)),
 ) -> TraceResponse:
-    """Return the ordered trace for a run; 404 via the envelope when unknown (Req 10.3)."""
-    trace = await run_in_threadpool(recorder.get_trace, run_id)
+    """Return the ordered trace for the caller's org run; 404 when unknown/cross-tenant (Req 10.3, 4.3)."""
+    trace = await run_in_threadpool(recorder.get_trace, principal.org_id, run_id)
     if not trace.entries:
         raise AppError(
             "not_found",

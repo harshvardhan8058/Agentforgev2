@@ -16,9 +16,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Response, status
 from fastapi.concurrency import run_in_threadpool
 
-from agentforge.api.deps import get_document_store, get_vector_store
+from agentforge.api.deps import get_document_store, get_vector_store, require_permission
 from agentforge.api.errors import AppError
 from agentforge.api.schemas import DocumentSummary
+from agentforge.enterprise.models import Principal
+from agentforge.enterprise.rbac import Permission
 from agentforge.storage.base import DocumentStore
 from agentforge.vectorstore.base import Vector_Store
 
@@ -28,9 +30,10 @@ router = APIRouter(tags=["documents"])
 @router.get("/documents", response_model=list[DocumentSummary])
 async def list_documents(
     store: DocumentStore = Depends(get_document_store),
+    principal: Principal = Depends(require_permission(Permission.READ)),
 ) -> list[DocumentSummary]:
-    """Return a summary of all stored documents."""
-    listings = await run_in_threadpool(store.list_documents)
+    """Return a summary of the caller's org documents (Req 4.2)."""
+    listings = await run_in_threadpool(store.list_documents, principal.org_id)
     return [
         DocumentSummary(
             document_id=item.document_id,
@@ -50,9 +53,14 @@ async def delete_document(
     document_id: str,
     store: DocumentStore = Depends(get_document_store),
     vector_store: Vector_Store = Depends(get_vector_store),
+    principal: Principal = Depends(require_permission(Permission.INGEST_DOCUMENTS)),
 ) -> Response:
-    """Delete a document and cascade to its chunks and embeddings."""
-    existing = await run_in_threadpool(store.get_document, document_id)
+    """Delete the caller's org document and cascade to its chunks and embeddings.
+
+    A document owned by another tenant is indistinguishable from a missing one — the
+    org-scoped ``get_document`` returns ``None`` and the caller receives ``404`` (Req 4.3).
+    """
+    existing = await run_in_threadpool(store.get_document, principal.org_id, document_id)
     if existing is None:
         raise AppError(
             "not_found",
@@ -61,7 +69,7 @@ async def delete_document(
         )
 
     # Cascade: relational rows (documents -> chunks) and vector-store embeddings.
-    await run_in_threadpool(store.delete_document, document_id)
+    await run_in_threadpool(store.delete_document, principal.org_id, document_id)
     await run_in_threadpool(vector_store.delete_document, document_id)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)

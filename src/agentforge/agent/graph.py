@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from agentforge.agent.selection import Selection_Strategy
 from agentforge.agent.state import AgentState, Observation, TerminationReason
+from agentforge.enterprise.tenancy import current_org
 from agentforge.tools.base import ToolError
 from agentforge.tools.registry import Tool_Registry
 from agentforge.tracing.base import Trace_Recorder
@@ -262,9 +263,14 @@ class Agent_Graph_Nodes:
         outcome: str | None = None,
         detail: dict | None = None,
     ) -> None:
-        """Record an Agent_Step in the Trace when a recorder is configured (Req 10.1)."""
+        """Record an Agent_Step in the Trace when a recorder is configured (Req 10.1).
+
+        The trace entry is scoped to the tenant in force for the run (Req 4.6); its parent
+        Agent_Run inherits that ``org_id`` when the recorder auto-creates the run row.
+        """
         if self._trace is not None:
             self._trace.record(
+                current_org(),
                 state.run_id,
                 step_type,
                 tool_name=tool_name,

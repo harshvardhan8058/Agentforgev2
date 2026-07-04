@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from uuid import UUID
 
 
 @dataclass
@@ -38,6 +39,7 @@ class Trace_Recorder(ABC):
     @abstractmethod
     def record(
         self,
+        org_id: UUID,
         run_id: str,
         step_type: str,
         *,
@@ -45,10 +47,14 @@ class Trace_Recorder(ABC):
         outcome: str | None = None,
         detail: dict | None = None,
     ) -> Trace_Entry:
-        """Append a Trace entry with the next ordinal for the run (Req 10.1, 10.2)."""
+        """Append a Trace entry (owned by ``org_id``) with the next ordinal (Req 10.1, 10.2).
+
+        The trace entry inherits tenancy through its parent Agent_Run, whose ``org_id`` is
+        set here on first use so the run and its trace are scoped to the same tenant.
+        """
         raise NotImplementedError
 
     @abstractmethod
-    def get_trace(self, run_id: str) -> Trace:
-        """Return the ordered Trace for a run (Req 10.3, 10.4)."""
+    def get_trace(self, org_id: UUID, run_id: str) -> Trace:
+        """Return ``org_id``'s Trace for the run; empty when unknown/cross-tenant (Req 10.3)."""
         raise NotImplementedError

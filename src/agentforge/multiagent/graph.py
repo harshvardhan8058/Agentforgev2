@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 
+from agentforge.enterprise.tenancy import current_org
 from agentforge.multiagent.models import Final_Output, Termination_Reason
 from agentforge.multiagent.roles.base import Agent_Role_Interface, Agent_Role_Registry
 from agentforge.multiagent.state import Blackboard_State
@@ -64,9 +65,10 @@ def _is_revision_entry(state: Blackboard_State) -> bool:
 
 
 def _record_step(trace: Trace_Recorder | None, run_id: str, role_id: str) -> None:
-    """Record a role-attributed Trace entry for a role step (Req 6.1)."""
+    """Record a role-attributed Trace entry for a role step (Req 6.1), tenant-scoped."""
     if trace is not None:
         trace.record(
+            current_org(),
             run_id,
             f"role:{role_id}",
             detail={"role_id": role_id, "checkpoint": None},

@@ -55,6 +55,7 @@ class SSE_Streaming_Service:
                 run_input.message,
                 run_input.conversation_context,
                 conversation_id=run_input.conversation_id,
+                org_id=run_input.org_id,
             )
             # Drive the generator manually so its returned final state is captured from
             # StopIteration.value while each yielded event is forwarded with a sequence.
@@ -70,7 +71,7 @@ class SSE_Streaming_Service:
                 yield event
 
             answer = (final_state.final_answer or "") if final_state else ""
-            self._persist_final_answer(final_state, answer)
+            self._persist_final_answer(final_state, answer, run_input.org_id)
             yield StreamEvent(
                 type=StreamEventType.COMPLETION,
                 data={
@@ -102,7 +103,7 @@ class SSE_Streaming_Service:
         for event in self.run_stream(run_input):
             yield format_sse_frame(event)
 
-    def _persist_final_answer(self, final_state, answer: str) -> None:
+    def _persist_final_answer(self, final_state, answer: str, org_id) -> None:
         """Persist the final assistant message when a store and conversation exist (Req 8.5)."""
         if (
             self._conversation_store is not None
@@ -110,5 +111,5 @@ class SSE_Streaming_Service:
             and final_state.conversation_id
         ):
             self._conversation_store.append(
-                final_state.conversation_id, "assistant", answer
+                org_id, final_state.conversation_id, "assistant", answer
             )

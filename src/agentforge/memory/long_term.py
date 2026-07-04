@@ -21,6 +21,7 @@ from __future__ import annotations
 import uuid
 
 from agentforge.embeddings.base import Embedding_Provider
+from agentforge.enterprise.tenancy import NIL_ORG_ID
 from agentforge.memory.base import MemoryEntry
 from agentforge.vectorstore.base import Vector_Store
 
@@ -53,13 +54,15 @@ class Long_Term_Memory:
             return f"{self._namespace_prefix}:{conversation_id}"
         return self._namespace_prefix
 
-    def persist_long_term(self, text: str, metadata: dict) -> str:
+    def persist_long_term(self, text: str, metadata: dict, *, org_id: object = None) -> str:
         """Embed ``text`` and upsert it into the Vector_Store; return the entry id (Req 7.1).
 
         Reuses the existing Embedding_Provider and Vector_Store — no embedding or vector
-        storage is reimplemented (Req 7.5).
+        storage is reimplemented (Req 7.5). The owning ``org_id`` is recorded in the
+        entry's ``metadata['org_id']`` so long-term records are tenant-scoped (Req 4.1).
         """
         metadata = dict(metadata or {})
+        metadata["org_id"] = str(org_id if org_id is not None else NIL_ORG_ID)
         entry_id = str(uuid.uuid4())
         embedding = self._embeddings.embed_text(text)
         self._store.upsert(
@@ -72,20 +75,24 @@ class Long_Term_Memory:
         )
         return entry_id
 
-    def retrieve_long_term(self, query: str, k: int) -> list[MemoryEntry]:
-        """Return ``min(k, stored_count)`` entries by descending similarity (Req 7.2-7.4).
+    def retrieve_long_term(
+        self, query: str, k: int, *, org_id: object = None
+    ) -> list[MemoryEntry]:
+        """Return ``min(k, stored_count)`` of ``org_id``'s entries by similarity (Req 7.2-7.4).
 
         Delegates ranking to ``Vector_Store.query`` and maps the ordered matches back to
-        their :class:`MemoryEntry` payloads; returns ``[]`` when ``k <= 0`` or nothing has
-        been stored (Req 7.4).
+        their :class:`MemoryEntry` payloads, keeping only entries owned by ``org_id`` so
+        long-term recall never crosses a tenant boundary (Req 4.2, 4.6); returns ``[]``
+        when ``k <= 0`` or nothing has been stored (Req 7.4).
         """
         if k <= 0 or not self._payload:
             return []
+        owner = str(org_id if org_id is not None else NIL_ORG_ID)
         embedding = self._embeddings.embed_text(query)
         matches = self._store.query(embedding, k)
         entries: list[MemoryEntry] = []
         for match in matches:
             entry = self._payload.get(match.chunk_id)
-            if entry is not None:
+            if entry is not None and entry.metadata.get("org_id") == owner:
                 entries.append(entry)
         return entries
