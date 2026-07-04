@@ -22,8 +22,13 @@ from agentforge.api.routers import conversations as conversations_router
 from agentforge.api.routers import documents as documents_router
 from agentforge.api.routers import health as health_router
 from agentforge.api.routers import ingest as ingest_router
+from agentforge.api.routers import multi_agent as multi_agent_router
 from agentforge.api.routers import query as query_router
-from agentforge.config.container import build_agent_context, build_app_context
+from agentforge.config.container import (
+    build_agent_context,
+    build_app_context,
+    build_multi_agent_context,
+)
 from agentforge.config.settings import Settings, load_settings
 from agentforge.db.engine import create_engine, create_session_factory
 from agentforge.db.migrations import run_migrations
@@ -84,6 +89,20 @@ async def lifespan(app: FastAPI):
             app.state.agent_context.orchestrator.iteration_limit,
         )
 
+    # 7. Compose the Phase 4 multi-agent object graph (registry with the four roles bound
+    #    to the same existing Agent_Orchestrator, approval policy + gate, run store, and
+    #    streaming service). Tests may pre-inject a keyless context, which is respected.
+    if getattr(app.state, "multi_agent_context", None) is None:
+        app.state.multi_agent_context = build_multi_agent_context(
+            settings, agent=app.state.agent_context
+        )
+        logger.info(
+            "Multi-agent context ready (approval_policy=%s, max_rounds=%s, max_revisions=%s)",
+            settings.approval_policy,
+            app.state.multi_agent_context.orchestrator.max_rounds,
+            app.state.multi_agent_context.orchestrator.max_revisions,
+        )
+
     try:
         yield
     finally:
@@ -119,6 +138,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Phase 3 agentic-layer routers.
     app.include_router(conversations_router.router)
     app.include_router(agent_router.router)
+    # Phase 4 multi-agent router.
+    app.include_router(multi_agent_router.router)
 
     return app
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 from fastapi import Request
 
 from agentforge.agent.orchestrator import Agent_Orchestrator
-from agentforge.config.container import AgentContext, AppContext
+from agentforge.config.container import AgentContext, AppContext, MultiAgentContext
 from agentforge.conversation.base import Conversation_Store
 from agentforge.ingestion.service import Ingestion_Service
 from agentforge.rag.service import RAG_Service
@@ -88,3 +88,21 @@ def get_trace_recorder(request: Request) -> Trace_Recorder:
 def get_streaming_service(request: Request) -> SSE_Streaming_Service:
     """Return the wired Streaming_Service."""
     return get_agent_context(request).streaming_service
+
+
+
+# --- Phase 4 multi-agent accessors ------------------------------------------------
+
+
+def get_multi_agent_context(request: Request) -> MultiAgentContext:
+    """Return the wired multi-agent context from ``app.state``.
+
+    Mirrors :func:`get_agent_context`: the composition root stores the wired
+    :class:`MultiAgentContext` on ``app.state.multi_agent_context`` at startup (or a test
+    pre-injects one). Routers depend on this accessor so the transport layer never
+    constructs the multi-agent object graph itself.
+    """
+    ctx = getattr(request.app.state, "multi_agent_context", None)
+    if ctx is None:  # pragma: no cover - defensive; startup always sets this
+        raise RuntimeError("Multi-agent context is not initialized")
+    return ctx

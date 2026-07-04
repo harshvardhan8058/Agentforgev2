@@ -111,6 +111,7 @@ class AgentRunResponse(BaseModel):
 class TraceEntryModel(BaseModel):
     ordinal: int
     step_type: str
+    role_id: str | None = None  # Phase 4: attributes multi-agent role steps (Req 6.1)
     tool_name: str | None = None
     outcome: str | None = None
 
@@ -118,3 +119,68 @@ class TraceEntryModel(BaseModel):
 class TraceResponse(BaseModel):
     run_id: str
     entries: list[TraceEntryModel] = Field(default_factory=list)
+
+
+
+# --- multi-agent (Phase 4) --------------------------------------------------------
+
+MultiAgentRunStatus = Literal["running", "awaiting_approval", "terminated"]
+
+TerminationReasonName = Literal[
+    "completed",
+    "max-rounds-reached",
+    "max-revisions-reached",
+    "rejected",
+    "aborted",
+]
+
+
+class StartMultiAgentRunRequest(BaseModel):
+    """Request body for starting a Multi_Agent_Run (Req 9.1)."""
+
+    task: str = Field(..., min_length=1)
+    conversation_id: str | None = None
+
+
+class StartMultiAgentRunResponse(BaseModel):
+    """Response for :class:`StartMultiAgentRunRequest` (Req 9.1)."""
+
+    run_id: str
+    conversation_id: str
+    status: MultiAgentRunStatus
+
+
+ApprovalDecisionKind = Literal["approve", "reject", "edit"]
+
+
+class ApprovalDecisionRequest(BaseModel):
+    """Body for :func:`submit_approval` — a human decision on a paused run (Req 9.3)."""
+
+    type: ApprovalDecisionKind
+    feedback: str | None = None
+    edited_content: str | None = None
+
+
+class ApprovalDecisionResponse(BaseModel):
+    """Response after applying an Approval_Decision to a paused run (Req 9.3)."""
+
+    run_id: str
+    status: MultiAgentRunStatus
+    termination_reason: TerminationReasonName | None = None
+
+
+class FinalOutputModel(BaseModel):
+    """The Final_Output emitted when a Multi_Agent_Run terminates successfully."""
+
+    content: str
+    citations: list[CitationModel] = Field(default_factory=list)
+
+
+class MultiAgentRunResult(BaseModel):
+    """Full run result: status, termination reason, final output, and trace (Req 9.4)."""
+
+    run_id: str
+    status: MultiAgentRunStatus
+    termination_reason: TerminationReasonName | None = None
+    final_output: FinalOutputModel | None = None
+    trace: list[TraceEntryModel] = Field(default_factory=list)
