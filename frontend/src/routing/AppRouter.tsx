@@ -25,6 +25,8 @@ import { ApiKeysView } from "../features/orgs/ApiKeysView";
 import { RagQueryView } from "../features/query/RagQueryView";
 import { DocumentListView } from "../features/documents/DocumentListView";
 import { SingleAgentRunView } from "../features/agent/SingleAgentRunView";
+import { MultiAgentRunView } from "../features/multiAgent/MultiAgentRunView";
+import { ConversationView } from "../features/conversations/ConversationView";
 
 function UnauthenticatedRedirectBridge(): null {
   const navigate = useNavigate();
@@ -47,6 +49,9 @@ export function AppRouter(): JSX.Element {
           <Route path="/query" element={<RagQueryView />} />
           <Route path="/documents" element={<DocumentListView />} />
           <Route path="/agents" element={<SingleAgentRunView />} />
+          <Route path="/multi-agent" element={<MultiAgentRunView />} />
+          <Route path="/conversations" element={<ConversationView />} />
+          <Route path="/conversations/:id" element={<ConversationView />} />
           <Route path="/members" element={<MembersView />} />
           <Route path="/api-keys" element={<ApiKeysView />} />
           <Route path="*" element={<DashboardView />} />

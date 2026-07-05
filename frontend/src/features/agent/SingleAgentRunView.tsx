@@ -30,6 +30,7 @@ import {
 } from "../../api/sse/singleAgentReducer";
 import { can } from "../../auth/rbac";
 import { useSession } from "../../auth/useSession";
+import { useConversation } from "../conversations/ConversationContext";
 import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
@@ -88,6 +89,7 @@ function CitationList({ citations }: { citations: readonly Citation[] }): JSX.El
 
 export function SingleAgentRunView(): JSX.Element {
   const { role } = useSession();
+  const { conversationId, setActiveConversation } = useConversation();
   const permitted = role !== null && can(role, "run_agents");
 
   const [message, setMessage] = useState("");
@@ -102,9 +104,21 @@ export function SingleAgentRunView(): JSX.Element {
   const nonStreaming = useMutation<AgentRunResponse, ClientError, void>({
     mutationFn: () =>
       runRequest<AgentRunResponse>(() =>
-        apiClient.POST("/agent/run", { body: { message: message.trim() } }),
+        apiClient.POST("/agent/run", {
+          // Thread the retained conversation id, when active (Req 15.2).
+          body: {
+            message: message.trim(),
+            conversation_id: conversationId ?? undefined,
+          },
+        }),
       ),
-    onSuccess: (data) => setTraceRunId(data.run_id),
+    onSuccess: (data) => {
+      setTraceRunId(data.run_id);
+      // Retain the run's conversation for subsequent runs (Req 15.1, 15.2).
+      if (typeof data.conversation_id === "string") {
+        setActiveConversation(data.conversation_id);
+      }
+    },
   });
 
   const trimmed = message.trim();
@@ -115,7 +129,11 @@ export function SingleAgentRunView(): JSX.Element {
   function startStreaming(): void {
     if (trimmed.length === 0) return;
     setTraceRunId(null);
-    stream.start("/agent/stream", { message: trimmed });
+    // Thread the retained conversation id, when active (Req 15.2).
+    stream.start("/agent/stream", {
+      message: trimmed,
+      conversation_id: conversationId ?? undefined,
+    });
   }
 
   // Capture the run_id from a streamed completion for the trace view.

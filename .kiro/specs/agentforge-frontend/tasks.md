@@ -564,7 +564,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     against MSW (including simulated `text/event-stream`), with the RBAC gate omitting
     unauthorized controls. Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 21. Implement the multi-agent run + approval view (`features/multiAgent/`)
+- [x] 21. Implement the multi-agent run + approval view (`features/multiAgent/`)
   - Implement `MultiAgentRunView`: start via `POST /multi-agent/runs` showing `run_id`/
     `conversation_id`/`status`; open `POST /multi-agent/runs/{id}/stream` via `useSseRun`
     with the multi-agent reducer, attributing events to `role_id` and ordering by `sequence`;
@@ -599,7 +599,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: SSE Handling (multiAgentReducer), Endpoint-to-view interface map (Multi-agent), Error Handling (409 row)_
   - _Design: Premium UX & Design System §3 (animated multi-agent workflow visualization, approval checkpoint as first-class non-terminal moment), §1 (agent-role accent tokens), §4 (reduced-motion, virtualization, 60fps transforms/opacity), §5 (keyboard operability of the approval panel)_
 
-  - [ ]* 21.1 Write component/integration tests for multi-agent run + approval (MSW SSE)
+  - [x]* 21.1 Write component/integration tests for multi-agent run + approval (MSW SSE)
     - Cover start fields (10.1); role-attributed sequence-ordered events (10.2); approval
       checkpoint offers approve/reject/edit (10.3); approval submit + response (10.4);
       completion renders output + citations (10.5); run result + trace (10.6); `404`
@@ -730,7 +730,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       run detail (14.4); cross-org `404` not-found (14.5).
     - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 14.1, 14.2, 14.3, 14.4, 14.5_
 
-- [ ] 25. Implement the conversation context for runs (`features/conversations/`)
+- [x] 25. Implement the conversation context for runs (`features/conversations/`)
   - Implement `ConversationView` + a conversation-context hook: `POST /conversations`
     retaining the returned `conversation_id`; include the retained `conversation_id` in
     subsequent single-agent and multi-agent run requests; `GET /conversations/{id}`
@@ -739,7 +739,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 15.1, 15.2, 15.3, 15.4_
   - _Design: Endpoint-to-view interface map (Conversations), Error Handling (404 row)_
 
-  - [ ]* 25.1 Write component tests for conversation context (MSW)
+  - [x]* 25.1 Write component tests for conversation context (MSW)
     - Cover create + retain id (15.1); run request includes `conversation_id` (15.2);
       history ordered by position (15.3); `404` not-found (15.4).
     - _Requirements: 15.1, 15.2, 15.3, 15.4_

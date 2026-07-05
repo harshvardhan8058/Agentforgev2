@@ -1,6 +1,7 @@
 import { SessionProvider } from "./auth/SessionProvider";
 import { AppRouter } from "./routing/AppRouter";
 import { CommandLayer } from "./components/command/CommandLayer";
+import { ConversationProvider } from "./features/conversations/ConversationContext";
 
 /**
  * Layout shell + router mount.
@@ -13,10 +14,12 @@ import { CommandLayer } from "./components/command/CommandLayer";
 export default function App(): JSX.Element {
   return (
     <SessionProvider>
-      <div className="app-shell" data-testid="app-root">
-        <AppRouter />
-        <CommandLayer />
-      </div>
+      <ConversationProvider>
+        <div className="app-shell" data-testid="app-root">
+          <AppRouter />
+          <CommandLayer />
+        </div>
+      </ConversationProvider>
     </SessionProvider>
   );
 }
