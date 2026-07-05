@@ -89,8 +89,8 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       regenerates `schema.d.ts` deterministically from the backend schema.
     - _Requirements: 1.2, 1.3_
 
-- [ ] 3. Implement the pure auth logic layer (`auth/token.ts`, `auth/rbac.ts`)
-  - [ ] 3.1 Implement `decodeClaims(token)` and `isExpired(claims, nowSeconds)` (`auth/token.ts`)
+- [x] 3. Implement the pure auth logic layer (`auth/token.ts`, `auth/rbac.ts`)
+  - [x] 3.1 Implement `decodeClaims(token)` and `isExpired(claims, nowSeconds)` (`auth/token.ts`)
     - `decodeClaims` decodes a JWT payload and returns a `Claims` (`sub`, `org_id`, `role`,
       `exp`) for a well-formed token carrying all four correctly-typed claims, and returns
       `null` (never throws) for any malformed/undecodable token or any missing/mistyped
@@ -98,34 +98,34 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 3.1, 3.2, 2.1, 2.3_
     - _Design: Pure logic modules (`auth/token.ts`)_
 
-  - [ ] 3.2 Implement `ROLE_PERMISSIONS` and `can(role, permission)` (`auth/rbac.ts`)
+  - [x] 3.2 Implement `ROLE_PERMISSIONS` and `can(role, permission)` (`auth/rbac.ts`)
     - Mirror the backend `enterprise/rbac.py` map exactly: `viewer = {read}`,
       `member = viewer ∪ {run_agents, ingest_documents}`, `admin = member ∪ {manage_api_keys}`,
       `owner = admin ∪ {manage_members}`; `can` is a pure lookup.
     - _Requirements: 4.2, 4.3, 4.4, 4.5_
     - _Design: Pure logic modules (`auth/rbac.ts`)_
 
-  - [ ]* 3.3 Write property test for total, correct claims decoding
+  - [x]* 3.3 Write property test for total, correct claims decoding
     - **Property 1: Claims decoding is total and correct**
     - **Validates: Requirements 3.1, 2.1, 2.3**
     - fast-check over arbitrary well-formed JWT payloads (all four claims) and arbitrary
       malformed/garbage tokens: assert never throws, returns the exact claims for
       well-formed input, and `null` for malformed/missing/mistyped input. Min 100 iterations.
 
-  - [ ]* 3.4 Write property test for expiry deciding authentication
+  - [x]* 3.4 Write property test for expiry deciding authentication
     - **Property 2: Session expiry is decided solely by exp vs. now**
     - **Validates: Requirements 3.2**
     - fast-check over arbitrary `exp`/`nowSeconds` integers: assert
       `isExpired(claims, now) === (claims.exp <= now)`. Min 100 iterations.
 
-  - [ ]* 3.5 Write property test for the RBAC map nesting invariant
+  - [x]* 3.5 Write property test for the RBAC map nesting invariant
     - **Property 4: The client RBAC map mirrors the backend nesting invariant**
     - **Validates: Requirements 4.2, 4.3, 4.4, 4.5**
     - fast-check over the four roles: assert `viewer ⊆ member ⊆ admin ⊆ owner` and every
       role contains `read`. Min 100 iterations.
 
-- [ ] 4. Implement the pure error and SSE logic layer (`api/errors.ts`, `api/sse/*`)
-  - [ ] 4.1 Implement the error-envelope normalizer `mapError(status, body)` (`api/errors.ts`)
+- [x] 4. Implement the pure error and SSE logic layer (`api/errors.ts`, `api/sse/*`)
+  - [x] 4.1 Implement the error-envelope normalizer `mapError(status, body)` (`api/errors.ts`)
     - Total function returning a defined `ClientError` (non-empty `message`, `kind`,
       `status`, `details`, optional `fieldErrors`) for any status (including `null` network
       failure) and any body (valid envelope, partial, garbage, none); copies `code`/
@@ -135,13 +135,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 5.1, 5.2, 5.3, 5.5, 5.6, 4.7, 6.5, 8.5, 9.6, 10.7, 12.7, 14.5, 15.4_
     - _Design: Pure logic modules (`api/errors.ts`), Error Handling (Normalization, Status-specific behavior)_
 
-  - [ ] 4.2 Implement the SSE frame parser `parseSseFrame(raw)` (`api/sse/parse.ts`)
+  - [x] 4.2 Implement the SSE frame parser `parseSseFrame(raw)` (`api/sse/parse.ts`)
     - Pure parse of one `event: <type>\ndata: <json>\n\n` frame into `{ type, data }`
       (with the monotonic `sequence` inside `data`); returns `null` for an unparseable frame.
     - _Requirements: 9.1, 10.2_
     - _Design: Pure logic modules (`api/sse/parse.ts`), SSE Handling_
 
-  - [ ] 4.3 Implement the single-agent reducer (`api/sse/singleAgentReducer.ts`)
+  - [x] 4.3 Implement the single-agent reducer (`api/sse/singleAgentReducer.ts`)
     - Pure `(state, event) -> state` fold keeping non-terminal `step`/`tool_call`/`delta`
       events in `sequence` order, transitioning to `closed` on the first terminal
       (`completion` → answer + citations + termination reason; `error` → error message),
@@ -149,7 +149,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 9.1, 9.2, 9.3_
     - _Design: SSE reducer interfaces (`singleAgentReducer`), SSE Handling_
 
-  - [ ] 4.4 Implement the multi-agent reducer (`api/sse/multiAgentReducer.ts`)
+  - [x] 4.4 Implement the multi-agent reducer (`api/sse/multiAgentReducer.ts`)
     - Pure fold exposing events ordered by `sequence`, bucketing agent events by `role_id`,
       recording `approval_required` as a **non-terminal** pause (`closed = false`, checkpoint
       exposed), and closing only on the single `completion` (final output + citations +
@@ -157,7 +157,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 10.2, 10.3, 10.5_
     - _Design: SSE reducer interfaces (`multiAgentReducer`), SSE Handling_
 
-  - [ ]* 4.5 Write property test for total error-envelope normalization
+  - [x]* 4.5 Write property test for total error-envelope normalization
     - **Property 5: Error-envelope normalization is total**
     - **Validates: Requirements 5.1, 5.2, 5.3, 5.5, 5.6, 4.7, 6.5, 8.5, 9.6, 10.7, 12.7, 14.5, 15.4**
     - fast-check over arbitrary status codes (and `null`) × arbitrary bodies (valid
@@ -166,29 +166,29 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       `kind = "network"` for `null`, no stack text for `500`, and no cross-org leak for
       `404`. Min 100 iterations.
 
-  - [ ]* 4.6 Write property test for SSE frame round-trip
+  - [x]* 4.6 Write property test for SSE frame round-trip
     - **Property 10: SSE frame parsing round-trips the backend frame format**
     - **Validates: Requirements 9.1, 10.2**
     - fast-check over arbitrary `{type, data-with-sequence}` pairs: rendering to
       `event: <type>\ndata: <json>\n\n` then `parseSseFrame` yields equal `type` and `data`.
       Min 100 iterations.
 
-  - [ ]* 4.7 Write property test for the single-agent reducer
+  - [x]* 4.7 Write property test for the single-agent reducer
     - **Property 8: The single-agent reducer preserves order and closes on exactly one terminal**
     - **Validates: Requirements 9.1, 9.2, 9.3**
     - fast-check over arbitrary finite event sequences ending in a terminal: assert order
       preserved, `closed` after first terminal with payload captured, post-terminal events
       ignored, exactly one terminal recorded. Min 100 iterations.
 
-  - [ ]* 4.8 Write property test for the multi-agent reducer
+  - [x]* 4.8 Write property test for the multi-agent reducer
     - **Property 9: The multi-agent reducer orders by sequence, attributes roles, and treats approval as non-terminal**
     - **Validates: Requirements 10.2, 10.3, 10.5**
     - fast-check over arbitrary finite multi-agent event sequences: assert `sequence`
       ordering, `role_id` bucketing, `approval_required` leaves `closed = false` with the
       checkpoint exposed, and closes only on the single `completion`/`error`. Min 100 iterations.
 
-- [ ] 5. Implement the auth middleware and wire it into the API_Client (`api/auth-middleware.ts`)
-  - [ ] 5.1 Implement request-side bearer attachment
+- [x] 5. Implement the auth middleware and wire it into the API_Client (`api/auth-middleware.ts`)
+  - [x] 5.1 Implement request-side bearer attachment
     - Attach `Authorization: Bearer <token>` on every authenticated request when a valid
       token is stored; exempt the public auth endpoints (`/auth/login`, `/auth/register-self`);
       attach nothing when no valid token is stored. Register the middleware on the
@@ -196,7 +196,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 2.6_
     - _Design: API_Client Layer (auth-middleware request)_
 
-  - [ ] 5.2 Implement response-side 401 refresh-once-then-retry
+  - [x] 5.2 Implement response-side 401 refresh-once-then-retry
     - On `401 unauthorized` for an authenticated request, call `POST /auth/refresh`
       **exactly once**; on success replace the stored token and retry the original request
       one time; on refresh failure or a second `401`, clear the token and route to `/login`.
@@ -204,26 +204,26 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 3.3, 3.5, 3.6_
     - _Design: API_Client Layer (auth-middleware response), Error Handling (401 row)_
 
-  - [ ]* 5.3 Write property test for bearer attachment
+  - [x]* 5.3 Write property test for bearer attachment
     - **Property 7: Every authenticated request carries the bearer token**
     - **Validates: Requirements 2.6**
     - fast-check over arbitrary token/endpoint pairs: authenticated endpoints get exactly
       one `Authorization: Bearer <token>`; public auth endpoints never do; no token → no
       header. Min 100 iterations.
 
-  - [ ]* 5.4 Write property test for the bounded 401 refresh path
+  - [x]* 5.4 Write property test for the bounded 401 refresh path
     - **Property 6: The 401 refresh path retries at most once**
     - **Validates: Requirements 3.3, 3.5, 3.6**
     - fast-check over arbitrary 401-then-{success|failure} response sequences (MSW-driven):
       assert at most one `POST /auth/refresh`, at most two original-request attempts, token
       replaced+retried on success, token cleared + `/login` route on failure. Min 100 iterations.
 
-  - [ ]* 5.5 Write an MSW integration test for the refresh flow end-to-end
+  - [x]* 5.5 Write an MSW integration test for the refresh flow end-to-end
     - Assert a live-style 401→refresh→retry→200 succeeds transparently and a
       401→refresh-401 clears the session and redirects to login.
     - _Requirements: 3.3, 3.5, 3.6_
 
-- [ ] 6. Implement the SessionProvider, useSession, and routing (`auth/`, `routing/`)
+- [x] 6. Implement the SessionProvider, useSession, and routing (`auth/`, `routing/`)
   - Implement `SessionProvider` + `useSession`: hydrate token from `localStorage`, decode
     claims via `decodeClaims`, validate expiry via `isExpired`, expose `orgId`/`role`/
     `isAuthenticated`/`login`/`logout`; `logout` clears the token and all derived state.
@@ -235,20 +235,20 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 3.1, 3.2, 3.4, 2.5, 2.1, 2.3_
   - _Design: Routing and Authenticated Layout, State Management Strategy (Session), Components and Interfaces (useSession)_
 
-  - [ ]* 6.1 Write component tests for session hydration and protected routing
+  - [x]* 6.1 Write component tests for session hydration and protected routing
     - Cover hydrate-valid-token → authenticated; expired/malformed token → `/login`;
       logout clears state and routes to `/login`; unauthenticated access to a protected
       route redirects to `/login`.
     - _Requirements: 3.1, 3.2, 3.4, 2.5_
 
-- [ ] 7. Implement the shared RBAC / error / empty-state components (`components/`)
-  - [ ] 7.1 Implement the `Can` RBAC gate (`components/Can.tsx`)
+- [x] 7. Implement the shared RBAC / error / empty-state components (`components/`)
+  - [x] 7.1 Implement the `Can` RBAC gate (`components/Can.tsx`)
     - Render children **iff** `can(role, permission)` for the Session Role; otherwise render
       nothing so the gated control is absent from the DOM (not merely disabled).
     - _Requirements: 4.2, 4.3, 4.4, 4.5_
     - _Design: React component contracts (`Can`)_
 
-  - [ ] 7.2 Implement `OrgContextBadge`, `ErrorBanner`, `EmptyState`, and `RetryNotice`
+  - [x] 7.2 Implement `OrgContextBadge`, `ErrorBanner`, `EmptyState`, and `RetryNotice`
     - `OrgContextBadge` renders the active Org_Context + Role (Req 4.1); `ErrorBanner`
       renders a normalized `ClientError` uniformly (message + relevant details, no stack);
       `EmptyState` renders explicit empty states; `RetryNotice` offers a retry affordance
@@ -256,25 +256,25 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 4.1, 5.1, 5.2, 5.5, 5.6, 6.2_
     - _Design: React component contracts, Error Handling, Graceful degradation_
 
-  - [ ]* 7.3 Write property test for the RBAC gate rendering
+  - [x]* 7.3 Write property test for the RBAC gate rendering
     - **Property 3: Control visibility is a pure function of role and required permission**
     - **Validates: Requirements 4.2, 4.3, 4.4, 4.5, 8.1, 12.4, 14.1**
     - fast-check over the four roles × five permissions rendering `<Can>`: assert the child
       is present in the DOM iff the backend map grants the permission, and absent (not
       disabled) otherwise. Min 100 iterations.
 
-  - [ ]* 7.4 Write component tests for the shared components
+  - [x]* 7.4 Write component tests for the shared components
     - Cover `OrgContextBadge` showing Org_Context + Role; `ErrorBanner` rendering message +
       details with no stack for `500`; `EmptyState` and `RetryNotice` rendering.
     - _Requirements: 4.1, 5.1, 5.2, 5.5, 5.6_
 
-- [ ] 8. Checkpoint — pure logic layer and shared infrastructure
+- [x] 8. Checkpoint — pure logic layer and shared infrastructure
   - Ensure the pure-logic property suite (Properties 1, 2, 3, 4, 5, 6, 7, 8, 9, 10) plus the
     middleware/session/component tests are green against MSW with no network and no
     credentials, and `tsc --noEmit` passes. Ensure all tests pass, ask the user if questions
     arise.
 
-- [ ] 9. Establish design tokens and theming (`styles/`, no-FOWT, `useTheme`)
+- [x] 9. Establish design tokens and theming (`styles/`, no-FOWT, `useTheme`)
   - Implement `styles/tokens.css`: dark-first + light **CSS custom properties** declared on
     `:root` / `[data-theme="dark"]` / `[data-theme="light"]`, covering the token families in
     the design — color **semantic roles** (`bg`, `surface`, `border`, `text`, `primary`,
@@ -294,7 +294,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.1_
   - _Design: Premium UX & Design System §1 (design language & theming), §6 (Frontend Directory Layout — styles/, providers/, hooks/)_
 
-  - [ ]* 9.1 Write property test for total design-token resolution
+  - [x]* 9.1 Write property test for total design-token resolution
     - **Property 13: Design-token resolution is total over theme × semantic role**
     - **Validates: Premium UX & Design System §1; supports Requirements 4.1**
     - fast-check over `{ dark, light }` × arbitrary role identifiers (declared and undeclared):
@@ -302,7 +302,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       and returns a single deterministic fallback for undeclared roles (stable across repeated
       calls). Min 100 iterations. Tag: `Feature: agentforge-frontend, Property 13: Design-token resolution is total over theme × semantic role`.
 
-- [ ] 10. Build the design-system component library over Radix (`components/ui/`, `components/motion/`)
+- [x] 10. Build the design-system component library over Radix (`components/ui/`, `components/motion/`)
   - Implement `components/ui/` primitives styled purely via the design tokens over **Radix UI**
     (shadcn/ui composition pattern): `Button`, `Input`, `Dialog`, `Tabs`, `Tooltip`, `Toast`,
     `Skeleton`, `Badge`, `Card`, `DropdownMenu`, `Popover` — each accessible (focus trap, ARIA,
@@ -315,13 +315,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.1_
   - _Design: Premium UX & Design System §2 (component & styling stack), §4 (motion & performance)_
 
-  - [ ]* 10.1 Write component/a11y tests for the UI and motion primitives
+  - [x]* 10.1 Write component/a11y tests for the UI and motion primitives
     - Cover: primitives render with token-driven classes; Dialog/Popover/DropdownMenu trap and
       restore focus and are keyboard-operable; motion primitives collapse to instant under a
       reduced-motion/test configuration; axe-core finds no violations on representative usage.
     - _Requirements: 4.1_
 
-- [ ] 11. Wire providers, the ⌘K command palette, and the keyboard-shortcut system (`providers/`, `components/command/`, `hooks/`)
+- [x] 11. Wire providers, the ⌘K command palette, and the keyboard-shortcut system (`providers/`, `components/command/`, `hooks/`)
   - Mount `ThemeProvider`, `ToastProvider` (+ `hooks/useToast.ts` imperative API over Radix
     Toast), and `CommandPaletteProvider` in `main.tsx` above the router.
   - Implement `components/command/` **cmdk** palette (⌘K / Ctrl-K) for navigation and actions
@@ -335,7 +335,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.2, 4.3, 4.4, 4.5_
   - _Design: Premium UX & Design System §3 (signature experiences — command palette, keyboard-shortcut system), §6_
 
-  - [ ]* 11.1 Write property test for shortcut-registry uniqueness
+  - [x]* 11.1 Write property test for shortcut-registry uniqueness
     - **Property 14: The keyboard-shortcut registry has no duplicate binding collisions**
     - **Validates: Premium UX & Design System §3**
     - fast-check over arbitrary shortcut-declaration lists: assert normalization is
@@ -343,13 +343,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       any two actions sharing a normalized chord surface a collision (never silently
       overwrite/drop). Min 100 iterations. Tag: `Feature: agentforge-frontend, Property 14: The keyboard-shortcut registry has no duplicate binding collisions`.
 
-  - [ ]* 11.2 Write component tests for the RBAC-gated palette (MSW)
+  - [x]* 11.2 Write component tests for the RBAC-gated palette (MSW)
     - Cover: ⌘K opens the palette; only commands permitted by `can(role, permission)` appear
       for a given Session Role; selecting a command navigates/acts; `?` opens the shortcuts
       overlay.
     - _Requirements: 4.2, 4.3, 4.4, 4.5_
 
-- [ ] 12. Implement the markdown renderer with inline citations (`components/markdown/`)
+- [x] 12. Implement the markdown renderer with inline citations (`components/markdown/`)
   - Implement `components/markdown/` using **react-markdown** + **remark-gfm** +
     **rehype-sanitize** with on-demand code-block **syntax highlighting**, and a custom renderer
     that turns each inline `[n]` marker into a citation link to its source
@@ -360,7 +360,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 7.2, 9.2_
   - _Design: Premium UX & Design System §3 (streaming chat inline citations), §2 (markdown stack)_
 
-  - [ ]* 12.1 Write property test for citation extraction safety
+  - [x]* 12.1 Write property test for citation extraction safety
     - **Property 15: Markdown citation extraction maps every marker to a valid citation or renders it inert**
     - **Validates: Premium UX & Design System §3; supports Requirements 7.2, 9.2**
     - fast-check over arbitrary markdown strings × citation lists of length `N`: assert
@@ -369,7 +369,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       dropped, and no out-of-range marker becomes a link. Min 100 iterations. Tag:
       `Feature: agentforge-frontend, Property 15: Markdown citation extraction maps every marker to a valid citation or renders it inert`.
 
-- [ ] 13. Build the responsive, RBAC-aware app shell
+- [x] 13. Build the responsive, RBAC-aware app shell
   - Implement the commercial-grade app shell: a **collapsible sidebar**, a **top bar**, the
     persistent `OrgContextBadge` (active Org_Context + Role), an **org switcher** for Operators
     holding tokens for multiple orgs, a **theme toggle**, logout, and an **RBAC-aware nav** whose
@@ -381,13 +381,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.1, 4.6_
   - _Design: Premium UX & Design System §1, §5 (accessibility & responsiveness); Routing and Authenticated Layout_
 
-  - [ ]* 13.1 Write component tests for the responsive app shell
+  - [x]* 13.1 Write component tests for the responsive app shell
     - Cover: shell renders the Org badge + Role (4.1); nav entries appear only when `can()`
       grants them; the org switcher adopts the matching-`org_id` token (4.6); the theme toggle
       flips `data-theme`; `< md` renders the drawer while `md+` renders the persistent sidebar.
     - _Requirements: 4.1, 4.6_
 
-- [ ] 14. Implement the auth feature views (`features/auth/`)
+- [x] 14. Implement the auth feature views (`features/auth/`)
   - Implement `LoginView`: submit valid credentials → `POST /auth/login`, store token for
     the Session; on `401 auth_failed` show the envelope message and stay on login; block
     submission with empty email/password.
@@ -415,12 +415,12 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: Routing and Authenticated Layout, Endpoint-to-view interface map (Auth)_
   - _Design: Premium UX & Design System §1 (design language & theming — glass, layout rhythm, typography), §3 (rich loading/empty/success/error states, premium auth + app shell), §5 (accessibility)_
 
-  - [ ]* 14.1 Write component tests for auth flows (MSW)
+  - [x]* 14.1 Write component tests for auth flows (MSW)
     - Cover login stores token (2.1); `401 auth_failed` stays on login (2.2); register `201`
       stores token (2.3); empty-field blocking (2.4); logout clears + routes (3.4).
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 3.4_
 
-- [ ] 15. Implement the org context, RBAC-aware layout, and org switcher (`features/`, layout)
+- [x] 15. Implement the org context, RBAC-aware layout, and org switcher (`features/`, layout)
   - Render the authenticated layout with the persistent `OrgContextBadge`, an RBAC-gated
     navigation menu (each entry wrapped in `Can`), and a logout control.
   - Implement the org switcher: selecting a different organization adopts the stored
@@ -431,13 +431,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.1, 4.6, 4.7_
   - _Design: Routing and Authenticated Layout, State Management Strategy (Server data), Error Handling (404 row)_
 
-  - [ ]* 15.1 Write component tests for org context and switching
+  - [x]* 15.1 Write component tests for org context and switching
     - Cover badge shows Org_Context + Role (4.1); org switch adopts the matching token and
       re-scopes queries (4.6); cross-tenant `404` renders as not-found with no cross-org
       leak (4.7).
     - _Requirements: 4.1, 4.6, 4.7_
 
-- [ ] 16. Implement org member/team management and API-key management (RBAC-gated, over `/orgs/*`)
+- [x] 16. Implement org member/team management and API-key management (RBAC-gated, over `/orgs/*`)
   - Implement member/team management controls gated behind `manage_members` via `Can`,
     calling only the existing shipped `/orgs/*` contracts (list/add/update/remove members
     and teams as exposed by the backend); omit the controls entirely when the permission is
@@ -449,13 +449,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.4, 4.5, 1.6_
   - _Design: Routing and Authenticated Layout (Note on manage_members / manage_api_keys), React component contracts (`Can`)_
 
-  - [ ]* 16.1 Write component tests for management gating
+  - [x]* 16.1 Write component tests for management gating
     - Cover: `manage_members` present → member/team controls in DOM and wired to `/orgs/*`;
       absent → controls omitted from DOM; `manage_api_keys` present → API-key controls in
       DOM and wired to `/orgs/*`; absent → omitted.
     - _Requirements: 4.4, 4.5_
 
-- [ ] 17. Implement the RAG query view with citations (`features/query/`)
+- [x] 17. Implement the RAG query view with citations (`features/query/`)
   - Implement `RagQueryView`: submit a non-empty query → `POST /query` with `top_k`, display
     the answer and `provider`; render each Citation's `document_id`/`chunk_id`; indicate
     ungrounded when `grounded` is false with empty citations; display guardrail `flags`;
@@ -483,13 +483,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: Endpoint-to-view interface map (Query), Error Handling (guardrail_blocked)_
   - _Design: Premium UX & Design System §3 (live streaming chat / inline citations, rich loading/empty/success/error states, command palette), §2 (markdown & motion stack), §4 (streaming smoothness), §5 (responsiveness & live regions); validates Property 15_
 
-  - [ ]* 17.1 Write component tests for the query view (MSW)
+  - [x]* 17.1 Write component tests for the query view (MSW)
     - Cover submit renders answer + provider (7.1, 7.6); citations render (7.2); ungrounded
       indicator (7.3); flags render (7.4); `guardrail_blocked` withholds answer + shows
       reason (7.5).
     - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6_
 
-- [ ] 18. Implement the documents view (`features/documents/`)
+- [x] 18. Implement the documents view (`features/documents/`)
   - Implement `DocumentListView` + `UploadControl`: list `GET /documents` with filename,
     content type, size, status, chunk count, created-at; upload via `POST /documents`
     (multipart) showing `document_id`/`filename`/`chunk_count`/`status`; delete via
@@ -514,12 +514,12 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: Endpoint-to-view interface map (Documents), Error Handling (Document errors)_
   - _Design: Premium UX & Design System §3 (rich loading/empty/success/error states, toasts), §5 (responsiveness — cards on mobile), §1 (layout rhythm)_
 
-  - [ ]* 18.1 Write component tests for the documents view (MSW)
+  - [x]* 18.1 Write component tests for the documents view (MSW)
     - Cover upload multipart + result fields (8.1, 8.2); list metadata rows (8.3); delete
       removes row on `204` (8.4); a document error status shows the envelope message (8.5).
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
 
-- [ ] 19. Implement the SSE transport hook and single-agent run + trace view (`api/sse/stream.ts`, `features/agent/`)
+- [x] 19. Implement the SSE transport hook and single-agent run + trace view (`api/sse/stream.ts`, `features/agent/`)
   - Implement `api/sse/stream.ts`: a `fetch` + `ReadableStream` SSE transport (POST,
     `Accept: text/event-stream`, bearer via the shared middleware) that splits frames on the
     blank-line delimiter, feeds `parseSseFrame`, and supports cancellation via
@@ -553,18 +553,18 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: SSE Handling, Components and Interfaces (`useSseRun`), Endpoint-to-view interface map (Single-agent)_
   - _Design: Premium UX & Design System §3 (live streaming chat / inline citations, trace timeline visualization, graceful NoOp-trace degradation), §4 (virtualization, memoization, streaming smoothness), §2 (markdown & motion stack); validates Property 15_
 
-  - [ ]* 19.1 Write component/integration tests for single-agent run + trace (MSW SSE)
+  - [x]* 19.1 Write component/integration tests for single-agent run + trace (MSW SSE)
     - Cover streamed events render in order + `completion` renders answer/citations (9.1,
       9.2); `error` terminal shows detail (9.3); non-streaming run fields (9.4); trace
       ordered by ordinal (9.5); trace `404` not-found (9.6); cancel aborts the stream (9.7).
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7_
 
-- [ ] 20. Checkpoint — auth, layout, core feature views, and streaming transport
+- [x] 20. Checkpoint — auth, layout, core feature views, and streaming transport
   - Ensure auth/org/query/documents/single-agent views and the SSE transport are green
     against MSW (including simulated `text/event-stream`), with the RBAC gate omitting
     unauthorized controls. Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 21. Implement the multi-agent run + approval view (`features/multiAgent/`)
+- [x] 21. Implement the multi-agent run + approval view (`features/multiAgent/`)
   - Implement `MultiAgentRunView`: start via `POST /multi-agent/runs` showing `run_id`/
     `conversation_id`/`status`; open `POST /multi-agent/runs/{id}/stream` via `useSseRun`
     with the multi-agent reducer, attributing events to `role_id` and ordering by `sequence`;
@@ -599,14 +599,14 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: SSE Handling (multiAgentReducer), Endpoint-to-view interface map (Multi-agent), Error Handling (409 row)_
   - _Design: Premium UX & Design System §3 (animated multi-agent workflow visualization, approval checkpoint as first-class non-terminal moment), §1 (agent-role accent tokens), §4 (reduced-motion, virtualization, 60fps transforms/opacity), §5 (keyboard operability of the approval panel)_
 
-  - [ ]* 21.1 Write component/integration tests for multi-agent run + approval (MSW SSE)
+  - [x]* 21.1 Write component/integration tests for multi-agent run + approval (MSW SSE)
     - Cover start fields (10.1); role-attributed sequence-ordered events (10.2); approval
       checkpoint offers approve/reject/edit (10.3); approval submit + response (10.4);
       completion renders output + citations (10.5); run result + trace (10.6); `404`
       not-found (10.7); `409` message + status refresh (10.8).
     - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8_
 
-- [ ] 22. Implement the analytics / usage dashboard (`features/analytics/`)
+- [x] 22. Implement the analytics / usage dashboard (`features/analytics/`)
   - Implement `UsageDashboardView`: `GET /analytics/usage` for the Org_Context showing
     `total_tokens` + `total_cost`; a start/end range control adding `start`/`end` query
     params; render `by_provider`/`by_model`/`by_user` breakdowns (key, tokens, cost); render
@@ -635,19 +635,19 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: Data Models (UsageReport), Graceful degradation (breakdown isolation)_
   - _Design: Premium UX & Design System §3 (analytics/observability dashboards, verbatim cost rendering), §2 (charts lazy-loaded & mocked), §4 (code-splitting/lazy-loading), §1 (tabular numerals), §5 (responsiveness); validates Property 11_
 
-  - [ ]* 22.1 Write property test for verbatim cost rendering
+  - [x]* 22.1 Write property test for verbatim cost rendering
     - **Property 11: Usage cost strings are rendered verbatim**
     - **Validates: Requirements 11.4, 11.3**
     - fast-check over arbitrary `UsageReport`s with arbitrary cost strings: assert every
       displayed cost (top-level + each breakdown entry) equals the exact backend string with
       no parsing/rounding/reformatting. Min 100 iterations.
 
-  - [ ]* 22.2 Write component tests for the analytics dashboard (MSW)
+  - [x]* 22.2 Write component tests for the analytics dashboard (MSW)
     - Cover totals (11.1); range query params (11.2); breakdown rows (11.3); empty usage
       state (11.5); one breakdown failing is isolated while totals + others render (11.6).
     - _Requirements: 11.1, 11.2, 11.3, 11.5, 11.6_
 
-- [ ] 23. Implement the prompt registry view (`features/prompts/`)
+- [x] 23. Implement the prompt registry view (`features/prompts/`)
   - Implement `PromptRegistryView`: `GET /prompts` template names; `GET /prompts/{name}/versions`
     ascending versions; `GET /prompts/{name}?version=N` showing body/variables/created-at;
     `POST /prompts` (gated behind `ingest_documents`) appending a new version and showing the
@@ -675,20 +675,20 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: Endpoint-to-view interface map (Prompts), Error Handling (missing_variable)_
   - _Design: Premium UX & Design System §3 (Prompt Studio — Monaco, version diffing, variable-aware editing, render preview), §2 (Monaco lazy-loaded & mocked), §1 (monospace typography); validates Property 12_
 
-  - [ ]* 23.1 Write property test for required-variable render blocking
+  - [x]* 23.1 Write property test for required-variable render blocking
     - **Property 12: Required-variable validation blocks render on exactly the missing set**
     - **Validates: Requirements 12.6**
     - fast-check over arbitrary declared-variable sets × supplied subsets: assert submission
       is blocked (no request) iff at least one declared variable is unsupplied, and the
       prompted-for set equals exactly the missing declared variables. Min 100 iterations.
 
-  - [ ]* 23.2 Write component tests for the prompt registry (MSW)
+  - [x]* 23.2 Write component tests for the prompt registry (MSW)
     - Cover list names (12.1); versions ascending (12.2); version detail (12.3); create
       version gated + returns number (12.4); render success (12.5); `400 missing_variable`
       shows missing names (12.7).
     - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.7_
 
-- [ ] 24. Implement the guardrails and evaluations views (`features/guardrails/`, `features/evaluations/`)
+- [x] 24. Implement the guardrails and evaluations views (`features/guardrails/`, `features/evaluations/`)
   - Premium UX (AI Operating System bar): polished, insightful safety/quality views, not
     raw JSON dumps —
     - **Guardrails**: present the config as an **ordered card/list** of `name`/`kind` (in
@@ -707,7 +707,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       backend contract change); motion honors `prefers-reduced-motion` and is instant under test.
   - _Design: Premium UX & Design System §3 (guardrails & evaluations views, rich loading/empty/success/error states), §1 (semantic decision-state color tokens), §2 (charts lazy-loaded & mocked), §5 (accessibility & responsiveness)_
 
-  - [ ] 24.1 Implement `GuardrailsView`
+  - [x] 24.1 Implement `GuardrailsView`
     - `GET /guardrails/config` rendering each active guardrail's `name`/`kind` in returned
       order; `POST /guardrails/evaluate` (gated behind `run_agents`) showing the decision;
       `flag` shows flags + reason; `block` shows reason; empty config → explicit
@@ -715,7 +715,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5_
     - _Design: Endpoint-to-view interface map (Guardrails), Graceful degradation_
 
-  - [ ] 24.2 Implement `EvaluationsView`
+  - [x] 24.2 Implement `EvaluationsView`
     - `POST /evaluations/datasets` (gated behind `run_agents`) showing `dataset_id`;
       `GET /evaluations/datasets` listing name + created-at; `POST /evaluations/runs` (gated
       behind `run_agents`) with `dataset_id` + evaluators showing aggregate + per-item
@@ -724,13 +724,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 14.1, 14.2, 14.3, 14.4, 14.5_
     - _Design: Endpoint-to-view interface map (Evaluations), Error Handling (404 row)_
 
-  - [ ]* 24.3 Write component tests for guardrails and evaluations (MSW)
+  - [x]* 24.3 Write component tests for guardrails and evaluations (MSW)
     - Cover config order render (13.1); evaluate decision/flag/block (13.2–13.4); empty
       config state (13.5); create dataset (14.1); list datasets (14.2); run scores (14.3);
       run detail (14.4); cross-org `404` not-found (14.5).
     - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 14.1, 14.2, 14.3, 14.4, 14.5_
 
-- [ ] 25. Implement the conversation context for runs (`features/conversations/`)
+- [x] 25. Implement the conversation context for runs (`features/conversations/`)
   - Implement `ConversationView` + a conversation-context hook: `POST /conversations`
     retaining the returned `conversation_id`; include the retained `conversation_id` in
     subsequent single-agent and multi-agent run requests; `GET /conversations/{id}`
@@ -739,12 +739,12 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 15.1, 15.2, 15.3, 15.4_
   - _Design: Endpoint-to-view interface map (Conversations), Error Handling (404 row)_
 
-  - [ ]* 25.1 Write component tests for conversation context (MSW)
+  - [x]* 25.1 Write component tests for conversation context (MSW)
     - Cover create + retain id (15.1); run request includes `conversation_id` (15.2);
       history ordered by position (15.3); `404` not-found (15.4).
     - _Requirements: 15.1, 15.2, 15.3, 15.4_
 
-- [ ] 26. Wire cross-cutting error handling and graceful degradation
+- [x] 26. Wire cross-cutting error handling and graceful degradation
   - Ensure every feature surfaces failures through `mapError` → `ErrorBanner` with the
     status-specific behavior from the design: `422` field errors against form fields; `429`
     rate-limit notice preserving unsubmitted input; `500` generic message (no stack);
@@ -756,14 +756,14 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 5.3, 5.4, 5.5, 6.1, 6.2, 6.3, 6.4, 6.5_
   - _Design: Error Handling (Status-specific behavior, Input preservation), Graceful degradation_
 
-  - [ ]* 26.1 Write component/integration tests for error handling and degradation (MSW)
+  - [x]* 26.1 Write component/integration tests for error handling and degradation (MSW)
     - Cover `422` field mapping (5.3); `429` notice + input preserved (5.4); `500` generic
       no-stack (5.5); `502` message + input preserved (6.5); network error + retry (5.6);
       empty states (6.2); NoOp trace unavailable (6.3); partial-capability rendering (6.4);
       optional-feature-disabled views still operate (6.1).
     - _Requirements: 5.3, 5.4, 5.5, 5.6, 6.1, 6.2, 6.3, 6.4, 6.5_
 
-- [ ] 27. Implement the contract-fidelity checks
+- [x] 27. Implement the contract-fidelity checks
   - Add a `tsc --noEmit` contract check over `schema.d.ts` + all API_Client call sites so
     the client cannot call an endpoint or read a field absent from the shipped OpenAPI
     schema; add the `openapi-typescript` codegen step to the CI/test scripts so drift from
@@ -773,12 +773,12 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 1.2, 1.3, 1.5_
   - _Design: Testing Strategy (Contract-fidelity checks)_
 
-  - [ ]* 27.1 Write the bundle-secret-scan test
+  - [x]* 27.1 Write the bundle-secret-scan test
     - Assert the production build embeds only the base URL / non-secret flags and contains
       no credential material.
     - _Requirements: 1.5_
 
-- [ ] 28. Documentation — frontend README and Phase 7 ADR
+- [x] 28. Documentation — frontend README and Phase 7 ADR
   - Create `/frontend/README.md` covering: prerequisites, `VITE_API_BASE_URL` config (no
     secrets), install/dev/build/test scripts, the OpenAPI codegen step, and the pure-logic /
     feature-view layering.
@@ -792,7 +792,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 1.1, 1.5, 1.6_
   - _Design: Overview, Design Goals, Error Handling, SSE Handling_
 
-- [ ] 29. Checkpoint — features, degradation, contract checks, and docs
+- [x] 29. Checkpoint — features, degradation, contract checks, and docs
   - Ensure all feature views, cross-cutting error handling/degradation, contract-fidelity
     checks, and documentation are complete and the fast (property + component) suite is green
     against MSW. Ensure all tests pass, ask the user if questions arise.

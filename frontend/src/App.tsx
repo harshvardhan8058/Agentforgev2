@@ -1,27 +1,25 @@
-import { Routes, Route } from "react-router-dom";
+import { SessionProvider } from "./auth/SessionProvider";
+import { AppRouter } from "./routing/AppRouter";
+import { CommandLayer } from "./components/command/CommandLayer";
+import { ConversationProvider } from "./features/conversations/ConversationContext";
 
 /**
  * Layout shell + router mount.
  *
- * This is the top-level application shell. Feature routes are added in later
- * tasks (auth, query, documents, agent, multi-agent, analytics, prompts,
- * guardrails, evaluations, conversations); for the scaffold it mounts only a
- * placeholder root so the app renders and the router is wired.
+ * Wraps the application in the `SessionProvider` (token + derived claims) and
+ * mounts the `AppRouter` (public `/login`, `/register` + protected routes). The
+ * `CommandLayer` (⌘K palette + `?` shortcuts overlay + global key bindings) is
+ * mounted alongside it, inside the session/router/theme context it depends on.
  */
 export default function App(): JSX.Element {
   return (
-    <div className="app-shell" data-testid="app-root">
-      <Routes>
-        <Route
-          path="*"
-          element={
-            <main>
-              <h1>AgentForge</h1>
-              <p>Web console — scaffold ready.</p>
-            </main>
-          }
-        />
-      </Routes>
-    </div>
+    <SessionProvider>
+      <ConversationProvider>
+        <div className="app-shell" data-testid="app-root">
+          <AppRouter />
+          <CommandLayer />
+        </div>
+      </ConversationProvider>
+    </SessionProvider>
   );
 }

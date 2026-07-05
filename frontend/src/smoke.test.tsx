@@ -5,6 +5,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import App from "./App";
 import { resolveConfig } from "./config";
+import { ThemeProvider } from "./providers/ThemeProvider";
+import { ToastProvider } from "./providers/ToastProvider";
+import { CommandPaletteProvider } from "./providers/CommandPaletteProvider";
 
 /**
  * Task 1.1 — smoke test for scaffold, config, and the no-secret guarantee.
@@ -14,16 +17,21 @@ describe("scaffold smoke test", () => {
   it("renders the app root", () => {
     const client = new QueryClient();
     render(
-      <QueryClientProvider client={client}>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </QueryClientProvider>,
+      <ThemeProvider>
+        <ToastProvider>
+          <CommandPaletteProvider>
+            <QueryClientProvider client={client}>
+              <BrowserRouter>
+                <App />
+              </BrowserRouter>
+            </QueryClientProvider>
+          </CommandPaletteProvider>
+        </ToastProvider>
+      </ThemeProvider>,
     );
     expect(screen.getByTestId("app-root")).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: /agentforge/i }),
-    ).toBeInTheDocument();
+    // Unauthenticated by default → the public login view renders.
+    expect(screen.getByTestId("login-view")).toBeInTheDocument();
   });
 
   it("resolves the base URL from import.meta.env.VITE_API_BASE_URL (Req 1.4)", () => {

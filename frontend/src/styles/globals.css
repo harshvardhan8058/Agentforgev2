@@ -1,0 +1,68 @@
+/*
+ * Global stylesheet: Tailwind layers + base element styling bound to the design
+ * tokens. Imported once from `main.tsx` (after `tokens.css`). Tailwind utilities
+ * resolve to the CSS custom properties declared in `tokens.css` via the theme
+ * extension in `tailwind.config.ts`.
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Tabular numerals for metrics-heavy dashboards. */
+    font-variant-numeric: tabular-nums;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-size: var(--text-base);
+    line-height: var(--leading-base);
+  }
+
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: var(--font-mono);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /*
+   * Glass surfaces are reserved for overlay-class primitives (Dialog, Popover,
+   * Toast, command palette, top bar). Every glass surface declares a solid,
+   * WCAG-AA-safe fallback for environments without `backdrop-filter` support or
+   * where reduced transparency is requested.
+   */
+  .af-glass {
+    background-color: var(--color-surface-overlay);
+    backdrop-filter: blur(var(--blur-md));
+    -webkit-backdrop-filter: blur(var(--blur-md));
+  }
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .af-glass {
+      background-color: var(--color-surface-overlay-solid);
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .af-glass {
+      background-color: var(--color-surface-overlay-solid);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+  }
+}

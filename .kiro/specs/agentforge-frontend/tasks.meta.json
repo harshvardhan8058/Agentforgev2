@@ -1,0 +1,25 @@
+{
+  "pbtResults": {
+    "9.1 Write property test for total design-token resolution": {
+      "status": "passed",
+      "lastRunTimestamp": 1783281320018
+    },
+    "11.1 Write property test for shortcut-registry uniqueness": {
+      "status": "passed",
+      "lastRunTimestamp": 1783282084199
+    },
+    "12.1 Write property test for citation extraction safety": {
+      "status": "passed",
+      "lastRunTimestamp": 1783282084588
+    },
+    "22.1 Write property test for verbatim cost rendering": {
+      "status": "passed",
+      "lastRunTimestamp": 1783286061529
+    },
+    "23.1 Write property test for required-variable render blocking": {
+      "status": "passed",
+      "lastRunTimestamp": 1783286062028
+    }
+  },
+  "executionHistory": {}
+}
