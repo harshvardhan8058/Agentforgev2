@@ -813,3 +813,143 @@ _Validates: Requirement 12.4._
 _Scope note:_ this record now covers Phases 1–6. The React frontend, third-party integrations
 (Slack, Gmail, Drive, GitHub), and cloud deployment remain reserved for later phases and are
 enabled — but not designed — by the modular seams established here.
+
+
+---
+
+# Phase 7 — React Web Frontend
+
+This section records the rationale for the major architectural decisions in the Phase 7
+**Web_Client** — a React + Vite + TypeScript single-page application in the `/frontend`
+subdirectory that gives human Operators a browser console over the already-shipped
+Phase 1–6 backend. It mirrors the Phase 7 design document so the reasoning is discoverable
+from the repository itself.
+
+## 39. UI-only — no backend capability or contract change
+
+Phase 7 is deliberately **UI-only**: it consumes the stable, already-shipped HTTP/SSE
+contracts and introduces no new backend capability and no backend contract change. Where a
+desirable UI affordance has no shipped contract, the affordance is **omitted** rather than
+met by a backend change. This one negative constraint governs the whole phase and keeps the
+mature backend's semantics authoritative — the frontend mirrors auth, RBAC, tenancy, and
+error semantics and never re-implements or relaxes them.
+
+_Validates: Requirements 1.1, 1.6._
+
+## 40. Types generated from the OpenAPI schema for contract fidelity
+
+The typed API surface is **generated** from the backend's FastAPI OpenAPI schema
+(`openapi-typescript` → `src/api/schema.d.ts`) and consumed through one tiny `openapi-fetch`
+client (`src/api/client.ts`), the sole module every Backend_API call flows through. This
+gives compile-time contract fidelity for a ~1 KB runtime and no generated imperative code in
+the bundle. `tsc --noEmit` guarantees the client cannot reference an endpoint or field the
+schema does not define, and a `codegen:check` step fails the build on drift between
+`schema.d.ts` and `openapi.json`.
+
+_Validates: Requirements 1.2, 1.3._
+
+## 41. RBAC gating as a pure function that omits controls from the DOM
+
+Control visibility is a **pure function** of the Session Role and the backend's static
+role→permission map (`viewer ⊆ member ⊆ admin ⊆ owner`), mirrored exactly from
+`enterprise/rbac.py` into `auth/rbac.ts`. The `Can` gate renders a control **iff**
+`can(role, permission)`; when the permission is absent the control is **omitted from the
+rendered DOM entirely**, not merely disabled — so the mirror can never grant more than the
+backend authorizes, and the command palette never surfaces an action the Operator cannot
+perform.
+
+_Validates: Requirements 4.2, 4.3, 4.4, 4.5._
+
+## 42. A single, total AppError → ClientError normalizer
+
+Every non-2xx response and every network-layer failure flows through one **total**
+normalizer, `mapError(status, body)`, producing a uniform `ClientError` that features render
+via `ErrorBanner`/`ErrorSurface`. It never throws and always yields a non-empty,
+user-presentable message: it copies `code`/`message`/`details` verbatim from a valid
+envelope, maps `422` to per-field errors, yields `kind: "network"` for a transport failure
+(surfaced as a connectivity error + `RetryNotice`), strips any stack text from `500`, and —
+critically — presents a cross-tenant `404` as "not found" without referencing any other
+organization. Forms keep input state independent of the request lifecycle so `429`, `502`,
+and `guardrail_blocked` retries need no re-entry.
+
+_Validates: Requirements 5.1, 5.2, 5.3, 5.5, 5.6, 4.7, 6.5._
+
+## 43. 401 refresh-once-then-retry and cross-tenant 404-as-not-found
+
+The API_Client auth middleware attaches `Authorization: Bearer <token>` to every
+authenticated request (public auth endpoints exempt) and, on a `401` for an authenticated
+request, calls `POST /auth/refresh` **exactly once**: on success it replaces the stored token
+and retries the original request one time; on refresh failure or a second `401` it clears the
+token and routes to `/login`. A per-original-request flag makes the policy provably
+non-looping (at most one refresh, at most two attempts). Cross-tenant access is presented as
+"not found", faithfully mirroring the backend's **404-never-403** existence-hiding rule.
+
+_Validates: Requirements 3.3, 3.5, 3.6, 2.6, 4.7._
+
+## 44. Fetch-based SSE with pure reducers and an exactly-one-terminal invariant
+
+Both stream endpoints are **POST** returning `text/event-stream`, but the browser
+`EventSource` API is GET-only — so the client streams via `fetch` + `ReadableStream`, splits
+frames on the blank-line delimiter, and parses each with a pure `parseSseFrame`. Parsed
+frames feed **pure `(state, event) → state` reducers**: the single-agent reducer keeps
+non-terminal events in `sequence` order and closes on the first terminal (ignoring anything
+after); the multi-agent reducer additionally buckets agent events by `role_id`, orders by
+`sequence`, and records `approval_required` as a **non-terminal** pause. Making the
+transport pure at its core lets the ordering and exactly-one-terminal guarantees be
+property-tested with no live stream.
+
+_Validates: Requirements 9.1, 9.2, 9.3, 10.2, 10.3, 10.5._
+
+## 45. Verbatim cost rendering
+
+Every cost the analytics dashboard displays — the top-level `total_cost` and each breakdown
+entry's `total_cost` — is rendered as the **exact string** returned by the backend, with no
+numeric parsing, rounding, or reformatting. The backend computes cost with `Decimal`; the
+client treats the value as an opaque authoritative string (charts may position or label it,
+but the string shown is verbatim), preventing any client-side rounding from misrepresenting
+spend.
+
+_Validates: Requirements 11.3, 11.4._
+
+## 46. The premium UX stack (Tailwind + Radix + Framer Motion + cmdk + Monaco + react-markdown + Recharts)
+
+The console targets a world-class SaaS bar, so the stack is deliberately additive and
+well-established: **Tailwind** (utility velocity with a single tokenized source of truth
+bound to CSS custom properties); **Radix UI** (accessible headless primitives — correct focus
+trapping, ARIA, and keyboard behavior for free, styled via tokens); **Framer Motion**
+(declarative 60fps transform/opacity animation with built-in reduced-motion support); **cmdk**
+(a battle-tested, accessible ⌘K command menu); **Monaco** (full-featured prompt editing with
+version diffing in the Prompt Studio); **react-markdown** + remark-gfm + rehype-sanitize
+(safe, extensible markdown with code highlighting and inline citations); and **Recharts** for
+analytics. Each is tree-shakeable, and the heavy ones (Monaco, charts) are code-split so the
+initial bundle stays lean.
+
+_Validates: Requirement 4.1 (and the Premium UX & Design System section)._
+
+## 47. Keyless, deterministic testing via MSW + fast-check (Monaco/charts lazy + mocked)
+
+The Web_Client mirrors the backend's keyless promise: the pure logic layer is unit- and
+**property-tested** with `fast-check` (Properties 1–15, ≥100 iterations each) with no network
+and no credentials, and every component/integration test runs against **MSW** mocks —
+including simulated `text/event-stream` SSE and network failures — so the full suite needs no
+live backend and no secrets. The heavy dependencies (Monaco, the charting library) are
+dynamically imported and **mocked** with lightweight stubs under Vitest (never loaded in
+tests), and Framer Motion runs with instant transitions so assertions never race animations.
+A bundle-secret scan additionally asserts the production build embeds only the base URL /
+non-secret config and no credential material.
+
+_Validates: Requirements 1.5, and the keyless/deterministic testing strategy._
+
+## How-to — Adding a new feature view without changing the backend
+
+1. **Confirm a shipped contract exists.** The view may only bind to an endpoint already in
+   the OpenAPI schema (`schema.d.ts`); if none exists, the capability is omitted (Decision 39).
+2. **Call through the typed client.** Use `apiClient` (`api/client.ts`) via `runRequest`, so
+   bearer attach, 401 refresh, and error normalization apply uniformly.
+3. **Gate controls by permission.** Wrap any privileged control in `<Can permission=…>` so it
+   is omitted from the DOM when the Session Role lacks it (Decision 41).
+4. **Surface errors and empty/degraded states uniformly.** Render failures via
+   `ErrorSurface`/`ErrorBanner` and zero-result/optional-off cases via `EmptyState`
+   (Decision 42).
+5. **Test keyless.** Add MSW-backed component tests and, for any new pure logic, a fast-check
+   property test (Decision 47).

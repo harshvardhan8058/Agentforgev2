@@ -13,7 +13,11 @@
     "preview": "vite preview",
     "test": "vitest --run",
     "typecheck": "tsc --noEmit",
-    "codegen": "openapi-typescript ./openapi.json --output ./src/api/schema.d.ts"
+    "codegen": "openapi-typescript ./openapi.json --output ./src/api/schema.d.ts",
+    "codegen:check": "node scripts/check-codegen.mjs",
+    "scan:bundle": "node scripts/scan-bundle-secrets.mjs",
+    "contract": "npm run codegen:check && npm run typecheck",
+    "ci": "npm run codegen:check && npm run typecheck && npm run test && npm run build && npm run scan:bundle"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

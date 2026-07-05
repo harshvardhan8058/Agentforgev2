@@ -744,7 +744,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       history ordered by position (15.3); `404` not-found (15.4).
     - _Requirements: 15.1, 15.2, 15.3, 15.4_
 
-- [ ] 26. Wire cross-cutting error handling and graceful degradation
+- [x] 26. Wire cross-cutting error handling and graceful degradation
   - Ensure every feature surfaces failures through `mapError` → `ErrorBanner` with the
     status-specific behavior from the design: `422` field errors against form fields; `429`
     rate-limit notice preserving unsubmitted input; `500` generic message (no stack);
@@ -756,14 +756,14 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 5.3, 5.4, 5.5, 6.1, 6.2, 6.3, 6.4, 6.5_
   - _Design: Error Handling (Status-specific behavior, Input preservation), Graceful degradation_
 
-  - [ ]* 26.1 Write component/integration tests for error handling and degradation (MSW)
+  - [x]* 26.1 Write component/integration tests for error handling and degradation (MSW)
     - Cover `422` field mapping (5.3); `429` notice + input preserved (5.4); `500` generic
       no-stack (5.5); `502` message + input preserved (6.5); network error + retry (5.6);
       empty states (6.2); NoOp trace unavailable (6.3); partial-capability rendering (6.4);
       optional-feature-disabled views still operate (6.1).
     - _Requirements: 5.3, 5.4, 5.5, 5.6, 6.1, 6.2, 6.3, 6.4, 6.5_
 
-- [ ] 27. Implement the contract-fidelity checks
+- [x] 27. Implement the contract-fidelity checks
   - Add a `tsc --noEmit` contract check over `schema.d.ts` + all API_Client call sites so
     the client cannot call an endpoint or read a field absent from the shipped OpenAPI
     schema; add the `openapi-typescript` codegen step to the CI/test scripts so drift from
@@ -773,12 +773,12 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 1.2, 1.3, 1.5_
   - _Design: Testing Strategy (Contract-fidelity checks)_
 
-  - [ ]* 27.1 Write the bundle-secret-scan test
+  - [x]* 27.1 Write the bundle-secret-scan test
     - Assert the production build embeds only the base URL / non-secret flags and contains
       no credential material.
     - _Requirements: 1.5_
 
-- [ ] 28. Documentation — frontend README and Phase 7 ADR
+- [x] 28. Documentation — frontend README and Phase 7 ADR
   - Create `/frontend/README.md` covering: prerequisites, `VITE_API_BASE_URL` config (no
     secrets), install/dev/build/test scripts, the OpenAPI codegen step, and the pure-logic /
     feature-view layering.
@@ -792,7 +792,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 1.1, 1.5, 1.6_
   - _Design: Overview, Design Goals, Error Handling, SSE Handling_
 
-- [ ] 29. Checkpoint — features, degradation, contract checks, and docs
+- [x] 29. Checkpoint — features, degradation, contract checks, and docs
   - Ensure all feature views, cross-cutting error handling/degradation, contract-fidelity
     checks, and documentation are complete and the fast (property + component) suite is green
     against MSW. Ensure all tests pass, ask the user if questions arise.

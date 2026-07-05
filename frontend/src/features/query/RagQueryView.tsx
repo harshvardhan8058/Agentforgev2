@@ -27,7 +27,7 @@ import { can } from "../../auth/rbac";
 import { useSession } from "../../auth/useSession";
 import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
-import { ErrorBanner } from "../../components/ErrorBanner";
+import { ErrorSurface } from "../../components/ErrorSurface";
 import { Markdown } from "../../components/markdown/Markdown";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
@@ -154,10 +154,12 @@ export function RagQueryView(): JSX.Element {
         />
       )}
 
-      {/* Guardrail-blocked / error surface — the answer is withheld (Req 7.5). */}
+      {/* Guardrail-blocked / error surface — the answer is withheld (Req 7.5).
+          A network failure offers a retry that re-submits the preserved input
+          (Req 5.6); 429/502 preserve the input for retry (Req 5.4, 6.5). */}
       {submit.isError && (
         <div data-testid="query-error">
-          <ErrorBanner error={submit.error} />
+          <ErrorSurface error={submit.error} onRetry={() => submit.mutate()} />
         </div>
       )}
 
