@@ -16,6 +16,7 @@ from __future__ import annotations
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
+from uuid import UUID
 
 from argon2 import PasswordHasher
 
@@ -69,6 +70,39 @@ from agentforge.tools.search.disabled import Disabled_Search_Provider
 from agentforge.tools.web_search_tool import Web_Search_Tool
 from agentforge.tracing.base import Trace_Recorder
 from agentforge.tracing.recorder import InMemory_Trace_Recorder, Pg_Trace_Recorder
+from agentforge.observability.analytics import Analytics_Service
+from agentforge.observability.cost import Cost_Model, build_default_cost_model
+from agentforge.observability.evaluation.base import Evaluation_Store, Evaluator
+from agentforge.observability.evaluation.evaluators import (
+    Contains_Evaluator,
+    Exact_Match_Evaluator,
+    Heuristic_Evaluator,
+)
+from agentforge.observability.evaluation.framework import Evaluation_Framework
+from agentforge.observability.evaluation.store import (
+    InMemory_Evaluation_Store,
+    Pg_Evaluation_Store,
+)
+from agentforge.observability.guardrails.base import Guardrail_Pipeline
+from agentforge.observability.guardrails.defaults import build_default_pipeline
+from agentforge.observability.prompt_registry.base import Prompt_Store
+from agentforge.observability.prompt_registry.registry import Prompt_Registry
+from agentforge.observability.prompt_registry.store import (
+    InMemory_Prompt_Store,
+    Pg_Prompt_Store,
+)
+from agentforge.observability.tracing_exporter import (
+    Tracing_Exporter,
+    build_tracing_exporter,
+)
+from agentforge.observability.usage.base import Usage_Sink, Usage_Store
+from agentforge.observability.usage.instrumented_provider import Instrumented_Provider
+from agentforge.observability.usage.recorder import Usage_Recorder
+from agentforge.observability.usage.sink import Recording_Usage_Sink
+from agentforge.observability.usage.store import (
+    InMemory_Usage_Store,
+    Pg_Usage_Store,
+)
 from agentforge.vectorstore.base import Vector_Store
 from agentforge.vectorstore.chroma_store import Chroma_Store
 
@@ -206,6 +240,11 @@ class AppContext:
     ingestion_service: Ingestion_Service
     retriever: Retriever
     rag_service: RAG_Service
+    # Phase 6: the Usage_Sink / Usage_Store the wrapping Instrumented_Provider emits
+    # through. Exposed so ``build_observability_context`` can share the SAME store, so the
+    # Analytics_Service reads exactly the usage the provider wrote (Req 2.3, 3.3, 7.3).
+    usage_sink: Usage_Sink | None = None
+    usage_store: Usage_Store | None = None
 
 
 def build_app_context(
@@ -215,6 +254,8 @@ def build_app_context(
     vector_store: Vector_Store | None = None,
     llm_provider: LLM_Provider | None = None,
     document_store: DocumentStore | None = None,
+    usage_sink: Usage_Sink | None = None,
+    usage_store: Usage_Store | None = None,
 ) -> AppContext:
     """Compose the full RAG object graph from settings.
 
@@ -222,11 +263,34 @@ def build_app_context(
     not injected is built from the credential/profile-driven defaults. The service
     layer only ever sees the abstract seams, so provider swaps require no changes here
     beyond the builders above (Req 11.6).
+
+    The active ``LLM_Provider`` is **re-wrapped** in an :class:`Instrumented_Provider`
+    (Phase 6) so every downstream RAG / agent / multi-agent flow emits a usage record
+    transparently, without any caller change (Req 2.1, 7.1, 7.2, 7.3). The
+    ``usage_sink`` / ``usage_store`` may be injected so the composed graph shares one
+    store with the :class:`ObservabilityContext`; anything not injected is built from the
+    keyless defaults. An already-instrumented injected provider is not double-wrapped.
     """
     emb = embedding_provider or build_embedding_provider(settings)
     vstore = vector_store or build_vector_store(settings, emb)
-    llm = llm_provider or build_llm_provider(settings)
     store = document_store if document_store is not None else build_document_store(settings)
+
+    # Phase 6: build (or reuse) the usage store + sink, then re-wrap the base provider so
+    # every generate() call emits usage transparently. Delegation happens inside the
+    # decorator, so callers still see the plain LLM_Provider contract (Req 7.1, 7.2).
+    u_store = usage_store if usage_store is not None else build_usage_store(settings)
+    if usage_sink is not None:
+        u_sink = usage_sink
+    else:
+        u_sink = Recording_Usage_Sink(
+            build_usage_recorder(settings, u_store, build_cost_model(settings))
+        )
+    base_llm = llm_provider or build_llm_provider(settings)
+    llm: LLM_Provider = (
+        base_llm
+        if isinstance(base_llm, Instrumented_Provider)
+        else Instrumented_Provider(base_llm, u_sink)
+    )
 
     # The extractor applies markdown normalization, so the chunker runs in identity
     # (preserve) mode to avoid double-normalization.
@@ -272,6 +336,8 @@ def build_app_context(
         ingestion_service=ingestion,
         retriever=retriever,
         rag_service=rag,
+        usage_sink=u_sink,
+        usage_store=u_store,
     )
 
 
@@ -744,4 +810,240 @@ def build_enterprise_context(
         api_key_store=api_key_store,
         api_key_service=api_key_service,
         rate_limiter=rate_limiter,
+    )
+
+
+
+# --- Observability layer composition (Phase 6) ------------------------------------
+#
+# ``config/container.py`` remains the ONLY module that names concrete observability
+# implementations. Each per-seam builder selects the Postgres-backed store in the
+# production profile and the keyless in-memory double in local/keyless, mirroring the
+# Phase 5 enterprise builders (Req 7.3, 9.7, 10.2).
+
+
+def build_cost_model(settings: Settings) -> Cost_Model:
+    """Return the active Cost_Model, parsing the rate table + defaults from Settings.
+
+    Delegates to :func:`~agentforge.observability.cost.build_default_cost_model`; on the
+    keyless path both default per-1K rates are ``"0.0"``, so every cost is a deterministic
+    ``Decimal("0")`` (Req 2.4, 2.5, 2.6, 10.2).
+    """
+    return build_default_cost_model(settings)
+
+
+def build_usage_store(settings: Settings) -> Usage_Store:
+    """Return the Usage_Store: Postgres in production, in-memory otherwise (Req 10.3)."""
+    if settings.profile == "production":
+        return Pg_Usage_Store(settings.database_url)
+    return InMemory_Usage_Store()
+
+
+def build_usage_recorder(
+    settings: Settings, store: Usage_Store, cost_model: Cost_Model
+) -> Usage_Recorder:
+    """Return a Usage_Recorder that builds + persists Usage_Records via the Cost_Model."""
+    return Usage_Recorder(store, cost_model)
+
+
+def build_prompt_store(settings: Settings) -> Prompt_Store:
+    """Return the Prompt_Store: Postgres in production, in-memory otherwise (Req 10.3)."""
+    if settings.profile == "production":
+        return Pg_Prompt_Store(settings.database_url)
+    return InMemory_Prompt_Store()
+
+
+def build_prompt_registry(settings: Settings, store: Prompt_Store) -> Prompt_Registry:
+    """Return the Prompt_Registry over the given (profile-selected) Prompt_Store."""
+    return Prompt_Registry(store)
+
+
+def _parse_blocklist(blocklist_json: str | None) -> tuple[str, ...]:
+    """Parse ``guardrail_blocklist_json`` into a tuple of blocklist terms.
+
+    Accepts a JSON array of strings (e.g. ``["term-a", "term-b"]``); ``None`` or an empty
+    string yields an empty tuple so no blocklist term is configured on the keyless path.
+    """
+    if not blocklist_json:
+        return ()
+    import json
+
+    raw = json.loads(blocklist_json)
+    return tuple(str(term) for term in raw)
+
+
+def build_guardrail_pipeline(settings: Settings) -> Guardrail_Pipeline:
+    """Return the default deterministic Guardrail_Pipeline built from Settings.
+
+    Supplies ``guardrail_max_input_chars`` and the parsed ``guardrail_blocklist_json`` to
+    the default pipeline factory; the resulting pipeline is a pure function of its content
+    on the keyless path (Req 5.7, 5.8, 10.2).
+    """
+    return build_default_pipeline(
+        max_input_chars=settings.guardrail_max_input_chars,
+        blocklist=_parse_blocklist(settings.guardrail_blocklist_json),
+    )
+
+
+def build_evaluation_store(settings: Settings) -> Evaluation_Store:
+    """Return the Evaluation_Store: Postgres in production, in-memory otherwise (Req 10.3)."""
+    if settings.profile == "production":
+        return Pg_Evaluation_Store(settings.database_url)
+    return InMemory_Evaluation_Store()
+
+
+def build_default_evaluators() -> dict[str, Evaluator]:
+    """Return the built-in deterministic evaluators keyed by their stable names (Req 6.7)."""
+    evaluators: list[Evaluator] = [
+        Exact_Match_Evaluator(),
+        Contains_Evaluator(),
+        Heuristic_Evaluator(),
+    ]
+    return {evaluator.name: evaluator for evaluator in evaluators}
+
+
+def build_evaluation_framework(
+    settings: Settings,
+    store: Evaluation_Store,
+    pipeline_runner: Callable[[str, UUID], str],
+    evaluators: dict[str, Evaluator],
+) -> Evaluation_Framework:
+    """Return the Evaluation_Framework over the store, runner, and evaluator map."""
+    return Evaluation_Framework(store, pipeline_runner, evaluators)
+
+
+def _default_pipeline_runner(app: AppContext | None) -> Callable[[str, UUID], str]:
+    """Build the keyless evaluation pipeline runner from the RAG object graph.
+
+    On the keyless path the wired provider is the deterministic ``Fallback_Provider``
+    (re-wrapped by the ``Instrumented_Provider``), so the produced actual output is a pure
+    function of the item input (Req 6.2, 6.6). When no AppContext is available (e.g. a
+    seam-level unit test), a trivial runner returning an empty string is used.
+    """
+    if app is None:
+        def _empty_runner(text: str, org_id: UUID) -> str:
+            return ""
+
+        return _empty_runner
+
+    rag = app.rag_service
+
+    def _runner(text: str, org_id: UUID) -> str:
+        return rag.answer(text, org_id=org_id).text
+
+    return _runner
+
+
+@dataclass
+class ObservabilityContext:
+    """The wired observability object graph the Phase 6 routers depend on.
+
+    Built once at startup (or injected in tests) and stored on
+    ``app.state.observability_context``. The FastAPI dependencies in ``api/deps.py`` read
+    each seam from here so the transport layer never constructs the observability graph
+    itself (Req 7.3, 9.7).
+    """
+
+    settings: Settings
+    tracing_exporter: Tracing_Exporter
+    usage_store: Usage_Store
+    cost_model: Cost_Model
+    usage_recorder: Usage_Recorder
+    usage_sink: Usage_Sink
+    analytics_service: Analytics_Service
+    prompt_store: Prompt_Store
+    prompt_registry: Prompt_Registry
+    guardrail_pipeline: Guardrail_Pipeline
+    evaluation_store: Evaluation_Store
+    evaluators: dict[str, Evaluator]
+    evaluation_framework: Evaluation_Framework
+
+
+def build_observability_context(
+    settings: Settings,
+    *,
+    app: AppContext | None = None,
+    **overrides,
+) -> ObservabilityContext:
+    """Compose the Phase 6 observability object graph from settings.
+
+    Every collaborator may be injected via keyword ``overrides`` (tests pass keyless
+    in-memory doubles / capturing fakes); anything not injected is built from the
+    credential/profile-driven defaults. When an ``app`` :class:`AppContext` is supplied,
+    its ``usage_store`` / ``usage_sink`` are reused so the ``Instrumented_Provider`` and
+    the ``Analytics_Service`` share exactly one store (a usage record emitted by the
+    provider is visible to the analytics report — Req 2.3, 3.3), and its ``rag_service``
+    backs the keyless evaluation pipeline runner (Req 6.2).
+
+    ``config/container.py`` is the only module naming the concrete exporter, stores, cost
+    model, registry, pipeline, and framework, so a new implementation is a builder edit
+    here — never a router or core-flow change (Req 7.3, 9.7).
+
+    Supported ``overrides`` keys (all optional): ``tracing_exporter``, ``usage_store``,
+    ``cost_model``, ``usage_recorder``, ``usage_sink``, ``analytics_service``,
+    ``prompt_store``, ``prompt_registry``, ``guardrail_pipeline``, ``evaluation_store``,
+    ``evaluators``, ``pipeline_runner``, and ``evaluation_framework``.
+    """
+    tracing_exporter: Tracing_Exporter = (
+        overrides.get("tracing_exporter") or build_tracing_exporter(settings)
+    )
+
+    # Reuse the app's usage store/sink when available so the provider and analytics share
+    # one store; otherwise build the profile-selected defaults.
+    usage_store: Usage_Store = overrides.get("usage_store") or (
+        app.usage_store
+        if app is not None and app.usage_store is not None
+        else build_usage_store(settings)
+    )
+    cost_model: Cost_Model = overrides.get("cost_model") or build_cost_model(settings)
+    usage_recorder: Usage_Recorder = overrides.get(
+        "usage_recorder"
+    ) or build_usage_recorder(settings, usage_store, cost_model)
+    usage_sink: Usage_Sink = overrides.get("usage_sink") or (
+        app.usage_sink
+        if app is not None and app.usage_sink is not None
+        else Recording_Usage_Sink(usage_recorder)
+    )
+    analytics_service: Analytics_Service = (
+        overrides.get("analytics_service") or Analytics_Service(usage_store)
+    )
+
+    prompt_store: Prompt_Store = overrides.get("prompt_store") or build_prompt_store(
+        settings
+    )
+    prompt_registry: Prompt_Registry = overrides.get(
+        "prompt_registry"
+    ) or build_prompt_registry(settings, prompt_store)
+
+    guardrail_pipeline: Guardrail_Pipeline = (
+        overrides.get("guardrail_pipeline") or build_guardrail_pipeline(settings)
+    )
+
+    evaluation_store: Evaluation_Store = overrides.get(
+        "evaluation_store"
+    ) or build_evaluation_store(settings)
+    evaluators: dict[str, Evaluator] = (
+        overrides.get("evaluators") or build_default_evaluators()
+    )
+    pipeline_runner = overrides.get("pipeline_runner") or _default_pipeline_runner(app)
+    evaluation_framework: Evaluation_Framework = overrides.get(
+        "evaluation_framework"
+    ) or build_evaluation_framework(
+        settings, evaluation_store, pipeline_runner, evaluators
+    )
+
+    return ObservabilityContext(
+        settings=settings,
+        tracing_exporter=tracing_exporter,
+        usage_store=usage_store,
+        cost_model=cost_model,
+        usage_recorder=usage_recorder,
+        usage_sink=usage_sink,
+        analytics_service=analytics_service,
+        prompt_store=prompt_store,
+        prompt_registry=prompt_registry,
+        guardrail_pipeline=guardrail_pipeline,
+        evaluation_store=evaluation_store,
+        evaluators=evaluators,
+        evaluation_framework=evaluation_framework,
     )

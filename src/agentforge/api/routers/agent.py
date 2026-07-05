@@ -22,6 +22,7 @@ from fastapi.responses import StreamingResponse
 from agentforge.agent.orchestrator import Agent_Orchestrator, extract_citations
 from agentforge.api.deps import (
     get_conversation_store,
+    get_optional_guardrail_pipeline,
     get_orchestrator,
     get_streaming_service,
     get_trace_recorder,
@@ -38,6 +39,10 @@ from agentforge.api.schemas import (
 from agentforge.conversation.base import Conversation_Store
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.rbac import Permission
+from agentforge.observability.guardrails.base import (
+    Guardrail_Pipeline,
+    apply_input_guardrail,
+)
 from agentforge.streaming.base import AgentRunInput
 from agentforge.streaming.sse import SSE_Streaming_Service
 from agentforge.tracing.base import Trace_Recorder
@@ -57,9 +62,16 @@ async def run_agent(
     payload: AgentRunRequest,
     orchestrator: Agent_Orchestrator = Depends(get_orchestrator),
     store: Conversation_Store = Depends(get_conversation_store),
+    pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> AgentRunResponse:
-    """Run the bounded agent loop and return its grounded result (Req 1.7, 8.5)."""
+    """Run the bounded agent loop and return its grounded result (Req 1.7, 8.5).
+
+    The input guardrail pipeline runs **before** the orchestrator is invoked: a blocking
+    guardrail raises ``AppError("guardrail_blocked", 400)`` and the agent loop is never
+    reached (Req 5.4). The output pipeline runs on the final answer and its flags are
+    attached to the response without blocking (Req 5.5, 5.6).
+    """
 
     org_id = principal.org_id
 
@@ -68,12 +80,27 @@ async def run_agent(
         store.append(org_id, conversation_id, "user", payload.message)
         context = store.history(org_id, conversation_id)
 
-        state = orchestrator.run(
-            payload.message, context, conversation_id=conversation_id, org_id=org_id
-        )
+        def _invoke():
+            return orchestrator.run(
+                payload.message,
+                context,
+                conversation_id=conversation_id,
+                org_id=org_id,
+            )
+
+        # Input guardrail: a block prevents the orchestrator invocation entirely (Req 5.4).
+        if pipeline is not None:
+            state = apply_input_guardrail(pipeline, payload.message, _invoke)
+        else:
+            state = _invoke()
+
         answer = state.final_answer or ""
         # Persist the final assistant message on completion (Req 8.5).
         store.append(org_id, conversation_id, "assistant", answer)
+
+        flags: list[str] = []
+        if pipeline is not None:
+            flags = list(pipeline.evaluate(answer).flags)
 
         return AgentRunResponse(
             run_id=state.run_id,
@@ -87,6 +114,7 @@ async def run_agent(
                 )
                 for c in extract_citations(state)
             ],
+            flags=flags,
         )
 
     return await run_in_threadpool(_run)

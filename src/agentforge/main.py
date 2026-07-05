@@ -18,19 +18,24 @@ from fastapi import FastAPI
 
 from agentforge.api.errors import register_exception_handlers
 from agentforge.api.routers import agent as agent_router
+from agentforge.api.routers import analytics as analytics_router
 from agentforge.api.routers import auth as auth_router
 from agentforge.api.routers import conversations as conversations_router
 from agentforge.api.routers import documents as documents_router
+from agentforge.api.routers import evaluations as evaluations_router
+from agentforge.api.routers import guardrails as guardrails_router
 from agentforge.api.routers import health as health_router
 from agentforge.api.routers import ingest as ingest_router
 from agentforge.api.routers import multi_agent as multi_agent_router
 from agentforge.api.routers import orgs as orgs_router
+from agentforge.api.routers import prompts as prompts_router
 from agentforge.api.routers import query as query_router
 from agentforge.config.container import (
     build_agent_context,
     build_app_context,
     build_enterprise_context,
     build_multi_agent_context,
+    build_observability_context,
 )
 from agentforge.config.settings import Settings, load_settings
 from agentforge.db.engine import create_engine, create_session_factory
@@ -122,6 +127,23 @@ async def lifespan(app: FastAPI):
             settings.rate_limit_enabled,
         )
 
+    # 9. Compose the Phase 6 observability object graph (tracing exporter, usage store/
+    #    recorder/sink, cost model, analytics service, prompt registry, guardrail
+    #    pipeline, evaluation framework), sharing the RAG AppContext's usage store/sink so
+    #    the Instrumented_Provider and the Analytics_Service read one store. Tests may
+    #    pre-inject a keyless context, which is respected here (Req 7.3, 9.7, 10.2). The
+    #    guardrail pipeline it holds also backs the query/agent/multi-agent entry-point
+    #    wrapping, and the downstream LLM provider is the Instrumented_Provider wired by
+    #    build_app_context, so every downstream flow emits usage transparently.
+    if getattr(app.state, "observability_context", None) is None:
+        app.state.observability_context = build_observability_context(
+            settings, app=app.state.app_context
+        )
+        logger.info(
+            "Observability context ready (tracing_exporter=%s)",
+            settings.active_tracing_exporter(),
+        )
+
     try:
         yield
     finally:
@@ -162,6 +184,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Phase 5 enterprise routers (auth + orgs/members/teams/api-keys).
     app.include_router(auth_router.router)
     app.include_router(orgs_router.router)
+    # Phase 6 observability routers (analytics + prompts + guardrails + evaluations).
+    app.include_router(analytics_router.router)
+    app.include_router(prompts_router.router)
+    app.include_router(guardrails_router.router)
+    app.include_router(evaluations_router.router)
 
     return app
 

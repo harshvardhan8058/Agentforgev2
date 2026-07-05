@@ -116,6 +116,29 @@ class Settings(BaseSettings):
     rate_limit_max: int = 60  # [1, 100_000] (Req 6.4)
     rate_limit_window_seconds: int = 60  # [1, 86_400] (Req 6.4)
 
+    # --- observability layer (Phase 6; all optional / defaulted to preserve keyless boot) ---
+    # Tracing export (optional; the NoOp_Tracing_Exporter is used when absent). The
+    # ``langsmith_api_key`` is the Tracing_Credential; as a ``SecretStr`` it never appears
+    # in logs / repr / model_dump (Req 1.2, 10.1). ``tracing_export_enabled`` is a master
+    # toggle; the NoOp exporter is still selected whenever no key is configured.
+    langsmith_api_key: SecretStr | None = None
+    langsmith_project: str = "agentforge"
+    tracing_export_enabled: bool = True
+
+    # Cost model (the default rate is applied when a (provider, model) pair is unlisted).
+    # Decimal-as-string so no float drift; the keyless default is free (Req 2.5).
+    cost_default_prompt_per_1k: str = "0.0"
+    cost_default_completion_per_1k: str = "0.0"
+    # Optional JSON rate table, e.g.
+    # {"groq:llama-3.1-8b": {"prompt": "0.05", "completion": "0.08"}}.
+    cost_rate_table_json: str | None = None
+
+    # Guardrails (deterministic defaults; all optional). ``guardrail_max_input_chars`` is
+    # the default max-length input guardrail; ``guardrail_blocklist_json`` an optional
+    # static blocklist of terms (Req 5.7, 10.2).
+    guardrail_max_input_chars: int = 8000
+    guardrail_blocklist_json: str | None = None
+
     # --- credentials (ALL optional) ---
     groq_api_key: SecretStr | None = None
     hosted_embedding_api_key: SecretStr | None = None
@@ -138,6 +161,19 @@ class Settings(BaseSettings):
     def active_vector_store(self) -> str:
         """Return the active vector store based on the selected profile."""
         return "pgvector" if self.profile == "production" else "chroma"
+
+    def active_tracing_exporter(self) -> str:
+        """Return the active Tracing_Exporter name based on credential presence.
+
+        Returns ``"langsmith"`` iff a Tracing_Credential is configured **and** export is
+        enabled, else ``"noop"`` — so no external tracer is constructed on the keyless
+        path and trace export never occurs without a credential (Req 1.2, 1.4, 10.2).
+        """
+        return (
+            "langsmith"
+            if self.tracing_export_enabled and self.langsmith_api_key is not None
+            else "noop"
+        )
 
 
 # Required non-secret settings that must be present at startup. Anything with a
