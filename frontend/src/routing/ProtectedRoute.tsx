@@ -9,11 +9,16 @@
 import { Navigate, Outlet } from "react-router-dom";
 
 import { useSession } from "../auth/useSession";
+import { AppShell } from "../components/shell/AppShell";
 
 export function ProtectedRoute(): JSX.Element {
   const { isAuthenticated } = useSession();
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
-  return <Outlet />;
+  return (
+    <AppShell>
+      <Outlet />
+    </AppShell>
+  );
 }

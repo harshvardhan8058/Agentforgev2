@@ -10,6 +10,8 @@ import {
   __resetTokenStoreForTests,
 } from "./tokenStore";
 import type { Role } from "./token";
+import { ThemeProvider } from "../providers/ThemeProvider";
+import { CommandPaletteProvider } from "../providers/CommandPaletteProvider";
 
 /** Build a JWT with the given claims (well-formed header.payload.signature). */
 function b64url(text: string): string {
@@ -38,11 +40,15 @@ function SessionProbe(): JSX.Element {
 
 function renderApp(initialPath: string) {
   return render(
-    <SessionProvider>
-      <MemoryRouter initialEntries={[initialPath]}>
-        <AppRouter />
-      </MemoryRouter>
-    </SessionProvider>,
+    <ThemeProvider>
+      <CommandPaletteProvider>
+        <SessionProvider>
+          <MemoryRouter initialEntries={[initialPath]}>
+            <AppRouter />
+          </MemoryRouter>
+        </SessionProvider>
+      </CommandPaletteProvider>
+    </ThemeProvider>,
   );
 }
 

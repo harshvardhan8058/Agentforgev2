@@ -18,6 +18,8 @@ import "./styles/globals.css";
 
 import App from "./App";
 import { ThemeProvider } from "./providers/ThemeProvider";
+import { ToastProvider } from "./providers/ToastProvider";
+import { CommandPaletteProvider } from "./providers/CommandPaletteProvider";
 
 /**
  * React root + provider shell.
@@ -44,11 +46,15 @@ if (rootElement) {
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
       <ThemeProvider>
-        <QueryClientProvider client={queryClient}>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </QueryClientProvider>
+        <ToastProvider>
+          <CommandPaletteProvider>
+            <QueryClientProvider client={queryClient}>
+              <BrowserRouter>
+                <App />
+              </BrowserRouter>
+            </QueryClientProvider>
+          </CommandPaletteProvider>
+        </ToastProvider>
       </ThemeProvider>
     </React.StrictMode>,
   );

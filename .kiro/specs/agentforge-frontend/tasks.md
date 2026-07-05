@@ -321,7 +321,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       reduced-motion/test configuration; axe-core finds no violations on representative usage.
     - _Requirements: 4.1_
 
-- [ ] 11. Wire providers, the ⌘K command palette, and the keyboard-shortcut system (`providers/`, `components/command/`, `hooks/`)
+- [x] 11. Wire providers, the ⌘K command palette, and the keyboard-shortcut system (`providers/`, `components/command/`, `hooks/`)
   - Mount `ThemeProvider`, `ToastProvider` (+ `hooks/useToast.ts` imperative API over Radix
     Toast), and `CommandPaletteProvider` in `main.tsx` above the router.
   - Implement `components/command/` **cmdk** palette (⌘K / Ctrl-K) for navigation and actions
@@ -335,7 +335,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.2, 4.3, 4.4, 4.5_
   - _Design: Premium UX & Design System §3 (signature experiences — command palette, keyboard-shortcut system), §6_
 
-  - [ ]* 11.1 Write property test for shortcut-registry uniqueness
+  - [x]* 11.1 Write property test for shortcut-registry uniqueness
     - **Property 14: The keyboard-shortcut registry has no duplicate binding collisions**
     - **Validates: Premium UX & Design System §3**
     - fast-check over arbitrary shortcut-declaration lists: assert normalization is
@@ -343,13 +343,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       any two actions sharing a normalized chord surface a collision (never silently
       overwrite/drop). Min 100 iterations. Tag: `Feature: agentforge-frontend, Property 14: The keyboard-shortcut registry has no duplicate binding collisions`.
 
-  - [ ]* 11.2 Write component tests for the RBAC-gated palette (MSW)
+  - [x]* 11.2 Write component tests for the RBAC-gated palette (MSW)
     - Cover: ⌘K opens the palette; only commands permitted by `can(role, permission)` appear
       for a given Session Role; selecting a command navigates/acts; `?` opens the shortcuts
       overlay.
     - _Requirements: 4.2, 4.3, 4.4, 4.5_
 
-- [ ] 12. Implement the markdown renderer with inline citations (`components/markdown/`)
+- [x] 12. Implement the markdown renderer with inline citations (`components/markdown/`)
   - Implement `components/markdown/` using **react-markdown** + **remark-gfm** +
     **rehype-sanitize** with on-demand code-block **syntax highlighting**, and a custom renderer
     that turns each inline `[n]` marker into a citation link to its source
@@ -360,7 +360,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 7.2, 9.2_
   - _Design: Premium UX & Design System §3 (streaming chat inline citations), §2 (markdown stack)_
 
-  - [ ]* 12.1 Write property test for citation extraction safety
+  - [x]* 12.1 Write property test for citation extraction safety
     - **Property 15: Markdown citation extraction maps every marker to a valid citation or renders it inert**
     - **Validates: Premium UX & Design System §3; supports Requirements 7.2, 9.2**
     - fast-check over arbitrary markdown strings × citation lists of length `N`: assert
@@ -369,7 +369,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       dropped, and no out-of-range marker becomes a link. Min 100 iterations. Tag:
       `Feature: agentforge-frontend, Property 15: Markdown citation extraction maps every marker to a valid citation or renders it inert`.
 
-- [ ] 13. Build the responsive, RBAC-aware app shell
+- [x] 13. Build the responsive, RBAC-aware app shell
   - Implement the commercial-grade app shell: a **collapsible sidebar**, a **top bar**, the
     persistent `OrgContextBadge` (active Org_Context + Role), an **org switcher** for Operators
     holding tokens for multiple orgs, a **theme toggle**, logout, and an **RBAC-aware nav** whose
@@ -381,7 +381,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.1, 4.6_
   - _Design: Premium UX & Design System §1, §5 (accessibility & responsiveness); Routing and Authenticated Layout_
 
-  - [ ]* 13.1 Write component tests for the responsive app shell
+  - [x]* 13.1 Write component tests for the responsive app shell
     - Cover: shell renders the Org badge + Role (4.1); nav entries appear only when `can()`
       grants them; the org switcher adopts the matching-`org_id` token (4.6); the theme toggle
       flips `data-theme`; `< md` renders the drawer while `md+` renders the persistent sidebar.

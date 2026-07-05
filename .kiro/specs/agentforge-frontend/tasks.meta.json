@@ -3,6 +3,14 @@
     "9.1 Write property test for total design-token resolution": {
       "status": "passed",
       "lastRunTimestamp": 1783281320018
+    },
+    "11.1 Write property test for shortcut-registry uniqueness": {
+      "status": "passed",
+      "lastRunTimestamp": 1783282084199
+    },
+    "12.1 Write property test for citation extraction safety": {
+      "status": "passed",
+      "lastRunTimestamp": 1783282084588
     }
   },
   "executionHistory": {}
