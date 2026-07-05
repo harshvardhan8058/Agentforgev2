@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgentForge</title>
+    <!--
+      No-flash-of-wrong-theme (FOWT) pre-paint script.
+      Resolves and applies the theme on <html> before React hydrates.
+      Reads only the non-secret theme preference key + prefers-color-scheme.
+      (Fully fleshed out in task 9; this establishes the contract early.)
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('agentforge.theme');
+          var theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

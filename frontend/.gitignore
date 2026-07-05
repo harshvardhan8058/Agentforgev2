@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Vite / test caches
+.vite/
+coverage/
+
+# Local env files (only .env.example is committed)
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+*.local
+.DS_Store
