@@ -3,9 +3,10 @@
  *
  * Public routes (`/login`, `/register`) are reachable with no valid Session;
  * everything else is wrapped by `ProtectedRoute`, which redirects to `/login`
- * when no valid Access_Token is stored (Req 2.5). The feature views for these
- * routes are filled in by later tasks; for now the protected area mounts a
- * placeholder home so the routing/guard behavior is exercisable.
+ * when no valid Access_Token is stored (Req 2.5). The auth feature views
+ * (`LoginView`/`RegisterView`) back the public routes; the protected area
+ * mounts the dashboard plus the org member/team and API-key management surfaces
+ * (each view RBAC-gates its own controls).
  *
  * `UnauthenticatedRedirectBridge` wires the token store's "unauthenticated"
  * hook (fired by the auth middleware on a terminal 401 / refresh failure) to a
@@ -16,6 +17,11 @@ import { Route, Routes, useNavigate } from "react-router-dom";
 
 import { setUnauthenticatedHandler } from "../auth/tokenStore";
 import { ProtectedRoute } from "./ProtectedRoute";
+import { LoginView } from "../features/auth/LoginView";
+import { RegisterView } from "../features/auth/RegisterView";
+import { DashboardView } from "../features/dashboard/DashboardView";
+import { MembersView } from "../features/orgs/MembersView";
+import { ApiKeysView } from "../features/orgs/ApiKeysView";
 
 function UnauthenticatedRedirectBridge(): null {
   const navigate = useNavigate();
@@ -26,53 +32,18 @@ function UnauthenticatedRedirectBridge(): null {
   return null;
 }
 
-/** Placeholder auth surfaces — replaced by the feature views in later tasks. */
-function LoginPlaceholder(): JSX.Element {
-  return (
-    <main
-      data-testid="login-view"
-      className="flex min-h-screen flex-col items-center justify-center gap-2 bg-bg p-6 text-center"
-    >
-      <h1 className="text-3xl font-semibold text-text">AgentForge</h1>
-      <p className="text-sm text-text-muted">Sign in to your workspace.</p>
-    </main>
-  );
-}
-
-function RegisterPlaceholder(): JSX.Element {
-  return (
-    <main
-      data-testid="register-view"
-      className="flex min-h-screen flex-col items-center justify-center gap-2 bg-bg p-6 text-center"
-    >
-      <h1 className="text-3xl font-semibold text-text">AgentForge</h1>
-      <p className="text-sm text-text-muted">Create your account.</p>
-    </main>
-  );
-}
-
-function HomePlaceholder(): JSX.Element {
-  return (
-    <main
-      data-testid="home-view"
-      className="flex min-h-screen flex-col items-center justify-center gap-2 bg-bg p-6 text-center"
-    >
-      <h1 className="text-3xl font-semibold text-text">AgentForge</h1>
-      <p className="text-sm text-text-muted">Web console.</p>
-    </main>
-  );
-}
-
 export function AppRouter(): JSX.Element {
   return (
     <>
       <UnauthenticatedRedirectBridge />
       <Routes>
-        <Route path="/login" element={<LoginPlaceholder />} />
-        <Route path="/register" element={<RegisterPlaceholder />} />
+        <Route path="/login" element={<LoginView />} />
+        <Route path="/register" element={<RegisterView />} />
         <Route element={<ProtectedRoute />}>
-          <Route path="/" element={<HomePlaceholder />} />
-          <Route path="*" element={<HomePlaceholder />} />
+          <Route path="/" element={<DashboardView />} />
+          <Route path="/members" element={<MembersView />} />
+          <Route path="/api-keys" element={<ApiKeysView />} />
+          <Route path="*" element={<DashboardView />} />
         </Route>
       </Routes>
     </>

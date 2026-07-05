@@ -30,9 +30,8 @@ describe("scaffold smoke test", () => {
       </ThemeProvider>,
     );
     expect(screen.getByTestId("app-root")).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: /agentforge/i }),
-    ).toBeInTheDocument();
+    // Unauthenticated by default → the public login view renders.
+    expect(screen.getByTestId("login-view")).toBeInTheDocument();
   });
 
   it("resolves the base URL from import.meta.env.VITE_API_BASE_URL (Req 1.4)", () => {

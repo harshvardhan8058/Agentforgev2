@@ -387,7 +387,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       flips `data-theme`; `< md` renders the drawer while `md+` renders the persistent sidebar.
     - _Requirements: 4.1, 4.6_
 
-- [ ] 14. Implement the auth feature views (`features/auth/`)
+- [x] 14. Implement the auth feature views (`features/auth/`)
   - Implement `LoginView`: submit valid credentials → `POST /auth/login`, store token for
     the Session; on `401 auth_failed` show the envelope message and stay on login; block
     submission with empty email/password.
@@ -415,12 +415,12 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: Routing and Authenticated Layout, Endpoint-to-view interface map (Auth)_
   - _Design: Premium UX & Design System §1 (design language & theming — glass, layout rhythm, typography), §3 (rich loading/empty/success/error states, premium auth + app shell), §5 (accessibility)_
 
-  - [ ]* 14.1 Write component tests for auth flows (MSW)
+  - [x]* 14.1 Write component tests for auth flows (MSW)
     - Cover login stores token (2.1); `401 auth_failed` stays on login (2.2); register `201`
       stores token (2.3); empty-field blocking (2.4); logout clears + routes (3.4).
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 3.4_
 
-- [ ] 15. Implement the org context, RBAC-aware layout, and org switcher (`features/`, layout)
+- [x] 15. Implement the org context, RBAC-aware layout, and org switcher (`features/`, layout)
   - Render the authenticated layout with the persistent `OrgContextBadge`, an RBAC-gated
     navigation menu (each entry wrapped in `Can`), and a logout control.
   - Implement the org switcher: selecting a different organization adopts the stored
@@ -431,13 +431,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.1, 4.6, 4.7_
   - _Design: Routing and Authenticated Layout, State Management Strategy (Server data), Error Handling (404 row)_
 
-  - [ ]* 15.1 Write component tests for org context and switching
+  - [x]* 15.1 Write component tests for org context and switching
     - Cover badge shows Org_Context + Role (4.1); org switch adopts the matching token and
       re-scopes queries (4.6); cross-tenant `404` renders as not-found with no cross-org
       leak (4.7).
     - _Requirements: 4.1, 4.6, 4.7_
 
-- [ ] 16. Implement org member/team management and API-key management (RBAC-gated, over `/orgs/*`)
+- [x] 16. Implement org member/team management and API-key management (RBAC-gated, over `/orgs/*`)
   - Implement member/team management controls gated behind `manage_members` via `Can`,
     calling only the existing shipped `/orgs/*` contracts (list/add/update/remove members
     and teams as exposed by the backend); omit the controls entirely when the permission is
@@ -449,7 +449,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.4, 4.5, 1.6_
   - _Design: Routing and Authenticated Layout (Note on manage_members / manage_api_keys), React component contracts (`Can`)_
 
-  - [ ]* 16.1 Write component tests for management gating
+  - [x]* 16.1 Write component tests for management gating
     - Cover: `manage_members` present → member/team controls in DOM and wired to `/orgs/*`;
       absent → controls omitted from DOM; `manage_api_keys` present → API-key controls in
       DOM and wired to `/orgs/*`; absent → omitted.

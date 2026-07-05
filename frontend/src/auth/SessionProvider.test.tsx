@@ -11,6 +11,7 @@ import {
 } from "./tokenStore";
 import type { Role } from "./token";
 import { ThemeProvider } from "../providers/ThemeProvider";
+import { ToastProvider } from "../providers/ToastProvider";
 import { CommandPaletteProvider } from "../providers/CommandPaletteProvider";
 
 /** Build a JWT with the given claims (well-formed header.payload.signature). */
@@ -41,13 +42,15 @@ function SessionProbe(): JSX.Element {
 function renderApp(initialPath: string) {
   return render(
     <ThemeProvider>
-      <CommandPaletteProvider>
-        <SessionProvider>
-          <MemoryRouter initialEntries={[initialPath]}>
-            <AppRouter />
-          </MemoryRouter>
-        </SessionProvider>
-      </CommandPaletteProvider>
+      <ToastProvider>
+        <CommandPaletteProvider>
+          <SessionProvider>
+            <MemoryRouter initialEntries={[initialPath]}>
+              <AppRouter />
+            </MemoryRouter>
+          </SessionProvider>
+        </CommandPaletteProvider>
+      </ToastProvider>
     </ThemeProvider>,
   );
 }
