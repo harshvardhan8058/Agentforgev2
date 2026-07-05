@@ -89,8 +89,8 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       regenerates `schema.d.ts` deterministically from the backend schema.
     - _Requirements: 1.2, 1.3_
 
-- [ ] 3. Implement the pure auth logic layer (`auth/token.ts`, `auth/rbac.ts`)
-  - [ ] 3.1 Implement `decodeClaims(token)` and `isExpired(claims, nowSeconds)` (`auth/token.ts`)
+- [x] 3. Implement the pure auth logic layer (`auth/token.ts`, `auth/rbac.ts`)
+  - [x] 3.1 Implement `decodeClaims(token)` and `isExpired(claims, nowSeconds)` (`auth/token.ts`)
     - `decodeClaims` decodes a JWT payload and returns a `Claims` (`sub`, `org_id`, `role`,
       `exp`) for a well-formed token carrying all four correctly-typed claims, and returns
       `null` (never throws) for any malformed/undecodable token or any missing/mistyped
@@ -98,34 +98,34 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 3.1, 3.2, 2.1, 2.3_
     - _Design: Pure logic modules (`auth/token.ts`)_
 
-  - [ ] 3.2 Implement `ROLE_PERMISSIONS` and `can(role, permission)` (`auth/rbac.ts`)
+  - [x] 3.2 Implement `ROLE_PERMISSIONS` and `can(role, permission)` (`auth/rbac.ts`)
     - Mirror the backend `enterprise/rbac.py` map exactly: `viewer = {read}`,
       `member = viewer ∪ {run_agents, ingest_documents}`, `admin = member ∪ {manage_api_keys}`,
       `owner = admin ∪ {manage_members}`; `can` is a pure lookup.
     - _Requirements: 4.2, 4.3, 4.4, 4.5_
     - _Design: Pure logic modules (`auth/rbac.ts`)_
 
-  - [ ]* 3.3 Write property test for total, correct claims decoding
+  - [x]* 3.3 Write property test for total, correct claims decoding
     - **Property 1: Claims decoding is total and correct**
     - **Validates: Requirements 3.1, 2.1, 2.3**
     - fast-check over arbitrary well-formed JWT payloads (all four claims) and arbitrary
       malformed/garbage tokens: assert never throws, returns the exact claims for
       well-formed input, and `null` for malformed/missing/mistyped input. Min 100 iterations.
 
-  - [ ]* 3.4 Write property test for expiry deciding authentication
+  - [x]* 3.4 Write property test for expiry deciding authentication
     - **Property 2: Session expiry is decided solely by exp vs. now**
     - **Validates: Requirements 3.2**
     - fast-check over arbitrary `exp`/`nowSeconds` integers: assert
       `isExpired(claims, now) === (claims.exp <= now)`. Min 100 iterations.
 
-  - [ ]* 3.5 Write property test for the RBAC map nesting invariant
+  - [x]* 3.5 Write property test for the RBAC map nesting invariant
     - **Property 4: The client RBAC map mirrors the backend nesting invariant**
     - **Validates: Requirements 4.2, 4.3, 4.4, 4.5**
     - fast-check over the four roles: assert `viewer ⊆ member ⊆ admin ⊆ owner` and every
       role contains `read`. Min 100 iterations.
 
-- [ ] 4. Implement the pure error and SSE logic layer (`api/errors.ts`, `api/sse/*`)
-  - [ ] 4.1 Implement the error-envelope normalizer `mapError(status, body)` (`api/errors.ts`)
+- [x] 4. Implement the pure error and SSE logic layer (`api/errors.ts`, `api/sse/*`)
+  - [x] 4.1 Implement the error-envelope normalizer `mapError(status, body)` (`api/errors.ts`)
     - Total function returning a defined `ClientError` (non-empty `message`, `kind`,
       `status`, `details`, optional `fieldErrors`) for any status (including `null` network
       failure) and any body (valid envelope, partial, garbage, none); copies `code`/
@@ -135,13 +135,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 5.1, 5.2, 5.3, 5.5, 5.6, 4.7, 6.5, 8.5, 9.6, 10.7, 12.7, 14.5, 15.4_
     - _Design: Pure logic modules (`api/errors.ts`), Error Handling (Normalization, Status-specific behavior)_
 
-  - [ ] 4.2 Implement the SSE frame parser `parseSseFrame(raw)` (`api/sse/parse.ts`)
+  - [x] 4.2 Implement the SSE frame parser `parseSseFrame(raw)` (`api/sse/parse.ts`)
     - Pure parse of one `event: <type>\ndata: <json>\n\n` frame into `{ type, data }`
       (with the monotonic `sequence` inside `data`); returns `null` for an unparseable frame.
     - _Requirements: 9.1, 10.2_
     - _Design: Pure logic modules (`api/sse/parse.ts`), SSE Handling_
 
-  - [ ] 4.3 Implement the single-agent reducer (`api/sse/singleAgentReducer.ts`)
+  - [x] 4.3 Implement the single-agent reducer (`api/sse/singleAgentReducer.ts`)
     - Pure `(state, event) -> state` fold keeping non-terminal `step`/`tool_call`/`delta`
       events in `sequence` order, transitioning to `closed` on the first terminal
       (`completion` → answer + citations + termination reason; `error` → error message),
@@ -149,7 +149,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 9.1, 9.2, 9.3_
     - _Design: SSE reducer interfaces (`singleAgentReducer`), SSE Handling_
 
-  - [ ] 4.4 Implement the multi-agent reducer (`api/sse/multiAgentReducer.ts`)
+  - [x] 4.4 Implement the multi-agent reducer (`api/sse/multiAgentReducer.ts`)
     - Pure fold exposing events ordered by `sequence`, bucketing agent events by `role_id`,
       recording `approval_required` as a **non-terminal** pause (`closed = false`, checkpoint
       exposed), and closing only on the single `completion` (final output + citations +
@@ -157,7 +157,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 10.2, 10.3, 10.5_
     - _Design: SSE reducer interfaces (`multiAgentReducer`), SSE Handling_
 
-  - [ ]* 4.5 Write property test for total error-envelope normalization
+  - [x]* 4.5 Write property test for total error-envelope normalization
     - **Property 5: Error-envelope normalization is total**
     - **Validates: Requirements 5.1, 5.2, 5.3, 5.5, 5.6, 4.7, 6.5, 8.5, 9.6, 10.7, 12.7, 14.5, 15.4**
     - fast-check over arbitrary status codes (and `null`) × arbitrary bodies (valid
@@ -166,29 +166,29 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       `kind = "network"` for `null`, no stack text for `500`, and no cross-org leak for
       `404`. Min 100 iterations.
 
-  - [ ]* 4.6 Write property test for SSE frame round-trip
+  - [x]* 4.6 Write property test for SSE frame round-trip
     - **Property 10: SSE frame parsing round-trips the backend frame format**
     - **Validates: Requirements 9.1, 10.2**
     - fast-check over arbitrary `{type, data-with-sequence}` pairs: rendering to
       `event: <type>\ndata: <json>\n\n` then `parseSseFrame` yields equal `type` and `data`.
       Min 100 iterations.
 
-  - [ ]* 4.7 Write property test for the single-agent reducer
+  - [x]* 4.7 Write property test for the single-agent reducer
     - **Property 8: The single-agent reducer preserves order and closes on exactly one terminal**
     - **Validates: Requirements 9.1, 9.2, 9.3**
     - fast-check over arbitrary finite event sequences ending in a terminal: assert order
       preserved, `closed` after first terminal with payload captured, post-terminal events
       ignored, exactly one terminal recorded. Min 100 iterations.
 
-  - [ ]* 4.8 Write property test for the multi-agent reducer
+  - [x]* 4.8 Write property test for the multi-agent reducer
     - **Property 9: The multi-agent reducer orders by sequence, attributes roles, and treats approval as non-terminal**
     - **Validates: Requirements 10.2, 10.3, 10.5**
     - fast-check over arbitrary finite multi-agent event sequences: assert `sequence`
       ordering, `role_id` bucketing, `approval_required` leaves `closed = false` with the
       checkpoint exposed, and closes only on the single `completion`/`error`. Min 100 iterations.
 
-- [ ] 5. Implement the auth middleware and wire it into the API_Client (`api/auth-middleware.ts`)
-  - [ ] 5.1 Implement request-side bearer attachment
+- [x] 5. Implement the auth middleware and wire it into the API_Client (`api/auth-middleware.ts`)
+  - [x] 5.1 Implement request-side bearer attachment
     - Attach `Authorization: Bearer <token>` on every authenticated request when a valid
       token is stored; exempt the public auth endpoints (`/auth/login`, `/auth/register-self`);
       attach nothing when no valid token is stored. Register the middleware on the
@@ -196,7 +196,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 2.6_
     - _Design: API_Client Layer (auth-middleware request)_
 
-  - [ ] 5.2 Implement response-side 401 refresh-once-then-retry
+  - [x] 5.2 Implement response-side 401 refresh-once-then-retry
     - On `401 unauthorized` for an authenticated request, call `POST /auth/refresh`
       **exactly once**; on success replace the stored token and retry the original request
       one time; on refresh failure or a second `401`, clear the token and route to `/login`.
@@ -204,26 +204,26 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 3.3, 3.5, 3.6_
     - _Design: API_Client Layer (auth-middleware response), Error Handling (401 row)_
 
-  - [ ]* 5.3 Write property test for bearer attachment
+  - [x]* 5.3 Write property test for bearer attachment
     - **Property 7: Every authenticated request carries the bearer token**
     - **Validates: Requirements 2.6**
     - fast-check over arbitrary token/endpoint pairs: authenticated endpoints get exactly
       one `Authorization: Bearer <token>`; public auth endpoints never do; no token → no
       header. Min 100 iterations.
 
-  - [ ]* 5.4 Write property test for the bounded 401 refresh path
+  - [x]* 5.4 Write property test for the bounded 401 refresh path
     - **Property 6: The 401 refresh path retries at most once**
     - **Validates: Requirements 3.3, 3.5, 3.6**
     - fast-check over arbitrary 401-then-{success|failure} response sequences (MSW-driven):
       assert at most one `POST /auth/refresh`, at most two original-request attempts, token
       replaced+retried on success, token cleared + `/login` route on failure. Min 100 iterations.
 
-  - [ ]* 5.5 Write an MSW integration test for the refresh flow end-to-end
+  - [x]* 5.5 Write an MSW integration test for the refresh flow end-to-end
     - Assert a live-style 401→refresh→retry→200 succeeds transparently and a
       401→refresh-401 clears the session and redirects to login.
     - _Requirements: 3.3, 3.5, 3.6_
 
-- [ ] 6. Implement the SessionProvider, useSession, and routing (`auth/`, `routing/`)
+- [x] 6. Implement the SessionProvider, useSession, and routing (`auth/`, `routing/`)
   - Implement `SessionProvider` + `useSession`: hydrate token from `localStorage`, decode
     claims via `decodeClaims`, validate expiry via `isExpired`, expose `orgId`/`role`/
     `isAuthenticated`/`login`/`logout`; `logout` clears the token and all derived state.
@@ -235,20 +235,20 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 3.1, 3.2, 3.4, 2.5, 2.1, 2.3_
   - _Design: Routing and Authenticated Layout, State Management Strategy (Session), Components and Interfaces (useSession)_
 
-  - [ ]* 6.1 Write component tests for session hydration and protected routing
+  - [x]* 6.1 Write component tests for session hydration and protected routing
     - Cover hydrate-valid-token → authenticated; expired/malformed token → `/login`;
       logout clears state and routes to `/login`; unauthenticated access to a protected
       route redirects to `/login`.
     - _Requirements: 3.1, 3.2, 3.4, 2.5_
 
-- [ ] 7. Implement the shared RBAC / error / empty-state components (`components/`)
-  - [ ] 7.1 Implement the `Can` RBAC gate (`components/Can.tsx`)
+- [x] 7. Implement the shared RBAC / error / empty-state components (`components/`)
+  - [x] 7.1 Implement the `Can` RBAC gate (`components/Can.tsx`)
     - Render children **iff** `can(role, permission)` for the Session Role; otherwise render
       nothing so the gated control is absent from the DOM (not merely disabled).
     - _Requirements: 4.2, 4.3, 4.4, 4.5_
     - _Design: React component contracts (`Can`)_
 
-  - [ ] 7.2 Implement `OrgContextBadge`, `ErrorBanner`, `EmptyState`, and `RetryNotice`
+  - [x] 7.2 Implement `OrgContextBadge`, `ErrorBanner`, `EmptyState`, and `RetryNotice`
     - `OrgContextBadge` renders the active Org_Context + Role (Req 4.1); `ErrorBanner`
       renders a normalized `ClientError` uniformly (message + relevant details, no stack);
       `EmptyState` renders explicit empty states; `RetryNotice` offers a retry affordance
@@ -256,19 +256,19 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 4.1, 5.1, 5.2, 5.5, 5.6, 6.2_
     - _Design: React component contracts, Error Handling, Graceful degradation_
 
-  - [ ]* 7.3 Write property test for the RBAC gate rendering
+  - [x]* 7.3 Write property test for the RBAC gate rendering
     - **Property 3: Control visibility is a pure function of role and required permission**
     - **Validates: Requirements 4.2, 4.3, 4.4, 4.5, 8.1, 12.4, 14.1**
     - fast-check over the four roles × five permissions rendering `<Can>`: assert the child
       is present in the DOM iff the backend map grants the permission, and absent (not
       disabled) otherwise. Min 100 iterations.
 
-  - [ ]* 7.4 Write component tests for the shared components
+  - [x]* 7.4 Write component tests for the shared components
     - Cover `OrgContextBadge` showing Org_Context + Role; `ErrorBanner` rendering message +
       details with no stack for `500`; `EmptyState` and `RetryNotice` rendering.
     - _Requirements: 4.1, 5.1, 5.2, 5.5, 5.6_
 
-- [ ] 8. Checkpoint — pure logic layer and shared infrastructure
+- [x] 8. Checkpoint — pure logic layer and shared infrastructure
   - Ensure the pure-logic property suite (Properties 1, 2, 3, 4, 5, 6, 7, 8, 9, 10) plus the
     middleware/session/component tests are green against MSW with no network and no
     credentials, and `tsc --noEmit` passes. Ensure all tests pass, ask the user if questions

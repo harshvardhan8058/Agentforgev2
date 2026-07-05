@@ -1,27 +1,19 @@
-import { Routes, Route } from "react-router-dom";
+import { SessionProvider } from "./auth/SessionProvider";
+import { AppRouter } from "./routing/AppRouter";
 
 /**
  * Layout shell + router mount.
  *
- * This is the top-level application shell. Feature routes are added in later
- * tasks (auth, query, documents, agent, multi-agent, analytics, prompts,
- * guardrails, evaluations, conversations); for the scaffold it mounts only a
- * placeholder root so the app renders and the router is wired.
+ * Wraps the application in the `SessionProvider` (token + derived claims) and
+ * mounts the `AppRouter` (public `/login`, `/register` + protected routes).
+ * Feature views and the premium app shell are layered in by later tasks.
  */
 export default function App(): JSX.Element {
   return (
-    <div className="app-shell" data-testid="app-root">
-      <Routes>
-        <Route
-          path="*"
-          element={
-            <main>
-              <h1>AgentForge</h1>
-              <p>Web console — scaffold ready.</p>
-            </main>
-          }
-        />
-      </Routes>
-    </div>
+    <SessionProvider>
+      <div className="app-shell" data-testid="app-root">
+        <AppRouter />
+      </div>
+    </SessionProvider>
   );
 }
