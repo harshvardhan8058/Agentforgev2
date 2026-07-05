@@ -61,6 +61,8 @@ class QueryResponse(BaseModel):
     grounded: bool
     provider: str
     citations: list[CitationModel] = Field(default_factory=list)
+    # Phase 6: output-guardrail annotations attached without blocking (Req 5.5, 5.6).
+    flags: list[str] = Field(default_factory=list)
 
 
 # --- documents (contract for Phase 2 wiring) ---
@@ -110,6 +112,8 @@ class AgentRunResponse(BaseModel):
     answer: str
     termination_reason: Literal["final-answer", "iteration-limit-reached"]
     citations: list[CitationModel] = Field(default_factory=list)
+    # Phase 6: output-guardrail annotations attached without blocking (Req 5.5, 5.6).
+    flags: list[str] = Field(default_factory=list)
 
 
 class TraceEntryModel(BaseModel):
@@ -152,6 +156,8 @@ class StartMultiAgentRunResponse(BaseModel):
     run_id: str
     conversation_id: str
     status: MultiAgentRunStatus
+    # Phase 6: output-guardrail annotations attached without blocking (Req 5.5, 5.6).
+    flags: list[str] = Field(default_factory=list)
 
 
 ApprovalDecisionKind = Literal["approve", "reject", "edit"]
@@ -299,3 +305,152 @@ class ApiKeyMetadata(BaseModel):
     key_prefix: str
     revoked_at: datetime | None = None
     created_at: datetime
+
+
+
+# --- observability: analytics / cost (Phase 6) ------------------------------------
+
+
+class UsageBreakdownEntry(BaseModel):
+    """One grouped row of a usage breakdown (by provider / model / user) (Req 3.2)."""
+
+    key: str
+    total_tokens: int
+    # Exact monetary total rendered as a string so no float drift crosses the wire.
+    total_cost: str
+
+
+class UsageReportResponse(BaseModel):
+    """Aggregated usage + cost for the caller's org over a time range (Req 3.1, 3.4)."""
+
+    org_id: UUID
+    start: datetime
+    end: datetime
+    total_tokens: int
+    total_cost: str
+    by_provider: list[UsageBreakdownEntry] = Field(default_factory=list)
+    by_model: list[UsageBreakdownEntry] = Field(default_factory=list)
+    by_user: list[UsageBreakdownEntry] = Field(default_factory=list)
+
+
+# --- observability: prompt registry (Phase 6) -------------------------------------
+
+
+class CreatePromptVersionRequest(BaseModel):
+    """Body for ``POST /prompts`` — append a new immutable Prompt_Version (Req 4.1)."""
+
+    name: str = Field(..., min_length=1)
+    body: str = Field(..., min_length=1)
+    variables: list[str] = Field(default_factory=list)
+
+
+class PromptVersionResponse(BaseModel):
+    """A resolved Prompt_Version (latest or a specific number) (Req 4.3, 4.4)."""
+
+    id: UUID
+    name: str
+    version: int
+    body: str
+    variables: list[str] = Field(default_factory=list)
+    created_at: datetime
+
+
+class RenderPromptRequest(BaseModel):
+    """Body for ``POST /prompts/{name}/render`` — supply the variable values (Req 4.6)."""
+
+    variables: dict[str, str] = Field(default_factory=dict)
+    version: int | None = None
+
+
+class RenderPromptResponse(BaseModel):
+    """The rendered prompt string for a resolved version (Req 4.6)."""
+
+    name: str
+    version: int
+    rendered: str
+
+
+# --- observability: guardrails (Phase 6) ------------------------------------------
+
+
+class GuardrailInfo(BaseModel):
+    """An active guardrail's stable name and kind (Req 5.1)."""
+
+    name: str
+    kind: str
+
+
+class GuardrailConfigResponse(BaseModel):
+    """The ordered list of active guardrails (names + kinds) (Req 5.1)."""
+
+    guardrails: list[GuardrailInfo] = Field(default_factory=list)
+
+
+class GuardrailEvaluateRequest(BaseModel):
+    """Body for ``POST /guardrails/evaluate`` — content to run through the pipeline."""
+
+    content: str = ""
+
+
+class GuardrailEvaluateResponse(BaseModel):
+    """The pipeline's allow / flag / block decision with flags/reason (Req 5.2-5.5)."""
+
+    decision: Literal["allow", "flag", "block"]
+    flags: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+
+# --- observability: evaluation framework (Phase 6) --------------------------------
+
+
+class EvaluationItemRequest(BaseModel):
+    """One dataset item: an input and an optional expected output (Req 6.1)."""
+
+    input: str = Field(..., min_length=1)
+    expected: str | None = None
+
+
+class CreateDatasetRequest(BaseModel):
+    """Body for ``POST /evaluations/datasets`` — a named dataset + its items (Req 6.1)."""
+
+    name: str = Field(..., min_length=1)
+    items: list[EvaluationItemRequest] = Field(default_factory=list)
+
+
+class CreateDatasetResponse(BaseModel):
+    """Response carrying the newly-created Evaluation_Dataset id (Req 6.1)."""
+
+    dataset_id: UUID
+    name: str
+
+
+class DatasetSummary(BaseModel):
+    """Safe metadata for one Evaluation_Dataset in the org's list (Req 6.5)."""
+
+    dataset_id: UUID
+    name: str
+    created_at: datetime
+
+
+class EvaluationRunRequest(BaseModel):
+    """Body for ``POST /evaluations/runs`` — run named evaluators over a dataset (Req 6.2)."""
+
+    dataset_id: UUID
+    evaluators: list[str] = Field(..., min_length=1)
+
+
+class EvaluationItemScore(BaseModel):
+    """The score one Evaluator assigned to one item within a run (Req 6.9)."""
+
+    item_id: UUID
+    evaluator: str
+    score: float
+
+
+class EvaluationRunResponse(BaseModel):
+    """A persisted Evaluation_Run: aggregate + per-item scores (Req 6.9)."""
+
+    run_id: UUID
+    dataset_id: UUID
+    aggregate_score: float
+    results: list[EvaluationItemScore] = Field(default_factory=list)

@@ -27,6 +27,12 @@ NIL_ORG_ID: UUID = UUID("00000000-0000-0000-0000-000000000000")
 
 _current_org: ContextVar[UUID] = ContextVar("current_org_id", default=NIL_ORG_ID)
 
+# A parallel context var carrying the acting Principal's ``user_id`` (or ``None`` for an
+# API-key/unattributed call). Published alongside the org by the orchestrator entry points
+# so cross-cutting consumers — e.g. the Phase 6 ``Instrumented_Provider`` — can attribute
+# usage to the right user without widening the ``LLM_Provider`` (or tool) contract.
+_current_user: ContextVar[UUID | None] = ContextVar("current_user_id", default=None)
+
 
 def set_current_org(org_id: UUID) -> None:
     """Publish ``org_id`` as the tenant in force for the current synchronous call stack."""
@@ -36,3 +42,13 @@ def set_current_org(org_id: UUID) -> None:
 def current_org() -> UUID:
     """Return the tenant in force for the current call, or :data:`NIL_ORG_ID` if unset."""
     return _current_org.get()
+
+
+def set_current_user(user_id: UUID | None) -> None:
+    """Publish ``user_id`` as the acting user for the current synchronous call stack."""
+    _current_user.set(user_id)
+
+
+def current_user() -> UUID | None:
+    """Return the acting user for the current call, or ``None`` if unset."""
+    return _current_user.get()

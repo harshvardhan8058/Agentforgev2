@@ -567,3 +567,249 @@ That is the entire contract; the store is the enforcement point, so a forgotten 
 never leak another tenant's data.
 
 _Validates: Requirements 11.1, 11.2, 11.3, 11.4._
+
+
+
+---
+
+# Phase 6 — Production Observability (Tracing Export, Token/Cost Analytics, Prompt Registry, Guardrails, Evaluation)
+
+This section records the rationale for the Phase 6 `Observability_Layer` (Requirement 12).
+Everything here **reuses, never reimplements** the Phase 1–5 seams: the async FastAPI
+`API_Service` and its uniform `AppError` envelope, `Settings` + `load_settings` +
+`config/container.py`, Postgres + pgvector + the versioned migration runner, Redis, the
+pluggable `LLM_Provider` seam with the deterministic keyless `Fallback_Provider`, the
+`Trace_Recorder` + `Trace` (consumed, not reimplemented, by the exporter), and the Phase 5
+enterprise layer — the `Principal`, `get_current_principal` + `require_permission`
+dependencies, the static `RBAC_Policy`, and the request-scoped tenancy context. The layer
+is fully runnable and testable **keyless**: with no `Tracing_Credential` and no external LLM
+credential, `settings.active_tracing_exporter() == "noop"`, the wired provider is the
+`Fallback_Provider` wrapped by the `Instrumented_Provider`, the `Default_Cost_Model` uses its
+deterministic default rate, the default guardrails and evaluators are pure functions, and the
+usage/prompt/evaluation stores are in-memory.
+
+## 32. A decorator over the `LLM_Provider` seam for usage capture
+
+Usage and cost emission is a cross-cutting concern that must apply to **every** provider
+without changing the `generate(prompt) -> GenerationResult` contract or editing any concrete
+provider. Modeling it as a decorator — `Instrumented_Provider` *implements* `LLM_Provider`
+and wraps another `LLM_Provider` — is the minimal way to achieve this. It is wired **in the
+composition root** in place of the bare provider inside `build_app_context`, so Groq and
+Fallback are instrumented identically and every downstream RAG/agent/multi-agent flow emits
+usage transparently. Callers cannot tell they are talking to a wrapper because the wrapper
+exposes the wrapped provider's `name` and the same `generate` signature. Critically,
+**delegation happens before emission** and the emission block is wrapped in a guard that
+swallows any exception, so a `Usage_Sink` failure can never turn a successful generation into
+an error — the wrapped result is always returned unchanged. The token count on the keyless
+path is `deterministic_token_count(prompt, result)`, a pure function of the request/response
+text, so with the `Fallback_Provider` the emitted `Usage_Record` is fully deterministic, and
+`total_tokens = prompt_tokens + completion_tokens` holds by construction.
+
+_Validates: Requirements 2.1, 2.4, 2.7, 7.1, 7.2, 7.7, 9.2._
+
+## 33. The `Tracing_Exporter` as a consumer of the existing `Trace`, with suppressed failures
+
+Trace *recording* is already solved by the Phase 3/4 `Trace_Recorder`; export is a read-side
+concern layered on top. Reimplementing recording would duplicate logic and risk drift, so the
+`Tracing_Exporter` **consumes** the already-recorded `Trace` and forwards it to an external
+destination, never recording steps itself. It is invoked at run completion — off the critical
+path, after the run's result is produced — and tags the exported trace with the acting
+`Principal`'s `org_id` and `user_id`. The `export` method wraps its forward in a `try/except`
+that **suppresses** any external error, guaranteeing that trace export never changes the
+outcome of a run. `NoOp_Tracing_Exporter` is the keyless default so **no external call is ever
+made without a credential**; `build_tracing_exporter(settings)` selects the LangSmith-backed
+exporter only when `active_tracing_exporter() == "langsmith"` (a `Tracing_Credential` is
+present and export is enabled). A new exporter is added by implementing the interface and
+registering a builder — no orchestrator or recorder edit.
+
+_Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 9.1._
+
+## 34. Immutable, monotonically-versioned prompts with a DB uniqueness constraint
+
+Safe prompt evolution requires that a version, once referenced by a run, can never change
+underneath it. A `Prompt_Version` is therefore **append-only**: there is no update path,
+`create_version` computes `max(version)+1` per `(org_id, name)` (or `1` for the first), and
+the database `UNIQUE (template_id, version)` constraint makes a duplicate version
+**structurally impossible** even under concurrent creates. This makes both immutability and a
+contiguous `1..N` sequence with no gaps or duplicates a structural guarantee rather than a
+convention; `list_versions` returns the numbers ascending and `get_latest` returns the highest.
+Rendering is a pure function that **fails closed**: supplying every declared variable produces
+the substituted string, while omitting any declared variable raises
+`AppError("missing_variable", 400, {"missing": [...]})`, so a half-substituted prompt never
+reaches a model.
+
+_Validates: Requirements 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.9, 8.6._
+
+## 35. An ordered guardrail pipeline with allow/flag/block and a block short-circuit
+
+Guardrails must be composable and their combination predictable. The `Guardrail_Pipeline`
+evaluates guardrails in a **stable configured order**, accumulates flags, and **stops at the
+first block**. This yields a single, testable semantics: `ALLOW` when every guardrail allows;
+`ALLOW` carrying all accumulated flags when some flag and none block; and `BLOCK` with the
+reason when a guardrail blocks, with no guardrail evaluated after the first block. Applied at
+the query/agent/multi-agent entry points via the reusable `apply_input_guardrail(pipeline,
+content, downstream)` helper, a blocking **input** raises `AppError("guardrail_blocked", 400,
+{"reason": ...})` and the downstream `LLM_Provider`/agent/multi-agent orchestrator is
+**never** invoked — the safety guarantee — while the **output** pipeline annotates the
+response with flags without blocking — the observability guarantee. The default guardrails
+(non-empty, max-input-length, static blocklist) are pure functions of the content, so the
+keyless path stays deterministic, and a new guardrail is a composition-root registration with
+no entry-point edit.
+
+_Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8._
+
+## 36. Deterministic evaluation on the keyless `Fallback_Provider` with pure evaluators
+
+The value of an evaluation harness for learning and CI is **reproducibility**: the same
+dataset + evaluators must yield the same scores every time, with no credential. The
+`Evaluation_Framework` runs the real RAG/agent pipeline but through the injected keyless
+`pipeline_runner` (the `Fallback_Provider`, a pure function of its prompt), and every
+evaluator (`Exact_Match`, `Contains`, `Heuristic`) is a pure function of
+`(input, expected, actual)`. The `Aggregate_Score` is the mean of the per-item scores. This
+makes an `Evaluation_Run` bit-for-bit repeatable, so both the determinism guarantee and the
+aggregate-equals-aggregation invariant are checkable. Datasets, items, and runs are all
+`org_id`-scoped, so a cross-tenant dataset or run resolves to `AppError("not_found", 404)`. A
+new evaluator is registered in the composition root without touching the run logic.
+
+_Validates: Requirements 6.2, 6.3, 6.4, 6.5, 6.6, 6.8, 6.9._
+
+## 37. `Decimal` cost and a total `Cost_Model` with a default rate
+
+Money must not suffer float rounding, so `Cost` is a `Decimal` throughout and the
+`usage_records.cost` column is `NUMERIC(20,8)`. The `Cost_Model` is defined over its
+**entire** input space: `Default_Cost_Model` holds a per-1K-token rate table keyed by
+`(provider, model)` and falls back to a configured `default_rate` for any unlisted pair, so a
+new or misconfigured model never produces an undefined cost or a crash on the hot path. The
+computation is exact: `prompt/1000 * prompt_per_1k + completion/1000 * completion_per_1k` in
+`Decimal`. The keyless default rate is `0.0`, keeping keyless usage records deterministic, and
+a new `Cost_Model` is registered in the composition root without touching the
+`Instrumented_Provider` or the `LLM_Provider` contract.
+
+_Validates: Requirements 2.2, 2.5, 2.6._
+
+## 38. Tenant isolation enforced at the data-access layer (404, never 403)
+
+Consistent with Phase 5, tenancy for every observability resource is enforced **at the store,
+not the handler**, because any endpoint that forgets a check leaks data. Every Phase 6 store
+method (`Usage_Store`, `Prompt_Store`, `Evaluation_Store` and their `InMemory_*` / `Pg_*`
+implementations) takes `org_id` as a **required** parameter and constrains its query with
+`WHERE org_id = :org_id` (and, for descendants, through the parent FK), so a cross-tenant
+read/mutate matches **zero rows** → `None`/`[]` → `AppError("not_found", 404)`. Cross-tenant
+access is **404, never 403**, because a 403 would leak the fact that a resource exists in
+another org. Every new table (`usage_records`, `prompt_templates`, `prompt_versions`,
+`evaluation_datasets`, `evaluation_items`, `evaluation_runs`, `evaluation_results`) carries
+`org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE`, so deleting an org
+sweeps its observability state transitively. Because the store cannot return cross-org rows,
+the handler cannot forget the check.
+
+_Validates: Requirements 10.3, 10.4, 10.5._
+
+## How-to — Adding a new `Tracing_Exporter` without modifying any core flow
+
+Export lives entirely behind the `Tracing_Exporter` interface, so a new tracer is an
+adapter + composition edit only:
+
+1. **Implement `Tracing_Exporter`** in a new module under `observability/` (e.g.
+   `tracing_exporter.py` or a sibling). Provide the two members:
+   - `name` — a stable string identifying the exporter (e.g. `"otel"`).
+   - `export(trace, *, org_id, user_id) -> None` — map the consumed `Trace` to the external
+     run/span shape, tag it with `org_id`/`user_id` metadata, and **wrap the forward in a
+     `try/except` that suppresses any exception** — suppression is the contract, so export can
+     never change a run's outcome. Never record steps here; the `Trace` is already produced by
+     the reused `Trace_Recorder`.
+2. **Select it in the composition root** (`config/container.py`, `build_tracing_exporter`):
+   extend the selection so your exporter is returned when its credential/toggle is present,
+   keeping `NoOp_Tracing_Exporter` as the keyless default so no external call is made without a
+   credential. Add any new credential/toggle to `Settings` as an optional `SecretStr` / bounded
+   field so keyless boot is preserved.
+
+No edit to either orchestrator, to the `Trace_Recorder`, or to any router is required.
+
+## How-to — Adding a new `Cost_Model` without modifying the `Instrumented_Provider`
+
+The `Instrumented_Provider` and `Usage_Recorder` depend only on the abstract `Cost_Model`:
+
+1. **Implement `Cost_Model`** in `observability/cost.py` (or a sibling): provide
+   `cost_for(provider, model, tokens) -> Decimal`. Keep it **total** — return a defined,
+   non-negative `Decimal` for every `(provider, model, Token_Count)`, including unlisted pairs
+   (fall back to a default rate) — so the hot path never raises. Use `Decimal` arithmetic
+   throughout; never `float`.
+2. **Select it in the composition root** (`config/container.py`, `build_cost_model`):
+   construct your model from `Settings` and return it. The `Usage_Recorder` receives it by
+   injection, so neither the `Instrumented_Provider` nor the `LLM_Provider` contract changes.
+
+## How-to — Adding a new `Guardrail` without modifying any entry point
+
+Guardrails compose behind the `Guardrail` interface and the `Guardrail_Pipeline`:
+
+1. **Implement `Guardrail`** in `observability/guardrails/` (e.g. `defaults.py` or a sibling):
+   provide `name` and `check(content) -> Guardrail_Result` returning `ALLOW`, `FLAG` (with
+   annotations), or `BLOCK` (with a reason). Keep `check` a **pure function of `content`** so
+   the keyless path stays deterministic.
+2. **Add it to the pipeline in the composition root** (`config/container.py`,
+   `build_guardrail_pipeline`): insert it at the desired position in the ordered guardrail list.
+   Order matters — the pipeline evaluates in order and short-circuits at the first `BLOCK`.
+
+Because the query/agent/multi-agent entry points call the pipeline through
+`apply_input_guardrail(...)`, no handler or orchestrator changes when a guardrail is added.
+
+## How-to — Adding a new `Evaluator` without modifying the run logic
+
+Evaluators sit behind the `Evaluator` interface consumed by the `Evaluation_Framework`:
+
+1. **Implement `Evaluator`** in `observability/evaluation/evaluators.py`: provide `name` and
+   `score(*, input, expected, actual) -> float` as a **pure function of its inputs**, so
+   repeated runs on the keyless path are identical.
+2. **Register it in the composition root** (`config/container.py`,
+   `build_evaluation_framework`): add it to the `evaluators` mapping keyed by its name. A run
+   references it by name in `evaluator_names`; the framework loads the org-scoped dataset,
+   produces each item's actual output via the keyless `pipeline_runner`, scores with each named
+   evaluator, and persists the run — no change to `framework.py` is required.
+
+## How-to — How the `Instrumented_Provider` captures usage without breaking the contract or the keyless promise
+
+The instrumentation is invisible to callers and to the keyless lane by design:
+
+1. **It implements `LLM_Provider`.** `Instrumented_Provider` exposes the wrapped provider's
+   `name` and the same `generate(prompt) -> GenerationResult`, so RAG_Service and the
+   orchestrators see no signature change. It is wired in the composition root in place of the
+   bare provider, so every provider is instrumented identically.
+2. **Delegate first, emit second, guard the emission.** `generate` calls the wrapped provider
+   **first**, then computes a `Token_Count` and forwards exactly one emission to the
+   `Usage_Sink` inside a `try/except` that swallows any exception — so a sink or store failure
+   never changes the returned `GenerationResult`.
+3. **Attribution without widening the contract.** `org_id`/`user_id` are read from the
+   request-scoped tenancy context (`enterprise/tenancy`), not passed through `generate`, so the
+   `LLM_Provider` surface stays unchanged.
+4. **Keyless promise preserved.** The default `token_counter` is a pure function of the
+   request/response text, the default sink writes to the in-memory `Usage_Store`, and the
+   `Default_Cost_Model` uses its deterministic default rate — so wrapping the `Fallback_Provider`
+   keeps every usage record reproducible with zero credentials.
+
+_Validates: Requirements 12.1, 12.2, 12.3._
+
+## How-to — How tenant isolation is enforced for observability resources at the data-access layer
+
+Enforcement is structural and identical to Phase 5:
+
+1. **`org_id` is a required store parameter.** Every `Usage_Store`, `Prompt_Store`, and
+   `Evaluation_Store` method takes `org_id` and constrains its query with
+   `WHERE org_id = :org_id` (descendants through their parent FK), so a cross-tenant row is
+   never returned — the store yields `None`/`[]`.
+2. **The router maps a miss to 404, never 403.** Handlers thread `principal.org_id` into the
+   store; a `None`/empty result raises `AppError("not_found", 404)`, so cross-tenant existence
+   is never leaked.
+3. **The schema backs it up.** Every Phase 6 table carries
+   `org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE`, so an org delete
+   sweeps its observability state transitively and no orphaned cross-tenant row can survive.
+
+Because the store is the enforcement point, a forgotten handler check can never leak another
+tenant's usage, prompts, or evaluations.
+
+_Validates: Requirement 12.4._
+
+---
+
+_Scope note:_ this record now covers Phases 1–6. The React frontend, third-party integrations
+(Slack, Gmail, Drive, GitHub), and cloud deployment remain reserved for later phases and are
+enabled — but not designed — by the modular seams established here.

@@ -27,7 +27,11 @@ from fastapi import APIRouter, Depends, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
-from agentforge.api.deps import get_multi_agent_context, require_permission
+from agentforge.api.deps import (
+    get_multi_agent_context,
+    get_optional_guardrail_pipeline,
+    require_permission,
+)
 from agentforge.api.errors import AppError
 from agentforge.api.schemas import (
     ApprovalDecisionRequest,
@@ -43,6 +47,10 @@ from agentforge.config.container import MultiAgentContext
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.rbac import Permission
 from agentforge.enterprise.tenancy import set_current_org
+from agentforge.observability.guardrails.base import (
+    Guardrail_Pipeline,
+    apply_input_guardrail,
+)
 from agentforge.multiagent.approval import RunNotAwaitingApprovalError
 from agentforge.multiagent.models import (
     Approval_Decision,
@@ -105,6 +113,7 @@ def _termination_reason_name(run: Multi_Agent_Run) -> str | None:
 async def start_multi_agent_run(
     payload: StartMultiAgentRunRequest,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
+    pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> StartMultiAgentRunResponse:
     """Start a Multi_Agent_Run, persist it, and run it synchronously to completion.
@@ -114,6 +123,11 @@ async def start_multi_agent_run(
     is persisted before the orchestrator runs (Req 10.1), the terminal ``Final_Output``
     and ``Termination_Reason`` are persisted on completion (Req 10.5), and a start-time
     failure surfaces through the existing uniform error envelope (Req 9.1).
+
+    The input guardrail pipeline runs **before** the run is created and the orchestrator
+    is invoked: a blocking guardrail raises ``AppError("guardrail_blocked", 400)`` and the
+    downstream multi-agent orchestrator is never reached (Req 5.4). The output pipeline
+    runs on the terminal output and its flags are attached to the response (Req 5.5, 5.6).
     """
 
     org_id = principal.org_id
@@ -123,37 +137,51 @@ async def start_multi_agent_run(
             org_id
         )
 
-        try:
-            run = ctx.run_store.create(org_id, conversation_id, payload.task)
-            # Reuse the run_store-assigned id so the orchestrator, the trace, and the
-            # store record all key off the same run_id.
-            final_state = ctx.orchestrator.run(
-                payload.task,
-                conversation_id=conversation_id,
-                run_id=run.id,
-                org_id=org_id,
-            )
-            ctx.run_store.terminate(
-                org_id,
-                run.id,
-                final_state.final_output,
-                final_state.termination_reason or Termination_Reason.ABORTED,
-            )
-        except AppError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - render through the uniform envelope
-            raise AppError(
-                "run_start_failed",
-                f"failed to start multi-agent run: {exc}",
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-            ) from exc
+        def _invoke() -> object:
+            try:
+                run = ctx.run_store.create(org_id, conversation_id, payload.task)
+                # Reuse the run_store-assigned id so the orchestrator, the trace, and the
+                # store record all key off the same run_id.
+                final_state = ctx.orchestrator.run(
+                    payload.task,
+                    conversation_id=conversation_id,
+                    run_id=run.id,
+                    org_id=org_id,
+                )
+                ctx.run_store.terminate(
+                    org_id,
+                    run.id,
+                    final_state.final_output,
+                    final_state.termination_reason or Termination_Reason.ABORTED,
+                )
+            except AppError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - render through the uniform envelope
+                raise AppError(
+                    "run_start_failed",
+                    f"failed to start multi-agent run: {exc}",
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                ) from exc
+            return run
+
+        # Input guardrail: a block prevents run creation + orchestration entirely (Req 5.4).
+        if pipeline is not None:
+            run = apply_input_guardrail(pipeline, payload.task, _invoke)
+        else:
+            run = _invoke()
 
         # After ``terminate`` the persisted run has status = "terminated".
         persisted = ctx.run_store.get(org_id, run.id) or run
+
+        flags: list[str] = []
+        if pipeline is not None and persisted.final_output is not None:
+            flags = list(pipeline.evaluate(persisted.final_output.content).flags)
+
         return StartMultiAgentRunResponse(
             run_id=persisted.id,
             conversation_id=persisted.conversation_id,
             status=_run_status_name(persisted),
+            flags=flags,
         )
 
     return await run_in_threadpool(_start)
