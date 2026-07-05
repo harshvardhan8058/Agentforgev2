@@ -953,3 +953,14 @@ _Validates: Requirements 1.5, and the keyless/deterministic testing strategy._
    (Decision 42).
 5. **Test keyless.** Add MSW-backed component tests and, for any new pure logic, a fast-check
    property test (Decision 47).
+
+
+## Phase 7 status
+
+**COMPLETE and in review on PR #14** (base `main`). The Web_Client ships **UI-only** over
+the shipped Phase 1–6 HTTP/SSE contracts with **no backend capability or contract change**.
+Verification: **168 keyless tests** (Vitest + React Testing Library over MSW, including
+simulated `text/event-stream` SSE and network failures) and **15/15 correctness properties**
+(fast-check, ≥100 iterations each) pass; `tsc --noEmit` contract-fidelity, `codegen:check`
+schema-drift, and the `scan:bundle` no-secret checks all pass. Task 30 — the final manual
+Phase Completion checkpoint — is intentionally **left for the user**.

@@ -72,3 +72,30 @@ the `integration` marker and are excluded by default. To run them with the stack
 ```bash
 pytest -m integration
 ```
+
+
+## Web Frontend (Phase 7)
+
+A React + Vite + TypeScript operator console lives in [`/frontend`](./frontend). It is a
+**UI-only** client over the already-shipped Backend_API (Phases 1–6): it consumes the
+stable HTTP/SSE contracts and introduces **no new backend capability and no backend
+contract change**. Its typed API surface is generated from the backend's OpenAPI schema,
+so the client can never drift from the shipped contracts.
+
+The console runs **keyless** in test — the full suite is mocked (MSW) and deterministic,
+requiring no live backend and no credentials. See
+[`frontend/README.md`](./frontend/README.md) for the full details on configuration
+(`VITE_API_BASE_URL`, no secrets), the design system, and the pure-logic / feature-view
+layering.
+
+### Frontend scripts
+
+```bash
+cd frontend
+npm install         # install dependencies
+npm run dev         # start the Vite dev server with HMR
+npm run build       # type-check then produce the production bundle
+npm run test        # run the full keyless test suite once (property + component/integration)
+npm run typecheck   # tsc --noEmit contract-fidelity type-check
+npm run ci          # full local gate: codegen:check -> typecheck -> test -> build -> scan:bundle
+```
