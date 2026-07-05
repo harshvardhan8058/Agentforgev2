@@ -455,7 +455,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       DOM and wired to `/orgs/*`; absent → omitted.
     - _Requirements: 4.4, 4.5_
 
-- [ ] 17. Implement the RAG query view with citations (`features/query/`)
+- [x] 17. Implement the RAG query view with citations (`features/query/`)
   - Implement `RagQueryView`: submit a non-empty query → `POST /query` with `top_k`, display
     the answer and `provider`; render each Citation's `document_id`/`chunk_id`; indicate
     ungrounded when `grounded` is false with empty citations; display guardrail `flags`;
@@ -483,13 +483,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: Endpoint-to-view interface map (Query), Error Handling (guardrail_blocked)_
   - _Design: Premium UX & Design System §3 (live streaming chat / inline citations, rich loading/empty/success/error states, command palette), §2 (markdown & motion stack), §4 (streaming smoothness), §5 (responsiveness & live regions); validates Property 15_
 
-  - [ ]* 17.1 Write component tests for the query view (MSW)
+  - [x]* 17.1 Write component tests for the query view (MSW)
     - Cover submit renders answer + provider (7.1, 7.6); citations render (7.2); ungrounded
       indicator (7.3); flags render (7.4); `guardrail_blocked` withholds answer + shows
       reason (7.5).
     - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6_
 
-- [ ] 18. Implement the documents view (`features/documents/`)
+- [x] 18. Implement the documents view (`features/documents/`)
   - Implement `DocumentListView` + `UploadControl`: list `GET /documents` with filename,
     content type, size, status, chunk count, created-at; upload via `POST /documents`
     (multipart) showing `document_id`/`filename`/`chunk_count`/`status`; delete via
@@ -514,12 +514,12 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: Endpoint-to-view interface map (Documents), Error Handling (Document errors)_
   - _Design: Premium UX & Design System §3 (rich loading/empty/success/error states, toasts), §5 (responsiveness — cards on mobile), §1 (layout rhythm)_
 
-  - [ ]* 18.1 Write component tests for the documents view (MSW)
+  - [x]* 18.1 Write component tests for the documents view (MSW)
     - Cover upload multipart + result fields (8.1, 8.2); list metadata rows (8.3); delete
       removes row on `204` (8.4); a document error status shows the envelope message (8.5).
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
 
-- [ ] 19. Implement the SSE transport hook and single-agent run + trace view (`api/sse/stream.ts`, `features/agent/`)
+- [x] 19. Implement the SSE transport hook and single-agent run + trace view (`api/sse/stream.ts`, `features/agent/`)
   - Implement `api/sse/stream.ts`: a `fetch` + `ReadableStream` SSE transport (POST,
     `Accept: text/event-stream`, bearer via the shared middleware) that splits frames on the
     blank-line delimiter, feeds `parseSseFrame`, and supports cancellation via
@@ -553,13 +553,13 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: SSE Handling, Components and Interfaces (`useSseRun`), Endpoint-to-view interface map (Single-agent)_
   - _Design: Premium UX & Design System §3 (live streaming chat / inline citations, trace timeline visualization, graceful NoOp-trace degradation), §4 (virtualization, memoization, streaming smoothness), §2 (markdown & motion stack); validates Property 15_
 
-  - [ ]* 19.1 Write component/integration tests for single-agent run + trace (MSW SSE)
+  - [x]* 19.1 Write component/integration tests for single-agent run + trace (MSW SSE)
     - Cover streamed events render in order + `completion` renders answer/citations (9.1,
       9.2); `error` terminal shows detail (9.3); non-streaming run fields (9.4); trace
       ordered by ordinal (9.5); trace `404` not-found (9.6); cancel aborts the stream (9.7).
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7_
 
-- [ ] 20. Checkpoint — auth, layout, core feature views, and streaming transport
+- [x] 20. Checkpoint — auth, layout, core feature views, and streaming transport
   - Ensure auth/org/query/documents/single-agent views and the SSE transport are green
     against MSW (including simulated `text/event-stream`), with the RBAC gate omitting
     unauthorized controls. Ensure all tests pass, ask the user if questions arise.

@@ -22,6 +22,9 @@ import { RegisterView } from "../features/auth/RegisterView";
 import { DashboardView } from "../features/dashboard/DashboardView";
 import { MembersView } from "../features/orgs/MembersView";
 import { ApiKeysView } from "../features/orgs/ApiKeysView";
+import { RagQueryView } from "../features/query/RagQueryView";
+import { DocumentListView } from "../features/documents/DocumentListView";
+import { SingleAgentRunView } from "../features/agent/SingleAgentRunView";
 
 function UnauthenticatedRedirectBridge(): null {
   const navigate = useNavigate();
@@ -41,6 +44,9 @@ export function AppRouter(): JSX.Element {
         <Route path="/register" element={<RegisterView />} />
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<DashboardView />} />
+          <Route path="/query" element={<RagQueryView />} />
+          <Route path="/documents" element={<DocumentListView />} />
+          <Route path="/agents" element={<SingleAgentRunView />} />
           <Route path="/members" element={<MembersView />} />
           <Route path="/api-keys" element={<ApiKeysView />} />
           <Route path="*" element={<DashboardView />} />
