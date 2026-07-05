@@ -29,27 +29,36 @@ function UnauthenticatedRedirectBridge(): null {
 /** Placeholder auth surfaces — replaced by the feature views in later tasks. */
 function LoginPlaceholder(): JSX.Element {
   return (
-    <main data-testid="login-view">
-      <h1>AgentForge</h1>
-      <p>Sign in to your workspace.</p>
+    <main
+      data-testid="login-view"
+      className="flex min-h-screen flex-col items-center justify-center gap-2 bg-bg p-6 text-center"
+    >
+      <h1 className="text-3xl font-semibold text-text">AgentForge</h1>
+      <p className="text-sm text-text-muted">Sign in to your workspace.</p>
     </main>
   );
 }
 
 function RegisterPlaceholder(): JSX.Element {
   return (
-    <main data-testid="register-view">
-      <h1>AgentForge</h1>
-      <p>Create your account.</p>
+    <main
+      data-testid="register-view"
+      className="flex min-h-screen flex-col items-center justify-center gap-2 bg-bg p-6 text-center"
+    >
+      <h1 className="text-3xl font-semibold text-text">AgentForge</h1>
+      <p className="text-sm text-text-muted">Create your account.</p>
     </main>
   );
 }
 
 function HomePlaceholder(): JSX.Element {
   return (
-    <main data-testid="home-view">
-      <h1>AgentForge</h1>
-      <p>Web console.</p>
+    <main
+      data-testid="home-view"
+      className="flex min-h-screen flex-col items-center justify-center gap-2 bg-bg p-6 text-center"
+    >
+      <h1 className="text-3xl font-semibold text-text">AgentForge</h1>
+      <p className="text-sm text-text-muted">Web console.</p>
     </main>
   );
 }

@@ -6,9 +6,10 @@
     <title>AgentForge</title>
     <!--
       No-flash-of-wrong-theme (FOWT) pre-paint script.
-      Resolves and applies the theme on <html> before React hydrates.
-      Reads only the non-secret theme preference key + prefers-color-scheme.
-      (Fully fleshed out in task 9; this establishes the contract early.)
+      Resolves and applies the theme on <html> before first paint / React
+      hydration, reading the same non-secret 'agentforge.theme' localStorage key
+      and prefers-color-scheme media query that ThemeProvider/useTheme use, so
+      React adopts the already-applied theme with no light->dark repaint.
     -->
     <script>
       (function () {

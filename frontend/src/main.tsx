@@ -3,7 +3,21 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+// Self-hosted fonts (subset latin woff2, font-display: swap via @fontsource).
+// Bundled at build time — no network fetch at runtime.
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
+import "@fontsource/inter/700.css";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+
+// Design tokens first, then the Tailwind global stylesheet that binds to them.
+import "./styles/tokens.css";
+import "./styles/globals.css";
+
 import App from "./App";
+import { ThemeProvider } from "./providers/ThemeProvider";
 
 /**
  * React root + provider shell.
@@ -29,11 +43,13 @@ const rootElement = document.getElementById("root");
 if (rootElement) {
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </QueryClientProvider>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </QueryClientProvider>
+      </ThemeProvider>
     </React.StrictMode>,
   );
 }

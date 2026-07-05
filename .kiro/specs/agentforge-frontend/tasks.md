@@ -274,7 +274,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     credentials, and `tsc --noEmit` passes. Ensure all tests pass, ask the user if questions
     arise.
 
-- [ ] 9. Establish design tokens and theming (`styles/`, no-FOWT, `useTheme`)
+- [x] 9. Establish design tokens and theming (`styles/`, no-FOWT, `useTheme`)
   - Implement `styles/tokens.css`: dark-first + light **CSS custom properties** declared on
     `:root` / `[data-theme="dark"]` / `[data-theme="light"]`, covering the token families in
     the design — color **semantic roles** (`bg`, `surface`, `border`, `text`, `primary`,
@@ -294,7 +294,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.1_
   - _Design: Premium UX & Design System §1 (design language & theming), §6 (Frontend Directory Layout — styles/, providers/, hooks/)_
 
-  - [ ]* 9.1 Write property test for total design-token resolution
+  - [x]* 9.1 Write property test for total design-token resolution
     - **Property 13: Design-token resolution is total over theme × semantic role**
     - **Validates: Premium UX & Design System §1; supports Requirements 4.1**
     - fast-check over `{ dark, light }` × arbitrary role identifiers (declared and undeclared):
@@ -302,7 +302,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       and returns a single deterministic fallback for undeclared roles (stable across repeated
       calls). Min 100 iterations. Tag: `Feature: agentforge-frontend, Property 13: Design-token resolution is total over theme × semantic role`.
 
-- [ ] 10. Build the design-system component library over Radix (`components/ui/`, `components/motion/`)
+- [x] 10. Build the design-system component library over Radix (`components/ui/`, `components/motion/`)
   - Implement `components/ui/` primitives styled purely via the design tokens over **Radix UI**
     (shadcn/ui composition pattern): `Button`, `Input`, `Dialog`, `Tabs`, `Tooltip`, `Toast`,
     `Skeleton`, `Badge`, `Card`, `DropdownMenu`, `Popover` — each accessible (focus trap, ARIA,
@@ -315,7 +315,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Requirements: 4.1_
   - _Design: Premium UX & Design System §2 (component & styling stack), §4 (motion & performance)_
 
-  - [ ]* 10.1 Write component/a11y tests for the UI and motion primitives
+  - [x]* 10.1 Write component/a11y tests for the UI and motion primitives
     - Cover: primitives render with token-driven classes; Dialog/Popover/DropdownMenu trap and
       restore focus and are keyboard-operable; motion primitives collapse to instant under a
       reduced-motion/test configuration; axe-core finds no violations on representative usage.

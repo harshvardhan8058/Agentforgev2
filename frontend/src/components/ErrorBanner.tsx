@@ -7,7 +7,11 @@
  * alongside the message. It never renders a stack trace (the normalizer already
  * strips internal text for `500`), and offers an optional retry affordance.
  */
+import { AlertTriangle } from "lucide-react";
+
 import type { ClientError } from "../api/errors";
+import { cn } from "../lib/cn";
+import { Button } from "./ui/Button";
 
 function formatDetail(value: unknown): string {
   if (typeof value === "string") return value;
@@ -32,39 +36,62 @@ export function ErrorBanner({
   return (
     <div
       role="alert"
-      className="error-banner"
+      className={cn(
+        "error-banner flex flex-col gap-2 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-text",
+      )}
       data-testid="error-banner"
       data-kind={error.kind}
     >
-      <p className="error-banner__message" data-testid="error-message">
+      <p
+        className="error-banner__message flex items-center gap-2 font-medium text-text"
+        data-testid="error-message"
+      >
+        <AlertTriangle className="h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
         {error.message}
       </p>
 
       {hasFieldErrors && (
-        <ul className="error-banner__fields" data-testid="error-field-errors">
+        <ul
+          className="error-banner__fields ml-6 list-disc text-text-muted"
+          data-testid="error-field-errors"
+        >
           {Object.entries(error.fieldErrors!).map(([field, message]) => (
             <li key={field} data-field={field}>
-              <span className="error-banner__field-name">{field}</span>: {message}
+              <span className="error-banner__field-name font-medium text-text">
+                {field}
+              </span>
+              : {message}
             </li>
           ))}
         </ul>
       )}
 
       {!hasFieldErrors && detailEntries.length > 0 && (
-        <dl className="error-banner__details" data-testid="error-details">
+        <dl
+          className="error-banner__details ml-6 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-text-muted"
+          data-testid="error-details"
+        >
           {detailEntries.map(([key, value]) => (
-            <div key={key}>
-              <dt>{key}</dt>
-              <dd>{formatDetail(value)}</dd>
+            <div key={key} className="contents">
+              <dt className="font-medium text-text">{key}</dt>
+              <dd className="font-mono text-xs">{formatDetail(value)}</dd>
             </div>
           ))}
         </dl>
       )}
 
       {onRetry && (
-        <button type="button" className="error-banner__retry" onClick={onRetry}>
-          Retry
-        </button>
+        <div className="mt-1">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="error-banner__retry"
+            onClick={onRetry}
+          >
+            Retry
+          </Button>
+        </div>
       )}
     </div>
   );

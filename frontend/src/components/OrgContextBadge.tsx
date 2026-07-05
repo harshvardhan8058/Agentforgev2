@@ -13,11 +13,21 @@ export function OrgContextBadge(): JSX.Element | null {
     return null;
   }
   return (
-    <div className="org-context-badge" data-testid="org-context-badge" aria-label="Active organization and role">
-      <span className="org-context-badge__org" data-testid="org-context-org">
+    <div
+      className="org-context-badge inline-flex items-center gap-2 rounded-full border border-border bg-surface-raised px-3 py-1 text-xs"
+      data-testid="org-context-badge"
+      aria-label="Active organization and role"
+    >
+      <span
+        className="org-context-badge__org font-medium text-text"
+        data-testid="org-context-org"
+      >
         {orgId}
       </span>
-      <span className="org-context-badge__role" data-testid="org-context-role">
+      <span
+        className="org-context-badge__role rounded-full bg-primary/15 px-2 py-0.5 font-medium capitalize text-primary"
+        data-testid="org-context-role"
+      >
         {role}
       </span>
     </div>
