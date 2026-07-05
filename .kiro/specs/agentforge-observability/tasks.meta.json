@@ -1,0 +1,45 @@
+{
+  "pbtResults": {
+    "2.1 Write property test for `Cost_Model` totality with a default rate": {
+      "status": "passed",
+      "lastRunTimestamp": 1783267485840
+    },
+    "3.1 Write property test for org/user tagging on export": {
+      "status": "passed",
+      "lastRunTimestamp": 1783267488423
+    },
+    "3.2 Write property test for export-never-changes-outcome": {
+      "status": "passed",
+      "lastRunTimestamp": 1783267491977
+    },
+    "4.4 Write property test for the transparent, safe decorator": {
+      "status": "passed",
+      "lastRunTimestamp": 1783267495089
+    },
+    "4.5 Write property test for `Usage_Record` correctness, determinism, and token invariant": {
+      "status": "passed",
+      "lastRunTimestamp": 1783267498944
+    },
+    "5.4 Write property test for analytics aggregation and tenant isolation": {
+      "status": "passed",
+      "lastRunTimestamp": 1783268054678
+    },
+    "6.4 Write property test for prompt versioning and rendering": {
+      "status": "passed",
+      "lastRunTimestamp": 1783268054808
+    },
+    "7.3 Write property test for guardrail ordering, short-circuit, and downstream prevention": {
+      "status": "passed",
+      "lastRunTimestamp": 1783268602052
+    },
+    "8.5 Write property test for evaluation scoring and aggregation determinism": {
+      "status": "passed",
+      "lastRunTimestamp": 1783268604659
+    },
+    "8.6 Write property test for observability tenant isolation across every resource type": {
+      "status": "passed",
+      "lastRunTimestamp": 1783268607141
+    }
+  },
+  "executionHistory": {}
+}

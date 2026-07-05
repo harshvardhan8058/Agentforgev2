@@ -22,6 +22,7 @@ from agentforge.config.container import (
     AppContext,
     EnterpriseContext,
     MultiAgentContext,
+    ObservabilityContext,
 )
 from agentforge.config.settings import Settings
 from agentforge.conversation.base import Conversation_Store
@@ -32,6 +33,12 @@ from agentforge.enterprise.models import Principal
 from agentforge.enterprise.principal import PrincipalKind, principal_key
 from agentforge.enterprise.rbac import Permission, RBAC_Policy
 from agentforge.ingestion.service import Ingestion_Service
+from agentforge.observability.analytics import Analytics_Service
+from agentforge.observability.evaluation.base import Evaluation_Store
+from agentforge.observability.evaluation.framework import Evaluation_Framework
+from agentforge.observability.guardrails.base import Guardrail_Pipeline
+from agentforge.observability.prompt_registry.registry import Prompt_Registry
+from agentforge.observability.tracing_exporter import Tracing_Exporter
 from agentforge.rag.service import RAG_Service
 from agentforge.storage.base import DocumentStore
 from agentforge.streaming.sse import SSE_Streaming_Service
@@ -287,3 +294,72 @@ def require_permission(permission: Permission) -> Callable[..., Principal]:
 def get_org_id(principal: Principal = Depends(get_current_principal)) -> UUID:
     """Return ``principal.org_id`` for stores that only need the tenant key (Req 4.4)."""
     return principal.org_id
+
+
+# --- Phase 6 observability accessors ----------------------------------------------
+
+
+def get_observability_context(request: Request) -> ObservabilityContext:
+    """Return the wired :class:`ObservabilityContext` from ``app.state``.
+
+    Mirrors :func:`get_enterprise_context`: the composition root stores the wired
+    observability object graph (tracing exporter, usage store/recorder/sink, cost model,
+    analytics service, prompt registry, guardrail pipeline, evaluation framework) on
+    ``app.state.observability_context`` at startup (or a test pre-injects one). The Phase
+    6 routers depend on the per-seam accessors below so the transport layer never
+    constructs the observability graph itself (Req 7.3, 9.7).
+
+    Raises:
+        RuntimeError: if the context was never initialized (misconfiguration).
+    """
+    ctx = getattr(request.app.state, "observability_context", None)
+    if ctx is None:  # pragma: no cover - defensive; startup always sets this
+        raise RuntimeError("Observability context is not initialized")
+    return ctx
+
+
+def get_tracing_exporter(request: Request) -> Tracing_Exporter:
+    """Return the wired Tracing_Exporter."""
+    return get_observability_context(request).tracing_exporter
+
+
+def get_analytics_service(request: Request) -> Analytics_Service:
+    """Return the wired Analytics_Service."""
+    return get_observability_context(request).analytics_service
+
+
+def get_prompt_registry(request: Request) -> Prompt_Registry:
+    """Return the wired Prompt_Registry."""
+    return get_observability_context(request).prompt_registry
+
+
+def get_guardrail_pipeline(request: Request) -> Guardrail_Pipeline:
+    """Return the wired Guardrail_Pipeline."""
+    return get_observability_context(request).guardrail_pipeline
+
+
+def get_optional_guardrail_pipeline(request: Request) -> Guardrail_Pipeline | None:
+    """Return the wired Guardrail_Pipeline, or ``None`` when observability is unwired.
+
+    The query / agent / multi-agent entry points wrap their downstream invocation with
+    the input/output guardrail pipeline (Req 5.4, 5.6). Guarding is a cross-cutting layer:
+    when the ``ObservabilityContext`` has not been wired onto ``app.state`` (e.g. a test
+    that bypasses the startup lifespan and injects only the RAG/agent contexts), guarding
+    is skipped rather than failing the request. In the real application the composition
+    root always builds the observability context at startup, so the pipeline is always
+    present and the guardrails always run.
+    """
+    ctx = getattr(request.app.state, "observability_context", None)
+    if ctx is None:
+        return None
+    return ctx.guardrail_pipeline
+
+
+def get_evaluation_framework(request: Request) -> Evaluation_Framework:
+    """Return the wired Evaluation_Framework."""
+    return get_observability_context(request).evaluation_framework
+
+
+def get_evaluation_store(request: Request) -> Evaluation_Store:
+    """Return the wired Evaluation_Store (org-scoped dataset/run persistence)."""
+    return get_observability_context(request).evaluation_store
