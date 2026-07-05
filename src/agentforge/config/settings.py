@@ -93,6 +93,29 @@ class Settings(BaseSettings):
     # runs complete end-to-end without external human input (Req 5.7).
     approval_policy: Literal["auto", "human"] = "auto"
 
+    # --- enterprise layer (Phase 5; all optional / defaulted to preserve keyless boot) ---
+    # Master toggle for the enterprise auth layer. The test suite may set this False.
+    auth_enabled: bool = True
+    # Access_Token signing secret (Token_Signing_Secret). Optional so keyless local boot
+    # succeeds; ``build_auth_service`` generates a per-boot dev secret in the local
+    # profile when absent, and ``load_settings`` requires it in the production profile
+    # (Req 1.7, 1.8). ``SecretStr`` keeps it out of logs / repr / model_dump.
+    jwt_secret: SecretStr | None = None
+    jwt_algorithm: Literal["HS256"] = "HS256"
+    jwt_expiry_seconds: int = 3600  # resolved within [60, 86_400] by the Auth_Service
+
+    # --- enterprise: argon2id password / API-key hashing parameters ---
+    argon2_time_cost: int = 2  # [1, 10]
+    argon2_memory_cost: int = 64 * 1024  # KiB; [8 * 1024, 1_048_576]
+    argon2_parallelism: int = 2  # [1, 8]
+
+    # --- enterprise: per-principal rate limiting (Redis-backed) ---
+    # ``rate_limit_enabled=False`` forces the NoOp_Rate_Limiter regardless of Redis, so
+    # the keyless/test lane is deterministic (Req 6.5).
+    rate_limit_enabled: bool = True
+    rate_limit_max: int = 60  # [1, 100_000] (Req 6.4)
+    rate_limit_window_seconds: int = 60  # [1, 86_400] (Req 6.4)
+
     # --- credentials (ALL optional) ---
     groq_api_key: SecretStr | None = None
     hosted_embedding_api_key: SecretStr | None = None
@@ -130,7 +153,7 @@ def load_settings() -> Settings:
             error names the missing setting(s) and never includes secret values.
     """
     try:
-        return Settings()  # type: ignore[call-arg]
+        settings = Settings()  # type: ignore[call-arg]
     except ValidationError as exc:
         missing: list[str] = []
         for err in exc.errors():
@@ -141,6 +164,17 @@ def load_settings() -> Settings:
         seen: set[str] = set()
         ordered = [m for m in missing if not (m in seen or seen.add(m))]
         raise ConfigError(ordered) from None
+
+    # Phase 5 production guard: the Token_Signing_Secret is optional in the local profile
+    # (a dev secret is generated at boot) but REQUIRED in production. Its absence aborts
+    # startup before any handler is reachable (Req 1.7, 1.8).
+    if (
+        settings.profile == "production"
+        and settings.auth_enabled
+        and settings.jwt_secret is None
+    ):
+        raise ConfigError(["jwt_secret"], detail="required in production profile")
+    return settings
 
 
 @lru_cache(maxsize=1)

@@ -45,6 +45,7 @@ from agentforge.multiagent.approval import (
     CHECKPOINT_BEFORE_FINALIZE,
     Human_Approval_Gate,
 )
+from agentforge.enterprise.tenancy import set_current_org
 from agentforge.multiagent.graph import (
     ROUTE_APPROVE,
     ROUTE_REVISE,
@@ -125,6 +126,7 @@ class Multi_Agent_Streaming_Service:
         conversation_id: str | None = None,
         *,
         run_id: str | None = None,
+        org_id=None,
     ) -> Iterator[MultiAgentStreamEvent]:
         """Drive a Multi_Agent_Run and yield events in production order (Req 7.2, 7.4).
 
@@ -138,7 +140,13 @@ class Multi_Agent_Streaming_Service:
         A single ``try``/``except`` wraps the whole generator body so any exception raised
         anywhere in the run is translated into that one ``error`` event without also
         emitting a ``completion``.
+
+        ``org_id`` publishes the acting tenant for the streamed run (set at the top of the
+        generator body so it is in force while roles delegate to the reused
+        ``Agent_Orchestrator`` and trace entries are written) (Req 4.2, 4.6).
         """
+        if org_id is not None:
+            set_current_org(org_id)
         sequence = 0
 
         # ------------------------------------------------------------------ helper
@@ -258,9 +266,12 @@ class Multi_Agent_Streaming_Service:
         conversation_id: str | None = None,
         *,
         run_id: str | None = None,
+        org_id=None,
     ) -> Iterator[str]:
         """Render :meth:`run_stream` events as SSE frames for a StreamingResponse."""
-        for event in self.run_stream(task, conversation_id, run_id=run_id):
+        for event in self.run_stream(
+            task, conversation_id, run_id=run_id, org_id=org_id
+        ):
             yield multiagent_format_sse_frame(event)
 
     # ------------------------------------------------------------------ internal

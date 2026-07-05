@@ -14,9 +14,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, status
 from fastapi.concurrency import run_in_threadpool
 
-from agentforge.api.deps import get_rag_service
+from agentforge.api.deps import get_rag_service, require_permission
 from agentforge.api.errors import AppError
 from agentforge.api.schemas import CitationModel, QueryRequest, QueryResponse
+from agentforge.enterprise.models import Principal
+from agentforge.enterprise.rbac import Permission
 from agentforge.llm.base import LLMProviderError
 from agentforge.rag.service import RAG_Service
 
@@ -27,10 +29,13 @@ router = APIRouter(tags=["query"])
 async def query(
     payload: QueryRequest,
     service: RAG_Service = Depends(get_rag_service),
+    principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> QueryResponse:
-    """Answer a query with grounding and citations."""
+    """Answer a query with grounding and citations, scoped to the caller's org."""
     try:
-        answer = await run_in_threadpool(service.answer, payload.query, payload.top_k)
+        answer = await run_in_threadpool(
+            lambda: service.answer(payload.query, payload.top_k, org_id=principal.org_id)
+        )
     except LLMProviderError as exc:
         # The provider failure message already identifies the provider (Req 11.5).
         raise AppError(

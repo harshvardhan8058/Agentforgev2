@@ -16,6 +16,7 @@ from agentforge.agent.selection import Decision, Selection_Strategy
 from agentforge.llm.fallback_provider import Fallback_Provider
 from agentforge.tools.base import Tool_Call, Tool_Interface, Tool_Result
 from agentforge.tools.registry import Tool_Registry
+from agentforge.enterprise.tenancy import NIL_ORG_ID as ORG
 from agentforge.tracing.recorder import InMemory_Trace_Recorder
 
 _TOOL_NAME = "trace_tool"
@@ -77,7 +78,7 @@ def test_trace_is_complete_and_ordered_by_ordinal(tool_steps):
     )
 
     state = orchestrator.run("trace me")
-    entries = trace.get_trace(state.run_id).entries
+    entries = trace.get_trace(ORG, state.run_id).entries
 
     # get_trace returns entries ordered by ordinal, contiguous from 0 (Req 10.3).
     assert [e.ordinal for e in entries] == list(range(len(entries)))

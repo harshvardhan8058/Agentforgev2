@@ -28,6 +28,7 @@ from agentforge.multiagent.roles.writer import Writer_Agent
 from agentforge.multiagent.state import Blackboard_State
 from agentforge.tools.registry import Tool_Registry
 from agentforge.tracing.recorder import InMemory_Trace_Recorder
+from agentforge.enterprise.tenancy import NIL_ORG_ID as ORG
 
 
 def _agent_orchestrator() -> Agent_Orchestrator:
@@ -81,7 +82,7 @@ def test_real_roles_complete_end_to_end():
     assert state.final_output is not None
     assert state.final_output.content == state.draft.content
     # Every role step is attributed, in pipeline order.
-    steps = [e.step_type for e in trace.get_trace(state.run_id).entries]
+    steps = [e.step_type for e in trace.get_trace(ORG, state.run_id).entries]
     assert steps == ["role:planner", "role:researcher", "role:writer", "role:critic"]
 
 

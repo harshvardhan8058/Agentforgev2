@@ -49,11 +49,16 @@ class StreamEvent:
 
 @dataclass
 class AgentRunInput:
-    """The input for a streaming Agent_Run: the user message and its conversation."""
+    """The input for a streaming Agent_Run: the user message and its conversation.
+
+    ``org_id`` carries the acting tenant so the streamed run's tool calls, trace writes,
+    and final-message persistence stay scoped to the owning organization (Req 4.2, 4.6).
+    """
 
     message: str
     conversation_id: str | None = None
     conversation_context: list = field(default_factory=list)
+    org_id: object = None
 
 
 def format_sse_frame(event: StreamEvent) -> str:

@@ -55,11 +55,17 @@ class Memory_Manager(ABC):
 
     # --- long-term memory (cross-conversation semantic recall) ---
     @abstractmethod
-    def persist_long_term(self, text: str, metadata: dict) -> str:
-        """Store an entry as an embedding via Embedding_Provider + Vector_Store (Req 7.1)."""
+    def persist_long_term(self, text: str, metadata: dict, *, org_id: object = None) -> str:
+        """Store an entry as an embedding, tagged with the owning ``org_id`` (Req 7.1, 4.1).
+
+        The ``org_id`` is recorded in the entry's ``metadata['org_id']`` so long-term
+        records are tenant-scoped alongside the relational tables (Req 4.1, 4.6).
+        """
         raise NotImplementedError
 
     @abstractmethod
-    def retrieve_long_term(self, query: str, k: int) -> list[MemoryEntry]:
-        """Return ``min(k, stored_count)`` entries by descending similarity (Req 7.2-7.4)."""
+    def retrieve_long_term(
+        self, query: str, k: int, *, org_id: object = None
+    ) -> list[MemoryEntry]:
+        """Return ``min(k, stored_count)`` of ``org_id``'s entries by similarity (Req 7.2-7.4, 4.2)."""
         raise NotImplementedError

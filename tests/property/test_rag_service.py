@@ -28,7 +28,7 @@ class _SpyRetriever:
         self.events = events
         self.last_k = None
 
-    def retrieve(self, query, k):
+    def retrieve(self, query, k, *, org_id=None):
         self.last_k = k
         self.events.append(("retrieve", k))
         return list(self._chunks)

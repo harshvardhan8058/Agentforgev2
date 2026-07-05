@@ -28,6 +28,8 @@ dependencies = [
     "groq==0.13.1",
     "langgraph==1.2.7",
     "langchain-core==1.4.8",
+    "pyjwt==2.10.1",
+    "argon2-cffi==23.1.0",
 ]
 
 [project.optional-dependencies]

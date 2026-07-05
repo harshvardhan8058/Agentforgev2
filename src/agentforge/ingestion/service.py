@@ -19,12 +19,13 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
+from uuid import UUID
 
 from agentforge.chunking.chunker import Chunker
 from agentforge.embeddings.base import Embedding_Provider
+from agentforge.enterprise.tenancy import NIL_ORG_ID
 from agentforge.ingestion.extractors import (
     SUPPORTED_CONTENT_TYPES,
-    ExtractionError,
     extract,
 )
 from agentforge.models.domain import Chunk, Document
@@ -54,7 +55,7 @@ class DocumentSink(Protocol):
     in tests, keeping the Ingestion_Service independent of the storage backend.
     """
 
-    def persist(self, document: Document, chunks: list[Chunk]) -> None: ...
+    def persist(self, org_id: UUID, document: Document, chunks: list[Chunk]) -> None: ...
 
 
 @dataclass
@@ -88,8 +89,15 @@ class Ingestion_Service:
         self._extraction_timeout_seconds = extraction_timeout_seconds
         self._markdown_mode = markdown_mode
 
-    def ingest(self, filename: str, content_type: str, data: bytes) -> IngestionResult:
-        """Run the full ingestion pipeline for a single document."""
+    def ingest(
+        self,
+        filename: str,
+        content_type: str,
+        data: bytes,
+        *,
+        org_id: UUID = NIL_ORG_ID,
+    ) -> IngestionResult:
+        """Run the full ingestion pipeline for a single document owned by ``org_id`` (Req 4.4)."""
         # 1. Size limit — enforced before extraction (Req 7.7).
         if len(data) > self._max_document_bytes:
             raise SizeLimitError(
@@ -136,7 +144,7 @@ class Ingestion_Service:
         try:
             for chunk, vector in zip(chunks, vectors):
                 self._vector_store.upsert(chunk.id, document_id, vector)
-            self._sink.persist(document, chunks)
+            self._sink.persist(org_id, document, chunks)
         except Exception:
             self._vector_store.delete_document(document_id)
             raise

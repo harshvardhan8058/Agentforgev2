@@ -14,8 +14,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
+from uuid import UUID
 
 from agentforge.embeddings.base import Embedding_Provider
+from agentforge.enterprise.tenancy import NIL_ORG_ID
 from agentforge.vectorstore.base import Vector_Store
 
 # Hard bounds on the retrieval count (Req 12.1); the effective K always lies in [1, 10].
@@ -41,8 +43,8 @@ class RetrievedChunk:
 class Chunk_Text_Source(Protocol):
     """Port for loading chunk text by id (implemented by the DB / in-memory store)."""
 
-    def get_chunk_texts(self, chunk_ids: list[str]) -> dict[str, str]:
-        """Return a mapping of ``chunk_id -> content`` for the given ids."""
+    def get_chunk_texts(self, org_id: UUID, chunk_ids: list[str]) -> dict[str, str]:
+        """Return a mapping of ``chunk_id -> content`` for ``org_id``'s chunks."""
         ...
 
 
@@ -63,8 +65,15 @@ class Retriever:
         self._k_min = k_min
         self._k_max = k_max
 
-    def retrieve(self, query: str, k: int) -> list[RetrievedChunk]:
-        """Return at most ``clamp(k)`` chunks ordered by descending similarity."""
+    def retrieve(
+        self, query: str, k: int, *, org_id: UUID = NIL_ORG_ID
+    ) -> list[RetrievedChunk]:
+        """Return at most ``clamp(k)`` of ``org_id``'s chunks by descending similarity.
+
+        Chunk text is loaded through the org-scoped ``get_chunk_texts``, so a match whose
+        parent document belongs to another tenant resolves to no text and is dropped —
+        retrieval never crosses a tenant boundary (Req 4.6).
+        """
         effective_k = clamp_k(k, self._k_min, self._k_max)
 
         query_vector = self._embeddings.embed_text(query)
@@ -73,7 +82,9 @@ class Retriever:
         # Defensive: never return more than the effective K regardless of the backend.
         matches = matches[:effective_k]
 
-        texts = self._chunk_text_source.get_chunk_texts([m.chunk_id for m in matches])
+        texts = self._chunk_text_source.get_chunk_texts(
+            org_id, [m.chunk_id for m in matches]
+        )
         return [
             RetrievedChunk(
                 chunk_id=m.chunk_id,

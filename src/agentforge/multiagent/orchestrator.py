@@ -33,6 +33,7 @@ from agentforge.multiagent.graph import (
     next_after_review,
     run_role_step,
 )
+from agentforge.enterprise.tenancy import set_current_org
 from agentforge.multiagent.models import Termination_Reason
 from agentforge.multiagent.roles.base import DEFAULT_PIPELINE, Agent_Role_Registry
 from agentforge.multiagent.state import (
@@ -171,6 +172,7 @@ class Multi_Agent_Orchestrator:
         conversation_id: str | None = None,
         *,
         run_id: str | None = None,
+        org_id=None,
     ) -> Blackboard_State:
         """Execute a single Multi_Agent_Run and return the final Blackboard_State.
 
@@ -183,7 +185,13 @@ class Multi_Agent_Orchestrator:
         An external ``run_id`` may be supplied (e.g. the id already assigned by the
         ``Multi_Agent_Run_Store``) so the orchestrator's run id, the run-store record,
         and the trace all key off the same value.
+
+        ``org_id`` publishes the acting tenant for the synchronous run so the role
+        delegations to the reused ``Agent_Orchestrator`` (and their tool + trace writes)
+        stay scoped to that org (Req 4.2, 4.6).
         """
+        if org_id is not None:
+            set_current_org(org_id)
         initial = self.initialize_state(task, conversation_id, run_id=run_id)
 
         # The round bound caps completed rounds at ``max_rounds``; each round adds at most

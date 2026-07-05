@@ -12,6 +12,7 @@ from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
 
 from agentforge.conversation.store import InMemory_Conversation_Store
+from agentforge.enterprise.tenancy import NIL_ORG_ID as ORG
 
 _ROLES = ["user", "assistant", "tool", "system"]
 
@@ -38,16 +39,16 @@ def test_conversation_append_history_ordering_with_auto_create(messages, use_unk
     store = InMemory_Conversation_Store()
     # Either append to an explicitly-created conversation or to an unknown id that must be
     # auto-created on first append (Req 8.4).
-    conversation_id = "unknown-conversation-id" if use_unknown_id else store.create()
+    conversation_id = "unknown-conversation-id" if use_unknown_id else store.create(ORG)
 
     appended = []
     for position, (role, content) in enumerate(messages):
-        message = store.append(conversation_id, role, content)
+        message = store.append(ORG, conversation_id, role, content)
         # append returns the persisted message with its assigned ordinal.
         assert message.position == position
         appended.append(message)
 
-    history = store.history(conversation_id)
+    history = store.history(ORG, conversation_id)
 
     # Exactly the appended messages, in append order, with contiguous ascending ordinals.
     assert [m.position for m in history] == list(range(len(messages)))

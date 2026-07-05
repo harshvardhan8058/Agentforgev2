@@ -41,11 +41,21 @@ async def test_pg_trace_recorder_records_ordered_entries(engine):
     recorder = Pg_Trace_Recorder(_dsn())
     run_id = str(uuid.uuid4())
 
-    recorder.record(run_id, "reason")
-    recorder.record(run_id, "tool_call", tool_name="rag_search", outcome="tool_result")
-    recorder.record(run_id, "observe", detail={"iteration_count": 1})
+    # A real organization is required for the org_id FK on the auto-created agent_runs row.
+    org_id = str(uuid.uuid4())
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO organizations (id, name) VALUES (:id, 'Trace Org')"),
+            {"id": org_id},
+        )
 
-    trace = recorder.get_trace(run_id)
+    recorder.record(org_id, run_id, "reason")
+    recorder.record(
+        org_id, run_id, "tool_call", tool_name="rag_search", outcome="tool_result"
+    )
+    recorder.record(org_id, run_id, "observe", detail={"iteration_count": 1})
+
+    trace = recorder.get_trace(org_id, run_id)
 
     # Contiguous ascending ordinals in execution order (Req 10.1, 10.3).
     assert [e.ordinal for e in trace.entries] == [0, 1, 2]
@@ -58,7 +68,20 @@ async def test_pg_trace_recorder_records_ordered_entries(engine):
     assert trace.entries[2].detail == {"iteration_count": 1}
 
     # Cleanup so re-runs stay deterministic (entries cascade on run delete).
+    # Cross-tenant trace is empty (Req 4.6).
+    other_org = str(uuid.uuid4())
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO organizations (id, name) VALUES (:id, 'Other Org')"),
+            {"id": other_org},
+        )
+    assert recorder.get_trace(other_org, run_id).entries == []
+
     async with engine.begin() as conn:
         await conn.execute(
             text("DELETE FROM agent_runs WHERE id = :id"), {"id": run_id}
+        )
+        await conn.execute(
+            text("DELETE FROM organizations WHERE id = ANY(:ids)"),
+            {"ids": [org_id, other_org]},
         )
