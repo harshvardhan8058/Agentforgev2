@@ -606,7 +606,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       not-found (10.7); `409` message + status refresh (10.8).
     - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8_
 
-- [ ] 22. Implement the analytics / usage dashboard (`features/analytics/`)
+- [x] 22. Implement the analytics / usage dashboard (`features/analytics/`)
   - Implement `UsageDashboardView`: `GET /analytics/usage` for the Org_Context showing
     `total_tokens` + `total_cost`; a start/end range control adding `start`/`end` query
     params; render `by_provider`/`by_model`/`by_user` breakdowns (key, tokens, cost); render
@@ -635,19 +635,19 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: Data Models (UsageReport), Graceful degradation (breakdown isolation)_
   - _Design: Premium UX & Design System §3 (analytics/observability dashboards, verbatim cost rendering), §2 (charts lazy-loaded & mocked), §4 (code-splitting/lazy-loading), §1 (tabular numerals), §5 (responsiveness); validates Property 11_
 
-  - [ ]* 22.1 Write property test for verbatim cost rendering
+  - [x]* 22.1 Write property test for verbatim cost rendering
     - **Property 11: Usage cost strings are rendered verbatim**
     - **Validates: Requirements 11.4, 11.3**
     - fast-check over arbitrary `UsageReport`s with arbitrary cost strings: assert every
       displayed cost (top-level + each breakdown entry) equals the exact backend string with
       no parsing/rounding/reformatting. Min 100 iterations.
 
-  - [ ]* 22.2 Write component tests for the analytics dashboard (MSW)
+  - [x]* 22.2 Write component tests for the analytics dashboard (MSW)
     - Cover totals (11.1); range query params (11.2); breakdown rows (11.3); empty usage
       state (11.5); one breakdown failing is isolated while totals + others render (11.6).
     - _Requirements: 11.1, 11.2, 11.3, 11.5, 11.6_
 
-- [ ] 23. Implement the prompt registry view (`features/prompts/`)
+- [x] 23. Implement the prompt registry view (`features/prompts/`)
   - Implement `PromptRegistryView`: `GET /prompts` template names; `GET /prompts/{name}/versions`
     ascending versions; `GET /prompts/{name}?version=N` showing body/variables/created-at;
     `POST /prompts` (gated behind `ingest_documents`) appending a new version and showing the
@@ -675,20 +675,20 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
   - _Design: Endpoint-to-view interface map (Prompts), Error Handling (missing_variable)_
   - _Design: Premium UX & Design System §3 (Prompt Studio — Monaco, version diffing, variable-aware editing, render preview), §2 (Monaco lazy-loaded & mocked), §1 (monospace typography); validates Property 12_
 
-  - [ ]* 23.1 Write property test for required-variable render blocking
+  - [x]* 23.1 Write property test for required-variable render blocking
     - **Property 12: Required-variable validation blocks render on exactly the missing set**
     - **Validates: Requirements 12.6**
     - fast-check over arbitrary declared-variable sets × supplied subsets: assert submission
       is blocked (no request) iff at least one declared variable is unsupplied, and the
       prompted-for set equals exactly the missing declared variables. Min 100 iterations.
 
-  - [ ]* 23.2 Write component tests for the prompt registry (MSW)
+  - [x]* 23.2 Write component tests for the prompt registry (MSW)
     - Cover list names (12.1); versions ascending (12.2); version detail (12.3); create
       version gated + returns number (12.4); render success (12.5); `400 missing_variable`
       shows missing names (12.7).
     - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.7_
 
-- [ ] 24. Implement the guardrails and evaluations views (`features/guardrails/`, `features/evaluations/`)
+- [x] 24. Implement the guardrails and evaluations views (`features/guardrails/`, `features/evaluations/`)
   - Premium UX (AI Operating System bar): polished, insightful safety/quality views, not
     raw JSON dumps —
     - **Guardrails**: present the config as an **ordered card/list** of `name`/`kind` (in
@@ -707,7 +707,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
       backend contract change); motion honors `prefers-reduced-motion` and is instant under test.
   - _Design: Premium UX & Design System §3 (guardrails & evaluations views, rich loading/empty/success/error states), §1 (semantic decision-state color tokens), §2 (charts lazy-loaded & mocked), §5 (accessibility & responsiveness)_
 
-  - [ ] 24.1 Implement `GuardrailsView`
+  - [x] 24.1 Implement `GuardrailsView`
     - `GET /guardrails/config` rendering each active guardrail's `name`/`kind` in returned
       order; `POST /guardrails/evaluate` (gated behind `run_agents`) showing the decision;
       `flag` shows flags + reason; `block` shows reason; empty config → explicit
@@ -715,7 +715,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5_
     - _Design: Endpoint-to-view interface map (Guardrails), Graceful degradation_
 
-  - [ ] 24.2 Implement `EvaluationsView`
+  - [x] 24.2 Implement `EvaluationsView`
     - `POST /evaluations/datasets` (gated behind `run_agents`) showing `dataset_id`;
       `GET /evaluations/datasets` listing name + created-at; `POST /evaluations/runs` (gated
       behind `run_agents`) with `dataset_id` + evaluators showing aggregate + per-item
@@ -724,7 +724,7 @@ scenarios. Contract-fidelity is enforced by a `tsc` type-check over the generate
     - _Requirements: 14.1, 14.2, 14.3, 14.4, 14.5_
     - _Design: Endpoint-to-view interface map (Evaluations), Error Handling (404 row)_
 
-  - [ ]* 24.3 Write component tests for guardrails and evaluations (MSW)
+  - [x]* 24.3 Write component tests for guardrails and evaluations (MSW)
     - Cover config order render (13.1); evaluate decision/flag/block (13.2–13.4); empty
       config state (13.5); create dataset (14.1); list datasets (14.2); run scores (14.3);
       run detail (14.4); cross-org `404` not-found (14.5).

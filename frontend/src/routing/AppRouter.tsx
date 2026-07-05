@@ -27,6 +27,10 @@ import { DocumentListView } from "../features/documents/DocumentListView";
 import { SingleAgentRunView } from "../features/agent/SingleAgentRunView";
 import { MultiAgentRunView } from "../features/multiAgent/MultiAgentRunView";
 import { ConversationView } from "../features/conversations/ConversationView";
+import { UsageDashboardView } from "../features/analytics/UsageDashboardView";
+import { PromptRegistryView } from "../features/prompts/PromptRegistryView";
+import { GuardrailsView } from "../features/guardrails/GuardrailsView";
+import { EvaluationsView } from "../features/evaluations/EvaluationsView";
 
 function UnauthenticatedRedirectBridge(): null {
   const navigate = useNavigate();
@@ -52,6 +56,10 @@ export function AppRouter(): JSX.Element {
           <Route path="/multi-agent" element={<MultiAgentRunView />} />
           <Route path="/conversations" element={<ConversationView />} />
           <Route path="/conversations/:id" element={<ConversationView />} />
+          <Route path="/analytics" element={<UsageDashboardView />} />
+          <Route path="/prompts" element={<PromptRegistryView />} />
+          <Route path="/guardrails" element={<GuardrailsView />} />
+          <Route path="/evaluations" element={<EvaluationsView />} />
           <Route path="/members" element={<MembersView />} />
           <Route path="/api-keys" element={<ApiKeysView />} />
           <Route path="*" element={<DashboardView />} />

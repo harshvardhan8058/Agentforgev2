@@ -16,6 +16,7 @@
     "codegen": "openapi-typescript ./openapi.json --output ./src/api/schema.d.ts"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-dialog": "^1.1.18",
     "@radix-ui/react-dropdown-menu": "^2.1.19",
     "@radix-ui/react-popover": "^1.1.18",
@@ -32,6 +33,7 @@
     "react-dom": "^18.3.1",
     "react-markdown": "^9.1.0",
     "react-router-dom": "^6.28.0",
+    "recharts": "^3.9.2",
     "rehype-highlight": "^7.0.2",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
