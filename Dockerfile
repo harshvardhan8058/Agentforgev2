@@ -28,25 +28,27 @@ WORKDIR /app
 #    is cached and only rebuilds when these inputs change — a source-only change
 #    reuses it.
 #
-#    Two build-only measures keep the image CPU-sized and the resolve deterministic
-#    WITHOUT touching pyproject's [project].dependencies (behavior is identical):
+#    `torch` is installed as an ordinary transitive dependency (pulled by
+#    sentence-transformers==3.3.1) from PyPI (files.pythonhosted.org) during the single
+#    `pip install -r requirements.txt -c constraints.txt` below. We deliberately do NOT
+#    use the PyTorch CPU wheel index (`--index-url https://download.pytorch.org/whl/cpu`):
+#    its wheel downloads redirect to the R2 CDN (download-r2.pytorch.org), which is not
+#    reliably reachable from the CI runner and fails the TLS handshake
+#    (SSLV3_ALERT_HANDSHAKE_FAILURE). Resolving torch from PyPI is reliable; the trade-off
+#    is a larger image (the PyPI Linux build bundles CUDA/NVIDIA wheels), which is why the
+#    CI build/publish jobs free runner disk before building (see .github/workflows).
 #
-#      a) Install a CPU-only `torch` from the PyTorch CPU wheel index FIRST. The app
-#         is CPU-only (keyless all-MiniLM-L6-v2 embeddings; no GPU target), so an
-#         unpinned `torch` (pulled transitively by sentence-transformers) would
-#         otherwise resolve to the multi-GB CUDA/NVIDIA build on Linux. Installing
-#         the CPU build up front means sentence-transformers finds `torch` already
-#         satisfied and pip never downloads any nvidia-* wheel.
-#
-#      b) Resolve the rest under a build-time constraints file (constraints.txt) that
-#         pins already-resolved transitive versions (e.g. `transformers`) to exactly
-#         what the app uses today. This stops pip from backtracking through dozens of
-#         `transformers` releases — deterministic and fast, same resulting versions.
+#    One build-only measure keeps the resolve deterministic WITHOUT touching pyproject's
+#    [project].dependencies (behavior is identical): resolve under a build-time constraints
+#    file (constraints.txt) that bounds the heavy transitive `transformers` dependency to a
+#    compatible RANGE. This stops pip from backtracking through dozens of `transformers`
+#    releases — deterministic and fast — while staying portable across runners (no exact
+#    pin that might not exist on the real upstream index). `--retries`/`--timeout` add
+#    resilience against transient network hiccups on the runner.
 COPY pyproject.toml README.md constraints.txt ./
 RUN python -c "import tomllib; d = tomllib.load(open('pyproject.toml','rb')); open('requirements.txt','w').write(chr(10).join(d['project']['dependencies']) + chr(10))" \
     && pip install --upgrade pip \
-    && pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cpu \
-    && pip install -r requirements.txt -c constraints.txt
+    && pip install --retries 5 --timeout 120 -r requirements.txt -c constraints.txt
 
 # 2) Application layer: copy the frequently-changing source and install the
 #    project itself WITHOUT re-resolving dependencies. An editable install keeps

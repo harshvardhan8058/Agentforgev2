@@ -138,17 +138,31 @@ full `<git-sha>` (immutable) on every publish, plus `<semver>` (immutable) only 
 release tag. Production Compose pulls by `${AGENTFORGE_IMAGE_TAG:-latest}`; rollback pins a
 prior immutable tag.
 
-### Backend image size — CPU-only torch
+### Backend image size — torch installed from PyPI
 
 The backend image installs `torch` / `sentence-transformers` for the default local embedding
-provider. Because the app is **CPU-only** (keyless all-MiniLM-L6-v2 embeddings; no GPU
-target), the builder stage installs a **CPU-only `torch`** from the PyTorch CPU wheel index
-before resolving the rest, so pip never pulls the multi-GB CUDA/NVIDIA build, and resolves
-the remaining stack under a build-time `constraints.txt` (pinning already-resolved transitive
-versions such as `transformers`) to keep the resolve deterministic and fast. This is a
-**build-only** optimization — `pyproject.toml` `[project].dependencies` and all application
-behavior are unchanged — that substantially reduces image size and pull time and keeps the
-backend image build within the CI runner's disk/time budget.
+provider. `torch` is installed as an ordinary transitive dependency of
+`sentence-transformers==3.3.1` **from PyPI** (`files.pythonhosted.org`) during the single
+constrained `pip install -r requirements.txt -c constraints.txt` step in the builder stage.
+
+The image does **not** use the PyTorch CPU wheel index
+(`--index-url https://download.pytorch.org/whl/cpu`): its wheel downloads redirect to the R2
+CDN (`download-r2.pytorch.org`), which is **not reliably reachable from the CI runner** and
+fails the TLS handshake (`SSLV3_ALERT_HANDSHAKE_FAILURE`). PyPI is a reliable host, so torch
+resolves cleanly there. The trade-off is a **large image**: the PyPI Linux `torch` build
+bundles the CUDA/NVIDIA wheels. To accommodate it, the CI `build` and `publish` jobs run a
+**"Free up runner disk space"** step (reclaiming pre-installed toolchains and pruning Docker)
+before building, giving the large backend image ample headroom on the runner's ~14 GB disk.
+
+The resolve is kept deterministic and fast by a build-time `constraints.txt` that bounds the
+heavy transitive `transformers` dependency to a compatible **range** (never an exact pin that
+might not exist upstream), preventing pip's pathological backtracking. This is a
+**build-only** change — `pyproject.toml` `[project].dependencies` and all application behavior
+are unchanged.
+
+> **Future work:** a CPU-slim `torch` (smaller image, no CUDA payload) is deferred until a
+> reliably reachable CPU wheel source is available from the CI runner. Until then the image
+> installs the standard PyPI build and CI frees runner disk to accommodate it.
 
 ---
 
