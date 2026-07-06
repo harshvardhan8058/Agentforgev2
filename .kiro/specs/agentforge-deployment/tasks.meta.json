@@ -3,6 +3,14 @@
     "2.3 Write the property test for build-once / run-anywhere": {
       "status": "passed",
       "lastRunTimestamp": 1783351689294
+    },
+    "8.2 Write the migration idempotence property test": {
+      "status": "not_run",
+      "lastRunTimestamp": 1783355779517
+    },
+    "6.3 Compose smoke + keyless all-healthy property": {
+      "status": "not_run",
+      "lastRunTimestamp": 1783355782489
     }
   },
   "executionHistory": {}

@@ -1,0 +1,117 @@
+# AgentForge — PRODUCTION overlay (Phase 9, Req 5.x, 7.x, 9.x, 10.x, 13.5).
+#
+# Applied ON TOP of the base file, never alone:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.production.yml pull
+#     docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
+#
+# What this overlay changes vs. the keyless base:
+#   * PROFILE=production and ALL credentials sourced from the operator's Secret_Source
+#     (the default `.env` file / orchestrator env) via ${VAR} interpolation — NO credential
+#     value is committed here. See .env.production.example for the full placeholder set.
+#   * Images are PULLED from GHCR by immutable tag (${AGENTFORGE_IMAGE_TAG:-latest})
+#     instead of built locally.
+#   * restart: unless-stopped on every long-running service.
+#   * nginx enables the TLS server block (certs mounted read-only) and publishes 443.
+#   * An optional one-shot `migrate` service applies migrations once before the api starts
+#     (the documented scale-out alternative to the default on-startup migration path).
+
+services:
+  nginx:
+    # Pull the pre-built Reverse_Proxy image rather than building from ./nginx.
+    image: ghcr.io/harshvardhan8058/agentforge-proxy:${AGENTFORGE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      # TLS is the production entry point; keep 80 for the optional HTTP->HTTPS redirect.
+      - "443:8443"
+      - "80:8080"
+    volumes:
+      # Enable the TLS server block (kept out of conf.d in the image so keyless local
+      # `nginx -t` passes without certs) by mounting it into conf.d at runtime.
+      - ./nginx/tls/agentforge-tls.conf:/etc/nginx/conf.d/agentforge-tls.conf:ro
+      # Certificate material mounted READ-ONLY from the host/Secret_Source — never baked
+      # into an image (Req 7.2). Paths come from the operator environment.
+      - ${TLS_CERT_PATH:-./nginx/tls/fullchain.pem}:/etc/nginx/tls/fullchain.pem:ro
+      - ${TLS_KEY_PATH:-./nginx/tls/privkey.pem}:/etc/nginx/tls/privkey.pem:ro
+
+  frontend:
+    image: ghcr.io/harshvardhan8058/agentforge-frontend:${AGENTFORGE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      # In production the SPA base URL is supplied at container start (Runtime_Config).
+      API_BASE_URL: ${API_BASE_URL:-}
+
+  # Optional one-shot migration runner (the documented scale-out option, Req 13.5).
+  # Runs the EXISTING additive runner once and exits 0; the api gates on its success.
+  # For the single-replica default the base file's on-startup migration path is used
+  # instead — this service simply makes ordering explicit when scaling backend replicas.
+  migrate:
+    image: ghcr.io/harshvardhan8058/agentforge-backend:${AGENTFORGE_IMAGE_TAG:-latest}
+    container_name: agentforge-migrate
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PROFILE: production
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+    # Invoke the existing run_migrations once via the app's own callable (no app change),
+    # then exit. A failure names the migration id and returns non-zero, blocking the api.
+    command:
+      - python
+      - -c
+      - |
+        import asyncio
+        from agentforge.config.settings import load_settings
+        from agentforge.db.engine import create_engine
+        from agentforge.db.migrations import run_migrations
+
+        async def _main() -> None:
+            settings = load_settings()
+            engine = create_engine(settings.database_url)
+            try:
+                applied = await run_migrations(engine, settings.embedding_dimension)
+                print(f"migrate: applied={applied}")
+            finally:
+                await engine.dispose()
+
+        asyncio.run(_main())
+
+  api:
+    image: ghcr.io/harshvardhan8058/agentforge-backend:${AGENTFORGE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      # Gate on a successful one-shot migration in addition to healthy infra so a scaled
+      # deployment never races concurrent migrations (Req 13.5).
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Production profile + credentials from the Secret_Source (NO values committed).
+      # These override the base file's bundled keyless defaults.
+      PROFILE: production
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      HOSTED_EMBEDDING_API_KEY: ${HOSTED_EMBEDDING_API_KEY:-}
+      SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+
+  postgres:
+    restart: unless-stopped
+    environment:
+      # Non-default, operator-supplied credentials (Req 5.3) — no values committed.
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+  redis:
+    restart: unless-stopped

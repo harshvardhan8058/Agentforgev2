@@ -204,8 +204,8 @@ guardrail (Req 14, 19.2, 21).
     serves its health endpoint, and the nginx config passes `nginx -t` with security headers.
     Ensure all checks pass, ask the user if questions arise.
 
-- [ ] 6. Unified one-command keyless local stack (`docker-compose.yml`)
-  - [ ] 6.1 Add `frontend` and `nginx` services with keyless env
+- [x] 6. Unified one-command keyless local stack (`docker-compose.yml`)
+  - [x] 6.1 Add `frontend` and `nginx` services with keyless env
     - Extend the existing `docker-compose.yml` (which already defines `api` + `postgres` +
       `redis`) by adding a `frontend` service (`build: frontend/Dockerfile`) and an `nginx`
       Reverse_Proxy service (the sole published entry point, port 80). Set `PROFILE=local`
@@ -215,7 +215,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 4.1, 4.2, 4.3, 4.5, 4.6, 6.4, 20.2, 20.3_
     - _Design: Local_Compose (`docker-compose.yml`); Environment variable matrix_
 
-  - [ ] 6.2 Wire healthchecks and dependency-ordered startup
+  - [x] 6.2 Wire healthchecks and dependency-ordered startup
     - Add a Health_Check to every service per the design table (postgres `pg_isready`; redis
       `redis-cli ping`; backend `/health/live`; frontend + nginx `/healthz`) with explicit
       `interval`/`timeout`/`retries`/`start_period` (e.g. backend `start_period: 40s` to cover
@@ -225,7 +225,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 12.1, 12.2, 12.3, 12.4_
     - _Design: Health checks + startup ordering (concrete); Startup gating (explicit)_
 
-  - [ ]* 6.3 Compose smoke + keyless all-healthy property
+  - [x]* 6.3 Compose smoke + keyless all-healthy property
     - **Property 2: Keyless local stack reaches all-healthy with zero credentials**
     - **Validates: Requirements 4.2, 20.1**
     - Tag: `Feature: agentforge-deployment, Property 2: Keyless local stack reaches all-healthy with zero credentials`.
@@ -237,8 +237,8 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 4.1, 4.4, 6.3, 6.6, 11, 12, 13.1, 13.3_
     - _Design: Testing Strategy — Compose smoke; Property 2 (keyless all-healthy)_
 
-- [ ] 7. Production deployment overlay (`docker-compose.production.yml`)
-  - [ ] 7.1 Author the production overlay (secrets, hardened creds, restart, TLS, GHCR images)
+- [x] 7. Production deployment overlay (`docker-compose.production.yml`)
+  - [x] 7.1 Author the production overlay (secrets, hardened creds, restart, TLS, GHCR images)
     - Add `docker-compose.production.yml` applied as an overlay on the base file:
       `PROFILE=production`; all credentials sourced from `env_file`/orchestrator Secret_Source
       with **no credential value committed** (including `JWT_SECRET` and non-default
@@ -249,7 +249,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 7.2, 9.3, 10.1, 10.5, 15.x_
     - _Design: Production_Compose (`docker-compose.production.yml`); Local vs. production compose differences_
 
-  - [ ] 7.2 Add `.env.production.example` (placeholders only)
+  - [x] 7.2 Add `.env.production.example` (placeholders only)
     - Add `.env.production.example` enumerating every production-required setting
       (`PROFILE`, `JWT_SECRET`, `DATABASE_URL`, `REDIS_URL`, `POSTGRES_*`, optional
       `SecretStr` provider keys, `API_BASE_URL`, `AGENTFORGE_IMAGE_TAG`) with **placeholder
@@ -258,15 +258,15 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 9.2, 9.4, 10.3_
     - _Design: Secrets management + environment separation; Environment variable matrix_
 
-  - [ ]* 7.3 Verify the production guard aborts on missing `JWT_SECRET`
+  - [x]* 7.3 Verify the production guard aborts on missing `JWT_SECRET`
     - Start the backend under `PROFILE=production` with `JWT_SECRET` absent and assert the
       existing `load_settings` guard raises `ConfigError(["jwt_secret"], ...)`, the container
       exits non-zero before serving, and no credential value is read from any committed file.
     - _Requirements: 5.6, 10.5_
     - _Design: Error Handling — Production missing JWT_SECRET_
 
-- [ ] 8. Migration step: on-startup default + optional one-shot service
-  - [ ] 8.1 Keep on-startup migrations and add the optional one-shot `migrate` service
+- [x] 8. Migration step: on-startup default + optional one-shot service
+  - [x] 8.1 Keep on-startup migrations and add the optional one-shot `migrate` service
     - Keep the existing `main.py` lifespan `run_migrations` on-startup path as the default
       (no app change) and document it as the Phase 9 single-replica default. Add an optional
       one-shot `migrate` service in Compose that invokes the existing runner once and exits 0,
@@ -276,7 +276,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 18.3_
     - _Design: Migration_Step_
 
-  - [ ]* 8.2 Write the migration idempotence property test
+  - [x]* 8.2 Write the migration idempotence property test
     - **Property 3: Migration runner is idempotent**
     - **Validates: Requirements 13.2, 18.3**
     - Tag: `Feature: agentforge-deployment, Property 3: Migration runner is idempotent`.
