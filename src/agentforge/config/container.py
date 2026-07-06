@@ -64,7 +64,7 @@ from agentforge.multiagent.store import (
 from agentforge.multiagent.streaming import Multi_Agent_Streaming_Service
 from agentforge.streaming.sse import SSE_Streaming_Service
 from agentforge.api.errors import AppError
-from agentforge.integrations.base import Integration_Connector
+from agentforge.integrations.base import Integration_Connector, Integration_Tool
 from agentforge.integrations.connection import (
     InMemory_Integration_Connection_Store,
     Integration_Connection_Store,
