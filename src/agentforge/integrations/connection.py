@@ -1,8 +1,99 @@
 """Integration_Connection — optional, additive, org-scoped non-secret persistence.
 
-Placeholder module scaffolded in task 1; the ``Integration_Connection`` model, the
-``Integration_Connection_Store`` ABC, and the in-memory / Postgres stores are implemented
-in task 7 per the design's "Optional org-scoped Integration_Connection persistence" section.
+Optional persistence of **non-secret** per-org integration configuration (e.g. a default
+Slack channel). It never stores credential material, and enablement never depends on it — a
+Disabled/Enabled decision is derived solely from ``Settings`` (Req 11.4, 11.5).
+
+Tenant isolation is enforced at the data-access layer: every method takes ``org_id`` as a
+required parameter, so a cross-tenant read/mutate matches no row → ``None``/``[]`` → the
+caller raises ``AppError("not_found", 404)`` — 404, never 403 (Req 11.1, 11.2). The
+in-memory store below is the keyless default; the Postgres-backed store and migration ``0011``
+are added in task 7.
 """
 
 from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from pydantic import SecretStr
+
+
+@dataclass
+class Integration_Connection:
+    """A per-org, non-secret integration configuration record (Req 11.1, 11.4)."""
+
+    id: UUID
+    org_id: UUID
+    integration: str
+    config: dict  # NON-SECRET only (e.g. {"default_channel": "#general"})
+    created_at: datetime
+
+
+def _reject_secret_config(config: dict | None) -> dict:
+    """Return a shallow copy of ``config``, rejecting any credential/SecretStr value (Req 11.4).
+
+    The store structurally never accepts or persists a ``SecretStr``; a defensive check keeps
+    an accidental credential out of persistence entirely.
+    """
+    materialized = dict(config or {})
+    for key, value in materialized.items():
+        if isinstance(value, SecretStr):
+            raise ValueError(
+                f"integration connection config must not contain a secret value: {key!r}"
+            )
+    return materialized
+
+
+class Integration_Connection_Store(ABC):
+    """Abstract org-scoped store for non-secret Integration_Connection records.
+
+    Every method takes ``org_id`` as a required parameter and never accepts or persists a
+    credential / ``SecretStr`` field (Req 11.1, 11.4).
+    """
+
+    @abstractmethod
+    def create(self, org_id: UUID, integration: str, config: dict) -> Integration_Connection:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get(self, org_id: UUID, connection_id: UUID) -> Integration_Connection | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_for_org(self, org_id: UUID) -> list[Integration_Connection]:
+        raise NotImplementedError
+
+
+class InMemory_Integration_Connection_Store(Integration_Connection_Store):
+    """Keyless default store keyed by ``(org_id, id)`` so cross-org access finds no row.
+
+    A cross-org ``get`` returns ``None`` and ``list_for_org`` returns ``[]`` for an org with
+    no rows — tenant isolation at the data-access layer (Req 11.1, 11.2).
+    """
+
+    def __init__(self) -> None:
+        self._by_key: dict[tuple[UUID, UUID], Integration_Connection] = {}
+
+    def create(self, org_id: UUID, integration: str, config: dict) -> Integration_Connection:
+        connection = Integration_Connection(
+            id=uuid4(),
+            org_id=org_id,
+            integration=integration,
+            config=_reject_secret_config(config),
+            created_at=datetime.now(timezone.utc),
+        )
+        self._by_key[(org_id, connection.id)] = connection
+        return connection
+
+    def get(self, org_id: UUID, connection_id: UUID) -> Integration_Connection | None:
+        return self._by_key.get((org_id, connection_id))
+
+    def list_for_org(self, org_id: UUID) -> list[Integration_Connection]:
+        return [
+            connection
+            for (owner_org, _cid), connection in self._by_key.items()
+            if owner_org == org_id
+        ]

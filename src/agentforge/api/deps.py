@@ -23,6 +23,8 @@ from agentforge.config.container import (
     EnterpriseContext,
     MultiAgentContext,
     ObservabilityContext,
+    build_integration_connection_store,
+    build_integration_status_service,
 )
 from agentforge.config.settings import Settings
 from agentforge.conversation.base import Conversation_Store
@@ -33,6 +35,8 @@ from agentforge.enterprise.models import Principal
 from agentforge.enterprise.principal import PrincipalKind, principal_key
 from agentforge.enterprise.rbac import Permission, RBAC_Policy
 from agentforge.ingestion.service import Ingestion_Service
+from agentforge.integrations.connection import Integration_Connection_Store
+from agentforge.integrations.status import Integration_Status_Service
 from agentforge.observability.analytics import Analytics_Service
 from agentforge.observability.evaluation.base import Evaluation_Store
 from agentforge.observability.evaluation.framework import Evaluation_Framework
@@ -363,3 +367,32 @@ def get_evaluation_framework(request: Request) -> Evaluation_Framework:
 def get_evaluation_store(request: Request) -> Evaluation_Store:
     """Return the wired Evaluation_Store (org-scoped dataset/run persistence)."""
     return get_observability_context(request).evaluation_store
+
+
+# --- Phase 8 integration accessors ------------------------------------------------
+
+
+def get_integration_status_service(request: Request) -> Integration_Status_Service:
+    """Return the Integration_Status_Service (used by the ``/integrations/status`` router).
+
+    Reads a pre-wired service from ``app.state`` when present (e.g. injected by a test or
+    the composition root); otherwise builds the stateless service from the active Settings.
+    """
+    service = getattr(request.app.state, "integration_status_service", None)
+    if service is not None:
+        return service
+    return build_integration_status_service(get_settings(request))
+
+
+def get_integration_connection_store(request: Request) -> Integration_Connection_Store:
+    """Return the org-scoped Integration_Connection_Store (used by the task 7 surfaces).
+
+    Reads a pre-wired store from ``app.state`` when present; otherwise builds the in-memory
+    default once and caches it on ``app.state`` so its persistence survives across requests.
+    """
+    store = getattr(request.app.state, "integration_connection_store", None)
+    if store is not None:
+        return store
+    store = build_integration_connection_store(get_settings(request))
+    request.app.state.integration_connection_store = store
+    return store

@@ -171,8 +171,8 @@ required.
       and that `Settings()` with no env vars leaves every integration Disabled.
     - _Requirements: 3.8, 4.2, 6.4_
 
-- [ ] 3. Implement the four Integration modules (`slack.py`, `gmail.py`, `google_drive.py`, `github.py`)
-  - [ ] 3.1 Implement `slack.py`
+- [x] 3. Implement the four Integration modules (`slack.py`, `gmail.py`, `google_drive.py`, `github.py`)
+  - [x] 3.1 Implement `slack.py`
     - Define `Slack_Connector(Integration_Connector)` with `read_channel(channel, limit)` and
       `post_message(channel, text)`; provide `Disabled_Slack_Connector` (`available=False`,
       operations raise defensively, no network), `Keyed_Slack_Connector(token)` (built only
@@ -185,7 +185,7 @@ required.
     - _Requirements: 1.1, 1.3, 5.1, 5.2, 5.3, 5.4, 12.1, 12.2, 12.3, 12.4, 12.5, 12.6_
     - _Design: The four Integration_Tools (Slack_Tool); Connector transport seam_
 
-  - [ ] 3.2 Implement `gmail.py`
+  - [x] 3.2 Implement `gmail.py`
     - Define `Gmail_Connector` with `search_messages(query)`, `read_message(message_id)`,
       `send_message(to, subject, body)`; provide the `Disabled_`/`Keyed_`/`Mock_` trio.
       Implement `Gmail_Tool` (`name="gmail"`) with the `input_schema` (`action` ∈
@@ -196,7 +196,7 @@ required.
     - _Requirements: 1.1, 1.3, 5.1, 5.2, 5.3, 5.4, 13.1, 13.2, 13.3, 13.4, 13.5_
     - _Design: The four Integration_Tools (Gmail_Tool)_
 
-  - [ ] 3.3 Implement `google_drive.py`
+  - [x] 3.3 Implement `google_drive.py`
     - Define `Google_Drive_Connector` with **read-only** operations `list_files()`,
       `search_files(query)`, `read_file(file_id)` (no mutate/delete on the contract);
       provide the `Disabled_`/`Keyed_`/`Mock_` trio. Implement `Google_Drive_Tool`
@@ -207,7 +207,7 @@ required.
     - _Requirements: 1.1, 1.3, 5.1, 5.2, 5.3, 5.4, 14.1, 14.2, 14.3, 14.4, 14.5_
     - _Design: The four Integration_Tools (Google_Drive_Tool)_
 
-  - [ ] 3.4 Implement `github.py`
+  - [x] 3.4 Implement `github.py`
     - Define `GitHub_Connector` with `search_code(query)`, `search_issues(query)`,
       `read_repo(owner, repo)`, `create_issue(owner, repo, title, body)`; provide the
       `Disabled_`/`Keyed_`/`Mock_` trio. Implement `GitHub_Tool` (`name="github"`) with the
@@ -219,7 +219,7 @@ required.
     - _Requirements: 1.1, 1.3, 5.1, 5.2, 5.3, 5.4, 15.1, 15.2, 15.3, 15.4, 15.5_
     - _Design: The four Integration_Tools (GitHub_Tool)_
 
-  - [ ]* 3.5 Write property test for single-write dispatch and Drive read-only
+  - [x]* 3.5 Write property test for single-write dispatch and Drive read-only
     - **Property 7: A write action performs exactly one connector write and no other side effect**
     - **Validates: Requirements 6.5, 12.5, 13.5, 15.5, 14.5**
     - Hypothesis over each write action (`slack.post_message`, `gmail.send_message`,
@@ -227,15 +227,15 @@ required.
       assert exactly one call to the corresponding write op with those arguments and no other
       connector call; and for any Google Drive action assert zero write/mutate/delete calls.
 
-  - [ ]* 3.6 Write unit tests for per-action schema shape and retrieval-by-id actions
+  - [x]* 3.6 Write unit tests for per-action schema shape and retrieval-by-id actions
     - Cover each tool's per-action required fields (Req 12.1, 13.1, 14.1, 15.1) with
       `additionalProperties: false`, and the retrieval-by-id actions
       `gmail.read_message` / `google_drive.read_file` / `github.read_repo` returning the
       identified resource, plus each tool's unique stable `name`.
     - _Requirements: 1.3, 12.1, 13.1, 13.4, 14.1, 14.4, 15.1, 15.4_
 
-- [ ] 4. Wire integrations through the composition root (`config/container.py`) and extend `build_tool_registry`
-  - [ ] 4.1 Add the per-integration connector builders
+- [x] 4. Wire integrations through the composition root (`config/container.py`) and extend `build_tool_registry`
+  - [x] 4.1 Add the per-integration connector builders
     - Add `build_slack_connector` / `build_gmail_connector` / `build_google_drive_connector`
       / `build_github_connector`, each returning the `Disabled_<X>_Connector` unless
       `settings.integration_enabled(name)`, in which case it constructs the
@@ -244,7 +244,7 @@ required.
     - _Requirements: 2.1, 3.2, 5.2, 5.3_
     - _Design: Composition-root additions (`config/container.py`)_
 
-  - [ ] 4.2 Implement `build_integration_tools` and extend `build_tool_registry`
+  - [x] 4.2 Implement `build_integration_tools` and extend `build_tool_registry`
     - Implement `build_integration_tools(settings, *, connectors=None)` iterating the
       `_INTEGRATION_BUILDERS`: build (or accept an injected) connector, and yield the
       `Integration_Tool` subclass (with `timeout_seconds` / `max_results` from settings) only
@@ -256,14 +256,14 @@ required.
     - _Requirements: 2.2, 2.3, 2.4, 2.5, 2.6, 3.2_
     - _Design: Composition-root registration policy; Composition-root additions_
 
-  - [ ] 4.3 Add the deps accessors
+  - [x] 4.3 Add the deps accessors
     - Add `build_integration_status_service(settings)` and
       `build_integration_connection_store(settings)` and surface them through `api/deps.py`
       `get_*` accessors mirroring the existing dependency wiring (used by tasks 6 and 7).
     - _Requirements: 2.1, 9.1, 11.5_
     - _Design: Composition-root additions_
 
-  - [ ]* 4.4 Write property test for Disabled-never-registered and the availability mirror
+  - [x]* 4.4 Write property test for Disabled-never-registered and the availability mirror
     - **Property 2: Disabled integrations are never registered, never listed, and hold no network path**
     - **Validates: Requirements 2.2, 2.3, 2.5, 3.2, 5.2, 5.5, 10.5, 12.3, 13.2, 14.2, 15.2**
     - Hypothesis over arbitrary integration configurations: assert the built `Tool_Registry`
@@ -271,7 +271,7 @@ required.
       integrations; every Disabled integration is absent, its selected connector reports
       `available == False`, and each tool's `available` equals its connector's.
 
-  - [ ]* 4.5 Write property test for backward compatibility with zero credentials
+  - [x]* 4.5 Write property test for backward compatibility with zero credentials
     - **Property 10: Backward compatibility with zero integration credentials**
     - **Validates: Requirements 17.1, 17.2, 3.8, 3.1**
     - Hypothesis over Settings with no integration credential: assert the registry's
@@ -279,13 +279,13 @@ required.
       own search credential is present), and a deterministic keyless agent / multi-agent run
       over identical inputs produces the same result as before Phase 8.
 
-  - [ ]* 4.6 Write unit tests for duplicate-name rejection and startup-abort naming the integration
+  - [x]* 4.6 Write unit tests for duplicate-name rejection and startup-abort naming the integration
     - Cover a `DuplicateToolNameError` surfacing unchanged on a duplicate registration, and a
       failing Enabled connector construction aborting startup with an `AppError` whose
       `details` name the offending integration.
     - _Requirements: 2.4, 2.6_
 
-- [ ] 5. Checkpoint — integration tools discoverable on the keyless path
+- [x] 5. Checkpoint — integration tools discoverable on the keyless path
   - Ensure the base + settings + integration-module + wiring property/unit suite
     (Properties 1–7, 10 plus their unit tests) is green on the keyless path with mock/disabled
     connectors, and that an Enabled integration (via an injected mock connector) is
