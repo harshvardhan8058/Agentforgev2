@@ -13,6 +13,7 @@ are added in task 7.
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -97,3 +98,104 @@ class InMemory_Integration_Connection_Store(Integration_Connection_Store):
             for (owner_org, _cid), connection in self._by_key.items()
             if owner_org == org_id
         ]
+
+
+class Pg_Integration_Connection_Store(Integration_Connection_Store):
+    """Synchronous Postgres-backed store, mirroring ``Pg_Usage_Store`` / ``Pg_*`` stores.
+
+    Uses the ``integration_connections`` table from migration ``0011``. Every method
+    constrains its SQL by ``WHERE org_id = :org_id`` (``create`` inserts the row under its
+    ``org_id``; ``get`` / ``list_for_org`` filter by it), so a cross-tenant read matches
+    zero rows → ``None`` / ``[]`` → the caller raises ``AppError("not_found", 404)`` — 404,
+    never 403 (Req 11.1, 11.2). There is **no** column for a token/secret and the store
+    never accepts or persists credential material (Req 4.3, 11.4).
+    """
+
+    def __init__(self, database_url: str, engine=None) -> None:
+        # Local imports keep the keyless in-memory path free of SQLAlchemy/psycopg.
+        from sqlalchemy import create_engine
+
+        from agentforge.conversation.store import _to_sqlalchemy_sync_dsn
+
+        self._engine = engine or create_engine(
+            _to_sqlalchemy_sync_dsn(database_url), future=True, pool_pre_ping=True
+        )
+
+    def create(self, org_id: UUID, integration: str, config: dict) -> Integration_Connection:
+        """Persist a non-secret connection row scoped to ``org_id`` and return it."""
+        from sqlalchemy import text
+
+        connection = Integration_Connection(
+            id=uuid4(),
+            org_id=org_id,
+            integration=integration,
+            config=_reject_secret_config(config),
+            created_at=datetime.now(timezone.utc),
+        )
+        with self._engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO integration_connections
+                        (id, org_id, integration, config, created_at)
+                    VALUES
+                        (:id, :org_id, :integration, CAST(:config AS JSONB), :created_at)
+                    """
+                ),
+                {
+                    "id": str(connection.id),
+                    "org_id": str(connection.org_id),
+                    "integration": connection.integration,
+                    "config": json.dumps(connection.config),
+                    "created_at": connection.created_at,
+                },
+            )
+        return connection
+
+    def get(self, org_id: UUID, connection_id: UUID) -> Integration_Connection | None:
+        """Return the connection iff owned by ``org_id``; SQL scoped by ``org_id`` (Req 11.2)."""
+        from sqlalchemy import text
+
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT id, org_id, integration, config, created_at
+                    FROM integration_connections
+                    WHERE org_id = :org_id AND id = :id
+                    """
+                ),
+                {"org_id": str(org_id), "id": str(connection_id)},
+            ).fetchone()
+        return self._row_to_connection(row) if row is not None else None
+
+    def list_for_org(self, org_id: UUID) -> list[Integration_Connection]:
+        """Return only ``org_id``'s connections; SQL scoped by ``org_id`` (Req 11.2)."""
+        from sqlalchemy import text
+
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, org_id, integration, config, created_at
+                    FROM integration_connections
+                    WHERE org_id = :org_id
+                    ORDER BY created_at ASC
+                    """
+                ),
+                {"org_id": str(org_id)},
+            ).fetchall()
+        return [self._row_to_connection(r) for r in rows]
+
+    @staticmethod
+    def _row_to_connection(row) -> Integration_Connection:
+        config = row[3]
+        if isinstance(config, str):
+            config = json.loads(config)
+        return Integration_Connection(
+            id=UUID(str(row[0])),
+            org_id=UUID(str(row[1])),
+            integration=row[2],
+            config=config or {},
+            created_at=row[4],
+        )

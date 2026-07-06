@@ -454,3 +454,26 @@ class EvaluationRunResponse(BaseModel):
     dataset_id: UUID
     aggregate_score: float
     results: list[EvaluationItemScore] = Field(default_factory=list)
+
+
+# --- integrations: status introspection (Phase 8) ---------------------------------
+
+
+class IntegrationStatusEntry(BaseModel):
+    """One integration's public status: its stable name and whether it is Enabled.
+
+    Contains only ``{name, enabled}`` — never a credential, token, or secret-derived
+    field (Req 9.2, 9.5).
+    """
+
+    name: str
+    enabled: bool
+
+
+class IntegrationStatusResponse(BaseModel):
+    """The org-scoped Integration_Status view: one ``{name, enabled}`` entry per integration.
+
+    No credential, token, or secret-derived field appears anywhere in the response (Req 9.2).
+    """
+
+    integrations: list[IntegrationStatusEntry] = Field(default_factory=list)
