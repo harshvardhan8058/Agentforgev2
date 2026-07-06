@@ -63,6 +63,38 @@ from agentforge.multiagent.store import (
 )
 from agentforge.multiagent.streaming import Multi_Agent_Streaming_Service
 from agentforge.streaming.sse import SSE_Streaming_Service
+from agentforge.api.errors import AppError
+from agentforge.integrations.base import Integration_Connector
+from agentforge.integrations.connection import (
+    InMemory_Integration_Connection_Store,
+    Integration_Connection_Store,
+)
+from agentforge.integrations.github import (
+    Disabled_GitHub_Connector,
+    GitHub_Connector,
+    GitHub_Tool,
+    Keyed_GitHub_Connector,
+)
+from agentforge.integrations.gmail import (
+    Disabled_Gmail_Connector,
+    Gmail_Connector,
+    Gmail_Tool,
+    Keyed_Gmail_Connector,
+)
+from agentforge.integrations.google_drive import (
+    Disabled_Google_Drive_Connector,
+    Google_Drive_Connector,
+    Google_Drive_Tool,
+    Keyed_Google_Drive_Connector,
+)
+from agentforge.integrations.slack import (
+    Disabled_Slack_Connector,
+    Keyed_Slack_Connector,
+    Slack_Connector,
+    Slack_Tool,
+)
+from agentforge.integrations.status import Integration_Status_Service
+from agentforge.tools.base import Tool_Interface
 from agentforge.tools.rag_tool import RAG_Tool
 from agentforge.tools.registry import Tool_Registry
 from agentforge.tools.search.base import Search_Provider
@@ -401,6 +433,8 @@ def build_tool_registry(
     settings: Settings,
     app: AppContext,
     search_provider: Search_Provider | None = None,
+    *,
+    integration_connectors: dict[str, Integration_Connector] | None = None,
 ) -> Tool_Registry:
     """Build the Tool_Registry: RAG_Tool always; Web_Search_Tool only when keyed (Req 5.3).
 
@@ -408,13 +442,143 @@ def build_tool_registry(
     ``Web_Search_Tool`` is registered **only** when the selected search provider is
     available (a search credential is present); otherwise it is not registered, so it is
     never offered to the LLM and performs no network request (Req 5.3, 5.4).
+
+    After the baseline tools, each Enabled Phase 8 Integration_Tool is registered (Req 2.2).
+    A Disabled integration is never yielded, so it is never registered nor offered; a
+    duplicate name surfaces the existing ``DuplicateToolNameError`` unchanged (Req 2.4).
+    ``integration_connectors`` lets a caller/test inject connectors (e.g. mock connectors)
+    keyed by integration name without naming a concrete connector outside this module.
     """
     registry = Tool_Registry()
     registry.register(RAG_Tool(app.rag_service))
     search = search_provider if search_provider is not None else build_search_provider(settings)
     if search.available:
         registry.register(Web_Search_Tool(search))
+    for tool in build_integration_tools(settings, connectors=integration_connectors):
+        registry.register(tool)
     return registry
+
+
+# --- Integration_Layer composition (Phase 8) --------------------------------------
+#
+# ``config/container.py`` is the ONLY module that names concrete Connectors and registers
+# Integration_Tools (Req 2.1). Each connector builder returns the keyless
+# ``Disabled_<X>_Connector`` unless the integration is Enabled, in which case it constructs
+# the ``Keyed_<X>_Connector`` from the ``SecretStr`` credential's plaintext — obtained here
+# and nowhere else (Req 3.2, 5.2, 5.3).
+
+
+def build_slack_connector(settings: Settings) -> Slack_Connector:
+    """Return the Slack connector: Disabled unless Enabled, else Keyed from the token."""
+    if not settings.integration_enabled("slack"):
+        return Disabled_Slack_Connector()
+    assert settings.slack_bot_token is not None
+    return Keyed_Slack_Connector(
+        settings.slack_bot_token.get_secret_value(),
+        timeout_seconds=settings.integration_timeout_seconds,
+    )
+
+
+def build_gmail_connector(settings: Settings) -> Gmail_Connector:
+    """Return the Gmail connector: Disabled unless Enabled, else Keyed from the token."""
+    if not settings.integration_enabled("gmail"):
+        return Disabled_Gmail_Connector()
+    assert settings.gmail_token is not None
+    return Keyed_Gmail_Connector(
+        settings.gmail_token.get_secret_value(),
+        timeout_seconds=settings.integration_timeout_seconds,
+    )
+
+
+def build_google_drive_connector(settings: Settings) -> Google_Drive_Connector:
+    """Return the Google Drive connector: Disabled unless Enabled, else Keyed from the token."""
+    if not settings.integration_enabled("google_drive"):
+        return Disabled_Google_Drive_Connector()
+    assert settings.google_drive_token is not None
+    return Keyed_Google_Drive_Connector(
+        settings.google_drive_token.get_secret_value(),
+        timeout_seconds=settings.integration_timeout_seconds,
+    )
+
+
+def build_github_connector(settings: Settings) -> GitHub_Connector:
+    """Return the GitHub connector: Disabled unless Enabled, else Keyed from the token."""
+    if not settings.integration_enabled("github"):
+        return Disabled_GitHub_Connector()
+    assert settings.github_token is not None
+    return Keyed_GitHub_Connector(
+        settings.github_token.get_secret_value(),
+        timeout_seconds=settings.integration_timeout_seconds,
+    )
+
+
+# Canonical (name, connector-builder, Tool class) triples, in the stable integration order.
+_INTEGRATION_BUILDERS: tuple[
+    tuple[str, Callable[[Settings], Integration_Connector], type[Integration_Tool]], ...
+] = (
+    ("slack", build_slack_connector, Slack_Tool),
+    ("gmail", build_gmail_connector, Gmail_Tool),
+    ("google_drive", build_google_drive_connector, Google_Drive_Tool),
+    ("github", build_github_connector, GitHub_Tool),
+)
+
+
+def build_integration_tools(
+    settings: Settings,
+    *,
+    connectors: dict[str, Integration_Connector] | None = None,
+) -> list[Tool_Interface]:
+    """Yield an Integration_Tool for each Enabled integration only (Req 2.2, 2.3, 2.5).
+
+    For each integration, build (or accept an injected) connector and register its
+    ``Integration_Tool`` — with the bounded ``timeout_seconds`` / ``max_results`` from
+    settings — only when ``connector.available`` (Enabled ⇒ register; Disabled ⇒ skip, never
+    offered, no network path). On any construction failure, raise an ``AppError``-shaped
+    error naming the offending integration and abort — never a partially registered state
+    (Req 2.6).
+    """
+    tools: list[Tool_Interface] = []
+    injected = connectors or {}
+    for name, build_connector, tool_cls in _INTEGRATION_BUILDERS:
+        try:
+            connector = injected.get(name) or build_connector(settings)
+            if connector.available:
+                tools.append(
+                    tool_cls(
+                        connector,
+                        timeout_seconds=settings.integration_timeout_seconds,
+                        max_results=settings.integration_max_results,
+                    )
+                )
+        except AppError:
+            raise
+        except Exception:
+            # Abort startup naming the offending integration; never leak internal detail.
+            raise AppError(
+                "integration_config_error",
+                f"failed to construct integration {name!r}",
+                500,
+                {"integration": name},
+            ) from None
+    return tools
+
+
+def build_integration_status_service(settings: Settings) -> Integration_Status_Service:
+    """Return the org-scoped Integration_Status_Service (used by the task 6 router)."""
+    return Integration_Status_Service(settings)
+
+
+def build_integration_connection_store(
+    settings: Settings,
+) -> Integration_Connection_Store:
+    """Return the Integration_Connection_Store (in-memory keyless default) (Req 11.5).
+
+    The in-memory default keeps standalone/keyless runs fully functional without a database.
+    The Postgres-backed ``Pg_Integration_Connection_Store`` (production profile) and its
+    migration ``0011`` are added in task 7; until then the in-memory store is used in every
+    profile so the keyless path and tests remain green.
+    """
+    return InMemory_Integration_Connection_Store()
 
 
 # --- Agentic layer composition ----------------------------------------------------
@@ -444,6 +608,7 @@ def build_agent_context(
     *,
     tool_registry: Tool_Registry | None = None,
     search_provider: Search_Provider | None = None,
+    integration_connectors: dict[str, Integration_Connector] | None = None,
     memory_manager: Memory_Manager | None = None,
     conversation_store: Conversation_Store | None = None,
     trace_recorder: Trace_Recorder | None = None,
@@ -460,7 +625,9 @@ def build_agent_context(
     """
     app = app or build_app_context(settings)
 
-    registry = tool_registry or build_tool_registry(settings, app, search_provider)
+    registry = tool_registry or build_tool_registry(
+        settings, app, search_provider, integration_connectors=integration_connectors
+    )
     memory = memory_manager or Composite_Memory_Manager(
         app.embedding_provider,
         app.vector_store,
