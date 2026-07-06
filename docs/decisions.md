@@ -1156,3 +1156,130 @@ the org-scoped `Integration_Status` introspection API, and the optional non-secr
 `Integration_Connection` persistence; interactive OAuth UI flows, per-org secret vaulting, a
 management frontend, streaming/webhook ingestion, and cloud deployment remain reserved for
 later phases and are enabled — but not designed — by the modular seams established here.
+
+
+
+---
+
+# Phase 9 — Cloud Deployment & Production Infrastructure
+
+This section records the rationale for the Phase 9 deployment infrastructure. Phase 9 is
+**infrastructure only**: it adds Docker/Compose/nginx/CI artifacts and reuses, without
+modifying, the existing application architecture — the `Settings` profile selection
+(`local`/`production`), the `container.py` composition root, the additive startup
+migration runner, the `AppError` envelope, organization tenancy, `/health/live` +
+`/health/ready`, and the keyless-by-default deterministic test promise. The **single
+app-adjacent edit** in the entire phase is the behavior-preserving `resolveConfig()`
+runtime-config plumbing in `frontend/src/config.ts`. No API contract, business logic,
+database-schema semantics, or observability behavior changes (Req 19), and `npm run
+codegen:check` stands as the API-contract guardrail.
+
+## 47. nginx as the single external entry point (routing + unbuffered SSE + security headers)
+
+A single nginx reverse proxy is the sole published service and the single TLS termination
+point; the frontend, backend, Postgres, and Redis stay on the internal Docker network with
+no host ports. Path-based routing sends `/` to the SPA and the concrete backend prefixes
+(+ SSE) to the API, forwarding request/response and event-stream bodies **byte-for-byte**
+so the HTTP/SSE contract and the `AppError` envelope are preserved in transit. SSE
+locations disable buffering/caching (`proxy_buffering off`, raised `proxy_read_timeout`,
+`X-Accel-Buffering` honored) so streams are not held back. Hardened response security
+headers (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, a
+tunable `Content-Security-Policy`) are additive metadata only and never alter bodies; HSTS
+is emitted **only from the TLS/production server block**, never from plain HTTP.
+
+_Validates: Requirements 6.1–6.5, 7.1, 7.4, 19.2._
+
+## 48. Multi-stage, non-root images on non-privileged ports (8080/8443)
+
+All three images (backend, frontend, proxy) are multi-stage and run **non-root**. The
+backend builder installs runtime dependencies into a venv **before** copying `src/`, so a
+source-only change reuses the cached dependency layer, and the slim runtime stage carries
+only the venv + application under a dedicated `appuser` — no build toolchain or dev/test
+tooling. The frontend and proxy use `nginxinc/nginx-unprivileged` (uid 101) listening on
+**8080** (and **8443** for TLS); the runtime publishes host 80/443 to those ports, so no
+container process binds a privileged port as root. `.dockerignore` files keep caches,
+`.venv`, `.git`, `node_modules`, and local env files out of every build context.
+
+_Validates: Requirements 1.1–1.6, 2.1–2.5, 3.1–3.3._
+
+## 49. Runtime `config.js` for build-once / run-anywhere frontend
+
+Vite bakes `VITE_API_BASE_URL` at build time, which would force a rebuild per environment.
+Instead the Frontend_Image entrypoint renders a tiny `/config.js`
+(`window.__AGENTFORGE_CONFIG__ = { apiBaseUrl: "${API_BASE_URL}" }`) at container start via
+`envsubst`; `index.html` loads it before the app bundle, and `resolveConfig()` reads the
+runtime value first, then the build-time value, then the documented default (preserved when
+`API_BASE_URL` is unset). The same image serves byte-identical hashed assets everywhere and
+differs only in `/config.js`, which carries the non-secret base URL only. This is the sole
+app-adjacent edit and is pure config plumbing.
+
+_Validates: Requirements 8.1–8.5, 19.1._
+
+## 50. Unified keyless local compose + a production overlay (same images)
+
+One base `docker-compose.yml` brings up the full platform **keyless** with a single
+`docker compose up --build` (PROFILE=local, bundled non-secret DSNs, no credentials).
+Production is expressed as an **overlay** (`docker-compose.production.yml`) applied on top
+of the base so the service graph is defined once; the overlay only overrides profile,
+injects secrets from a Secret_Source (no committed values, including `JWT_SECRET` and
+non-default Postgres creds), adds `restart: unless-stopped`, enables the TLS block with
+runtime-mounted certs, and pulls pinned GHCR images. `.env.production.example` enumerates
+every production setting with placeholders only. `SecretStr` typing keeps credentials
+redacted; no credential is ever baked into an image or committed.
+
+_Validates: Requirements 4.1–4.6, 5.1–5.6, 7.2, 9.1–9.5, 10.1–10.5, 20.1–20.3._
+
+## 51. On-startup migrations by default; optional one-shot for scale-out
+
+The existing additive `run_migrations` runner keeps running in the `main.py` lifespan on
+backend startup as the single-replica default — preserving One_Command_Startup with zero
+new app code, halting on `MigrationError` and naming the failing id. For scale-out, the
+production overlay adds an optional one-shot `migrate` service that runs the same runner
+once and exits 0, with the backend gating on
+`depends_on: migrate: condition: service_completed_successfully` so replicas never race
+concurrent migrations. The runner stays additive and `schema_migrations`-tracked, so
+re-runs and rollbacks to earlier images are safe.
+
+_Validates: Requirements 12.1–12.4, 13.1–13.5, 18.3._
+
+## 52. Four-job CI/CD → GHCR three-tag strategy; rollback via immutable tag
+
+CI is four jobs chained with `needs:` — `test → build → publish → deploy` — so a red stage
+stops all later stages. `test` runs both keyless lanes (backend `pytest -m 'not
+integration' -q`, frontend `npm run ci`) plus the repo-wide secret scan with **no
+credentials**; `build` builds all three images and runs the image-layer secret scan;
+`publish` (guarded to `main`/`v*`) pushes to GHCR under a **three-tag** strategy — `latest`
+(moving) + `<git-sha>` (immutable, every publish) + `<semver>` (only on a version tag);
+`deploy` is gated on a manual-approval GitHub Environment and wraps the rollback-capable
+`compose pull && up -d` shape. Rollback re-points `AGENTFORGE_IMAGE_TAG` to a prior
+immutable tag and re-pulls; because migrations are additive, no DB rollback is needed.
+
+_Validates: Requirements 14.1–14.4, 15.1–15.4, 18.1–18.2, 21.1–21.3._
+
+## 53. Observability preserved — deployment never changes app behavior
+
+Because the proxy forwards bodies and SSE byte-for-byte and no application source changes
+beyond the runtime-config plumbing, all existing observability surfaces behave exactly as
+before: the `Trace_Recorder` / `Tracing_Exporter` pipeline (NoOp in `local`, real exporter
+when configured), the `/analytics` endpoints, and the guardrails subsystem are unchanged.
+Traces, analytics, and guardrail decisions observed through the proxy are identical to
+those observed hitting the backend directly.
+
+_Validates: Requirements 19.1, 19.2, 19.4._
+
+### Known deployment consideration (future work)
+
+The backend image is **large** because it installs `torch` / `sentence-transformers` for
+the default local embedding provider. Slimming it is **out of scope** for Phase 9; the
+recommended future work is a **CPU-only `torch`** build (and/or making the local-embedding
+dependency optional when a hosted embedding provider is used) to reduce image size and pull
+time. This is a size/performance consideration only — it does not affect correctness or the
+keyless promise.
+
+---
+
+_Scope note:_ this record now covers Phases 1–6, 8, and 9. Phase 9 ships the deployment and
+production infrastructure (images, nginx proxy, compose files, CI/CD, docs) with no
+application behavior or contract change; managed cloud services, Kubernetes/Helm,
+DNS/domain registration, and real certificate issuance/renewal remain out of scope and are
+handled externally.

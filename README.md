@@ -163,3 +163,59 @@ curl http://localhost:8000/integrations/status
 
 A request with no valid principal is rejected with `401`, and a principal lacking the
 `read` permission with `403`, both rendered through the uniform error envelope.
+
+
+## Deployment & Infrastructure (Phase 9)
+
+Phase 9 packages the whole platform — the FastAPI backend, the Vite/React frontend,
+PostgreSQL (pgvector), and Redis — into a production-grade, container-based deployment
+behind a single nginx reverse proxy. It is **infrastructure only**: it adds no
+application capability and changes no HTTP/SSE API contract, database-schema semantics,
+or business logic.
+
+### One-command local start (keyless)
+
+Bring up the **entire** platform — frontend, backend, PostgreSQL, and Redis behind the
+nginx entry point — with a single command and **zero credentials**:
+
+```bash
+docker compose up --build
+```
+
+Everything is reachable same-origin through the proxy at **http://localhost** — the SPA
+at `/` and the API/SSE under their route prefixes (`/health`, `/auth`, `/agent`,
+`/query`, …). No credential is required or committed: the stack runs under the keyless
+`local` profile (deterministic Fallback LLM, local embeddings, disabled web search, NoOp
+tracing). Schema migrations run automatically on backend startup, and the proxy only
+begins serving after every service reports healthy.
+
+Verify readiness through the proxy once it is up:
+
+```bash
+curl http://localhost/health/ready
+# -> {"status":"ready","dependencies":{"database":"up","redis":"up"}}
+```
+
+> The legacy `docker compose up` backend-only workflow (`http://localhost:8000`,
+> described under *Foundation* above) still works for backend-only development; the
+> command above is the full-platform one-command start.
+
+### Production, HTTPS, images, and rollback
+
+Production runs the same images under a Compose overlay
+(`docker-compose.production.yml`) that selects the `production` profile, injects secrets
+from a Secret_Source at runtime, hardens credentials and restart policies, and terminates
+TLS at nginx. Images are published to GHCR under a three-tag strategy (`latest` + git SHA
++ semver) so a deploy pins an immutable tag and a rollback is a single tag change plus
+`pull` + `up -d`.
+
+Full operator guides:
+
+- **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)** — local start, production deploy under
+  the `production` profile, enabling HTTPS (mounting certificates), the frontend
+  Runtime_Config mechanism, the image-tag strategy, deployment verification, and the
+  rollback procedure.
+- **[docs/INFRASTRUCTURE.md](./docs/INFRASTRUCTURE.md)** — deployment topology, the
+  service list and ports, the env-var matrix (local vs. production), the
+  healthcheck/startup-ordering chain, the three images and their GHCR tags, and the
+  four-job CI/CD pipeline.

@@ -338,14 +338,14 @@ guardrail (Req 14, 19.2, 21).
       `*.env.example` files, assert no real credential value is present (only placeholders).
     - _Design: Testing Strategy — Property 1 (no baked secrets)_
 
-- [ ] 11. Deployment and infrastructure documentation
-  - [ ] 11.1 Add the README deployment section
+- [x] 11. Deployment and infrastructure documentation
+  - [x] 11.1 Add the README deployment section
     - Add a Deployment section to `README.md` describing the one-command local start
       (`docker compose up --build`) reaching a serving keyless platform through the proxy.
     - _Requirements: 16.1_
     - _Design: Documentation set — README.md_
 
-  - [ ] 11.2 Author `docs/DEPLOYMENT.md`
+  - [x] 11.2 Author `docs/DEPLOYMENT.md`
     - Cover production deploy under the `production` profile and how the Secret_Source
       supplies credentials; the proxy routing, TLS_Termination, and how to enable HTTPS by
       mounting cert material; the Runtime_Config mechanism for the frontend base URL; the
@@ -356,14 +356,14 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 16.2, 16.3, 16.4, 16.5, 17.1, 17.2, 17.3, 17.4, 18.1, 18.2, 18.3_
     - _Design: Documentation set — docs/DEPLOYMENT.md; Rollback plan; Deployment verification_
 
-  - [ ] 11.3 Author `docs/INFRASTRUCTURE.md`
+  - [x] 11.3 Author `docs/INFRASTRUCTURE.md`
     - Document the deployment topology, the service list (nginx/frontend/api/postgres/redis
       + optional migrate), network and published ports, the env-var matrix (local vs.
       production), and the four-job CI/CD overview.
     - _Requirements: 16.1, 9.1, 9.5_
     - _Design: Documentation set — docs/INFRASTRUCTURE.md; Compose service list; Environment variable matrix_
 
-  - [ ] 11.4 Add a Phase 9 note to `PROJECT_STATE` and `docs/decisions.md`
+  - [x] 11.4 Add a Phase 9 note to `PROJECT_STATE` and `docs/decisions.md`
     - Append a Phase 9 entry to `docs/PROJECT_STATE.md` and a "Phase 9 — Cloud Deployment &
       Production Infrastructure" section to `docs/decisions.md` recording the infra-only
       decisions: multi-stage/non-root images, the nginx single entry point with SSE and
@@ -373,7 +373,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 16.5, 19.1, 19.4_
     - _Design: Documentation set; Observability is preserved; Deployment targets_
 
-- [ ] 12. Checkpoint — docs and full local stack
+- [x] 12. Checkpoint — docs and full local stack
   - Ensure the documentation renders, `docker compose up --build` still reaches all-healthy
     keyless through the proxy, and the existing keyless lanes remain green unchanged. Ensure
     all checks pass, ask the user if questions arise.

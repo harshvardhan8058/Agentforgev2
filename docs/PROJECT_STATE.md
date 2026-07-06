@@ -4,9 +4,14 @@
 # without re-deriving context. YAML front-matter is the source of truth; the
 # markdown body below is a human-readable mirror.
 
-current_phase: "Phase 8 — Third-party Integrations (COMPLETE, in review). Phase 7 frontend also complete, in review on a parallel branch."
-current_branch: feat/agentforge-integrations
+current_phase: "Phase 9 — Cloud Deployment & Production Infrastructure (IN PROGRESS — completes on PR #17). Phases 1-8 complete and consolidated onto the deployment base."
+current_branch: feat/agentforge-deployment
 current_pr:
+  number: 17
+  base: main
+  state: anticipated
+  title: "Phase 9 — Cloud Deployment & Production Infrastructure"
+prior_integrations_pr:
   number: 16
   base: main
   state: open
@@ -41,8 +46,15 @@ completed_phases:
 
 remaining_phases:
   - id: 9
-    name: Cloud Deployment (Deployment & Infrastructure)
-    status: not_started
+    name: Cloud Deployment & Production Infrastructure
+    status: in_progress   # completes on PR #17
+    note: >-
+      Infrastructure only — no application behavior or API contract change. Adds
+      multi-stage non-root images (backend/frontend/proxy), the nginx single entry
+      point (routing, unbuffered SSE, TLS termination, security headers), the frontend
+      runtime config.js plumbing, the unified keyless docker-compose.yml + production
+      overlay, on-startup migrations (+ optional one-shot), a four-job CI/CD pipeline
+      publishing to GHCR under a three-tag strategy, and the deployment docs.
 
 # IMPORTANT STATE CORRECTION (recorded so future sessions do NOT assume the old
 # unmerged Phase 3-6 PR stack still exists):
@@ -106,8 +118,8 @@ architectural_constraints:
     - "No secret material in the bundle (enforced by the scan:bundle check)."
 
 resume_checkpoint:
-  state: "Phase 8 complete on PR #16 (base main); backend keyless lane 466 passed / 24 deselected. Phase 7 frontend complete on PR #14 (parallel branch): npm run ci green, 168 tests / 37 files, 15/15 properties, bundle-secret scan clean. The two feature branches are NOT merged together."
-  next: "Phase 9 — Cloud Deployment (Deployment & Infrastructure), PENDING user approval."
+  state: "Phase 9 (Cloud Deployment & Production Infrastructure) IN PROGRESS on feat/agentforge-deployment, completing on PR #17. Phases 1-8 are consolidated onto the deployment base. Tasks 1-11 done + checkpoint 12 passed; task 13 (final Phase Completion checkpoint) is left UNCHECKED for the user. Backend keyless lane green (pytest -m 'not integration' -q); frontend npm run ci green. Infrastructure only — no application behavior or API contract change."
+  next: "Task 13 — the final Phase Completion checkpoint — is left for the user to check off."
   do_not_auto_start: true
 ---
 
@@ -132,7 +144,39 @@ Phase 7 (frontend) is also complete and in review on a **parallel** branch
 
 ## Remaining phases
 
-9. Cloud Deployment (Deployment & Infrastructure) — *not started*
+9. Cloud Deployment & Production Infrastructure — *in progress (completes on PR #17)*
+
+## Phase 9 — Cloud Deployment & Production Infrastructure
+
+**Infrastructure only** — no application behavior, HTTP/SSE API contract, database-schema
+semantics, or business logic changes. The single app-adjacent edit is the
+behavior-preserving `resolveConfig()` runtime-config plumbing in `frontend/src/config.ts`.
+
+Delivered artifacts:
+
+- Multi-stage, **non-root** images: `agentforge-backend` (root `Dockerfile`),
+  `agentforge-frontend` (`frontend/Dockerfile`), `agentforge-proxy` (`nginx/Dockerfile`),
+  each with a matching `.dockerignore`.
+- **nginx** reverse proxy as the sole entry point: path routing to frontend/backend,
+  unbuffered SSE, a production TLS server block (certs mounted at runtime), and hardened
+  security headers (HSTS on the TLS block only).
+- Frontend **Runtime_Config**: entrypoint renders `/config.js` from `API_BASE_URL` at
+  container start (build-once / run-anywhere); default preserved when unset.
+- Unified **keyless** `docker-compose.yml` (one-command local start) + a **production
+  overlay** (`docker-compose.production.yml`) with injected secrets, hardened creds,
+  restart policies, TLS, and GHCR images; plus `.env.production.example` (placeholders).
+- Migrations run **on backend startup** by default (additive, `schema_migrations`-tracked),
+  with an optional one-shot `migrate` service for scale-out.
+- Four-job **CI/CD** (`test → build → publish → deploy`) publishing to GHCR under a
+  three-tag strategy (`latest` + git SHA + semver); cross-image secret scan.
+- Docs: README Deployment section, `docs/DEPLOYMENT.md`, `docs/INFRASTRUCTURE.md`.
+
+**Verification:** the four correctness properties are present and tagged — Property 1
+(no baked secrets, keyless), Properties 2 & 3 (keyless all-healthy; migration idempotence,
+both integration-lane, runtime-gated), Property 4 (build-once/run-anywhere, keyless). The
+keyless backend lane (`pytest -m 'not integration' -q`) and frontend `npm run ci` remain
+green and unmodified; `npm run codegen:check` confirms the API contract is unchanged. Task
+13 (the final Phase Completion checkpoint) is intentionally **left for the user**.
 
 ## State correction — the Phase 3–6 PR stack is merged
 
@@ -164,9 +208,10 @@ left for the user**.
 
 ## Resume checkpoint
 
-Phase 8 (third-party integrations) is complete on PR #16 (backend keyless lane: 466 passed,
-24 deselected). Phase 7 (frontend) is complete on PR #14 (`npm run ci` green: 168 tests /
-37 files, 15/15 properties, bundle-secret scan clean). The two feature branches are **not
-merged together** — reconciling them onto `main` is deployment/consolidation work. The next
-step is **Phase 9 (Cloud Deployment)**, **pending explicit user approval** — do **not**
-auto-start it.
+**Phase 9 (Cloud Deployment & Production Infrastructure)** is **in progress** on
+`feat/agentforge-deployment`, completing on **PR #17**. Phases 1–8 are consolidated onto the
+deployment base. Tasks 1–11 are done and checkpoint 12 has passed; **task 13 — the final
+Phase Completion checkpoint — is left UNCHECKED for the user**. The keyless backend lane
+(`pytest -m 'not integration' -q`) and the frontend `npm run ci` are green and unmodified,
+and `npm run codegen:check` confirms the API contract is unchanged. Phase 9 is
+**infrastructure only** — no application behavior or contract change.
