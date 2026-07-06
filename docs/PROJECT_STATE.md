@@ -4,9 +4,18 @@
 # without re-deriving context. YAML front-matter is the source of truth; the
 # markdown body below is a human-readable mirror.
 
-current_phase: "Phase 7 — React Frontend (COMPLETE, in review)"
-current_branch: feat/agentforge-frontend
+current_phase: "Phase 8 — Third-party Integrations (COMPLETE, in review). Phase 7 frontend also complete, in review on a parallel branch."
+current_branch: feat/agentforge-integrations
 current_pr:
+  number: 16
+  base: main
+  state: open
+  title: "Phase 8 — Third-party Integrations (Slack, Gmail, Drive, GitHub)"
+# NOTE ON TOPOLOGY: Phase 7 (frontend) and Phase 8 (integrations) were each branched
+# directly off `main` (cfd8204) and are NOT merged together. Phase 7 lives on
+# `feat/agentforge-frontend` (PR #14); Phase 8 lives on `feat/agentforge-integrations`
+# (PR #16). This PROJECT_STATE.md file currently exists only on the frontend branch.
+prior_frontend_pr:
   number: 14
   base: main
   state: open
@@ -27,13 +36,12 @@ completed_phases:
     name: Production Observability (Tracing, Cost Analytics, Prompt Registry, Guardrails, Evaluation)
   - id: 7
     name: React Web Frontend
-
-remaining_phases:
   - id: 8
     name: Third-party Integrations (Slack, Gmail, Drive, GitHub)
-    status: not_started
+
+remaining_phases:
   - id: 9
-    name: Cloud Deployment
+    name: Cloud Deployment (Deployment & Infrastructure)
     status: not_started
 
 # IMPORTANT STATE CORRECTION (recorded so future sessions do NOT assume the old
@@ -98,15 +106,18 @@ architectural_constraints:
     - "No secret material in the bundle (enforced by the scan:bundle check)."
 
 resume_checkpoint:
-  state: "Phase 7 complete on PR #14 (base main); 168 keyless frontend tests + 15/15 properties green; bundle-secret scan clean."
-  next: "Phase 8 — Third-party Integrations (Slack/Gmail/Drive/GitHub), PENDING user approval."
+  state: "Phase 8 complete on PR #16 (base main); backend keyless lane 466 passed / 24 deselected. Phase 7 frontend complete on PR #14 (parallel branch): npm run ci green, 168 tests / 37 files, 15/15 properties, bundle-secret scan clean. The two feature branches are NOT merged together."
+  next: "Phase 9 — Cloud Deployment (Deployment & Infrastructure), PENDING user approval."
   do_not_auto_start: true
 ---
 
 # AgentForge — Project State
 
-**Current phase:** Phase 7 — React Frontend (**COMPLETE, in review**).
-**Branch:** `feat/agentforge-frontend` · **PR:** #14 (base `main`).
+**Current phase:** Phase 8 — Third-party Integrations (**COMPLETE, in review**).
+**Branch:** `feat/agentforge-integrations` · **PR:** #16 (base `main`).
+Phase 7 (frontend) is also complete and in review on a **parallel** branch
+`feat/agentforge-frontend` (PR #14). Both branches were cut from `main` (cfd8204) and are
+**not merged together**; this file currently lives only on the frontend branch.
 
 ## Completed phases
 
@@ -117,11 +128,11 @@ resume_checkpoint:
 5. Enterprise Controls (auth, RBAC, multi-tenancy, API keys, rate limiting)
 6. Production Observability (tracing export, cost analytics, prompt registry, guardrails, evaluation)
 7. React Web Frontend
+8. Third-party Integrations (Slack, Gmail, Drive, GitHub)
 
 ## Remaining phases
 
-8. Third-party Integrations (Slack, Gmail, Drive, GitHub) — *not started*
-9. Cloud Deployment — *not started*
+9. Cloud Deployment (Deployment & Infrastructure) — *not started*
 
 ## State correction — the Phase 3–6 PR stack is merged
 
@@ -153,5 +164,9 @@ left for the user**.
 
 ## Resume checkpoint
 
-Phase 7 is complete on PR #14. The next step is **Phase 8 (third-party integrations)**,
-**pending explicit user approval** — do **not** auto-start it.
+Phase 8 (third-party integrations) is complete on PR #16 (backend keyless lane: 466 passed,
+24 deselected). Phase 7 (frontend) is complete on PR #14 (`npm run ci` green: 168 tests /
+37 files, 15/15 properties, bundle-secret scan clean). The two feature branches are **not
+merged together** — reconciling them onto `main` is deployment/consolidation work. The next
+step is **Phase 9 (Cloud Deployment)**, **pending explicit user approval** — do **not**
+auto-start it.
