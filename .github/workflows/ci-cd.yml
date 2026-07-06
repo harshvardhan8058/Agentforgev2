@@ -116,15 +116,31 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # The backend image installs the ML embedding stack (torch/sentence-transformers).
-      # Reclaim the pre-installed toolchains the runner ships with so the large backend
-      # build has ample headroom on the ~14GB runner disk (insurance; the CPU-only torch
-      # pin already keeps the image small).
+      # The backend image installs the PyPI Linux `torch`, which pulls the full CUDA 13
+      # NVIDIA payload (multi-GB `nvidia-cu13-*` wheels). Docker's default build storage
+      # lives on the runner's small ~14GB root filesystem, which overflows ("no space
+      # left on device") while extracting the CUDA libraries. We therefore (1) aggressively
+      # reclaim space on `/` and (2) relocate Docker's data-root to the runner's large
+      # ~65GB `/mnt` scratch volume BEFORE buildx is set up, so buildkit/buildx has room
+      # for the CUDA-sized layers.
       - name: Free up runner disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+          docker-images: true
+
+      - name: Relocate Docker data-root to the large /mnt scratch volume
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
-          sudo docker system prune -af || true
-          df -h /
+          sudo systemctl stop docker || true
+          sudo mkdir -p /mnt/docker /etc/docker
+          echo '{ "data-root": "/mnt/docker" }' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start docker || sudo service docker start || true
+          df -h /mnt /
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -183,13 +199,33 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # Same disk headroom insurance as the build job — the backend image is the large
-      # one, and publish builds + pushes all three images on the runner.
+      # Same disk provisioning as the build job — publish also builds all three images
+      # (the backend being the large CUDA-sized one) on the runner before pushing.
+      # The backend image installs the PyPI Linux `torch`, which pulls the full CUDA 13
+      # NVIDIA payload (multi-GB `nvidia-cu13-*` wheels). Docker's default build storage
+      # lives on the runner's small ~14GB root filesystem, which overflows ("no space
+      # left on device") while extracting the CUDA libraries. We therefore (1) aggressively
+      # reclaim space on `/` and (2) relocate Docker's data-root to the runner's large
+      # ~65GB `/mnt` scratch volume BEFORE buildx is set up, so buildkit/buildx has room
+      # for the CUDA-sized layers.
       - name: Free up runner disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+          docker-images: true
+
+      - name: Relocate Docker data-root to the large /mnt scratch volume
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
-          sudo docker system prune -af || true
-          df -h /
+          sudo systemctl stop docker || true
+          sudo mkdir -p /mnt/docker /etc/docker
+          echo '{ "data-root": "/mnt/docker" }' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start docker || sudo service docker start || true
+          df -h /mnt /
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

@@ -150,9 +150,11 @@ The image does **not** use the PyTorch CPU wheel index
 CDN (`download-r2.pytorch.org`), which is **not reliably reachable from the CI runner** and
 fails the TLS handshake (`SSLV3_ALERT_HANDSHAKE_FAILURE`). PyPI is a reliable host, so torch
 resolves cleanly there. The trade-off is a **large image**: the PyPI Linux `torch` build
-bundles the CUDA/NVIDIA wheels. To accommodate it, the CI `build` and `publish` jobs run a
-**"Free up runner disk space"** step (reclaiming pre-installed toolchains and pruning Docker)
-before building, giving the large backend image ample headroom on the runner's ~14 GB disk.
+bundles the multi-GB CUDA/NVIDIA (`nvidia-cu13-*`) wheels, which overflow the runner's small
+~14 GB root filesystem during layer extraction. To accommodate it, the CI `build` and
+`publish` jobs first **free disk space** on `/` and then **relocate Docker's `data-root` to
+the runner's large ~65 GB `/mnt` scratch volume** (before buildx is set up) so buildkit has
+room for the CUDA-sized layers.
 
 The resolve is kept deterministic and fast by a build-time `constraints.txt` that bounds the
 heavy transitive `transformers` dependency to a compatible **range** (never an exact pin that
