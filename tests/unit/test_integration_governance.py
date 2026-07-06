@@ -33,7 +33,6 @@ from agentforge.agent.graph import (
 )
 from agentforge.agent.selection import Deterministic_Fallback_Strategy
 from agentforge.agent.state import AgentState
-from agentforge.api.deps import get_current_principal
 from agentforge.api.errors import AppError
 from agentforge.config.container import (
     build_agent_context,
@@ -45,7 +44,7 @@ from agentforge.conversation.store import InMemory_Conversation_Store
 from agentforge.enterprise.base import Rate_Limiter
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.principal import PrincipalKind
-from agentforge.enterprise.rbac import Permission, Role
+from agentforge.enterprise.rbac import Role
 from agentforge.integrations.base import (
     Integration_Connector,
     Integration_Tool,
