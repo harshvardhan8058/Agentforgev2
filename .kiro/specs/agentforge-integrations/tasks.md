@@ -292,8 +292,8 @@ required.
     discoverable through the **unmodified** orchestrator via the `Tool_Registry`. Ensure all
     tests pass, ask the user if questions arise.
 
-- [ ] 6. Implement the `Integration_Status` service and the introspection router
-  - [ ] 6.1 Implement `Integration_Status_Service` (`integrations/status.py`)
+- [x] 6. Implement the `Integration_Status` service and the introspection router
+  - [x] 6.1 Implement `Integration_Status_Service` (`integrations/status.py`)
     - Implement the frozen `Integration_Status_Entry(name, enabled)` and
       `Integration_Status_Service(settings)` whose `status()` returns, for each name in
       `INTEGRATION_NAMES`, an entry with `enabled = settings.integration_enabled(name)`
@@ -301,7 +301,7 @@ required.
     - _Requirements: 9.1, 9.2, 9.5_
     - _Design: Integration_Status introspection API (`integrations/status.py`)_
 
-  - [ ] 6.2 Implement `api/routers/integrations.py` and its response schema, and mount it
+  - [x] 6.2 Implement `api/routers/integrations.py` and its response schema, and mount it
     - Add `GET /integrations/status` declaring only
       `Depends(require_permission(Permission.READ))` (no bespoke authorization), returning an
       `IntegrationStatusResponse` of `{name, enabled}` pairs; no valid Principal → 401 via
@@ -311,14 +311,14 @@ required.
     - _Requirements: 7.5, 9.1, 9.2, 9.3, 9.4, 9.5_
     - _Design: Integration_Status introspection API (router); Error Handling (HTTP surfaces)_
 
-  - [ ]* 6.3 Write unit tests for the status endpoint auth surface and response shape
+  - [x]* 6.3 Write unit tests for the status endpoint auth surface and response shape
     - Cover no-credential → 401, authenticated-without-`read` → 403, a `read` principal
       receiving one `{name, enabled}` entry per integration reflecting current config, and
       that no credential/secret-derived field appears anywhere in the response.
     - _Requirements: 9.2, 9.3, 9.4, 9.5_
 
-- [ ] 7. Implement optional org-scoped `Integration_Connection` persistence and migration `0011`
-  - [ ] 7.1 Implement the model, store ABC, and `InMemory_Integration_Connection_Store` (`integrations/connection.py`)
+- [x] 7. Implement optional org-scoped `Integration_Connection` persistence and migration `0011`
+  - [x] 7.1 Implement the model, store ABC, and `InMemory_Integration_Connection_Store` (`integrations/connection.py`)
     - Define the `Integration_Connection` dataclass (`id`, required `org_id`, `integration`,
       non-secret `config` dict, `created_at`) and `Integration_Connection_Store(ABC)` with
       `create(org_id, integration, config)`, `get(org_id, connection_id)`,
@@ -329,7 +329,7 @@ required.
     - _Requirements: 4.3, 11.1, 11.2, 11.4, 11.5_
     - _Design: Optional org-scoped Integration_Connection persistence_
 
-  - [ ] 7.2 Implement `Pg_Integration_Connection_Store`
+  - [x] 7.2 Implement `Pg_Integration_Connection_Store`
     - Use sync SQLAlchemy mirroring the Phase 5/6 `Pg_*` stores; `create` / `get` /
       `list_for_org` all constrain SQL by `WHERE org_id = :org_id`, so a cross-tenant
       read/mutate matches zero rows → `None`/`[]` → the caller raises `AppError("not_found",
@@ -337,7 +337,7 @@ required.
     - _Requirements: 4.3, 11.1, 11.2, 11.4_
     - _Design: Optional org-scoped Integration_Connection persistence; Integration_Connection row_
 
-  - [ ] 7.3 Add migration `migrations/0011_create_integration_connections.sql`
+  - [x] 7.3 Add migration `migrations/0011_create_integration_connections.sql`
     - Create `integration_connections` with `id UUID PRIMARY KEY`, `org_id UUID NOT NULL
       REFERENCES organizations(id) ON DELETE CASCADE`, `integration TEXT NOT NULL`, `config
       JSONB NOT NULL DEFAULT '{}'::jsonb` (NON-SECRET only — no token/secret column),
@@ -347,21 +347,21 @@ required.
     - _Requirements: 4.3, 11.1, 11.3, 11.4_
     - _Design: Integration_Connection row + additive migration_
 
-  - [ ]* 7.4 Write property test for cross-tenant connection isolation
+  - [x]* 7.4 Write property test for cross-tenant connection isolation
     - **Property 9: Cross-tenant Integration_Connection access resolves to not_found (404)**
     - **Validates: Requirements 11.1, 11.2**
     - Hypothesis over two distinct orgs and a connection owned by the first against the
       in-memory store: assert a read/mutate with the second org's `org_id` returns no row and
       resolves to `AppError("not_found", 404)` — never the other org's data and never 403.
 
-  - [ ]* 7.5 Write an integration test applying migration `0011` (`@pytest.mark.integration`)
+  - [x]* 7.5 Write an integration test applying migration `0011` (`@pytest.mark.integration`)
     - Apply `0011` through the existing runner; assert it reaches `schema_migrations`, the
       table has no secret column, `Pg_Integration_Connection_Store` round-trips under `org_id`
       scoping with cross-org isolation, and `ON DELETE CASCADE` sweeps an org's rows.
     - _Requirements: 11.1, 11.3, 11.4_
 
-- [ ] 8. Wire and verify RBAC, guardrail, rate-limit, and tracing over the reused seams
-  - [ ] 8.1 Verify permission gating and the write-action gate, and record the denial audit event
+- [x] 8. Wire and verify RBAC, guardrail, rate-limit, and tracing over the reused seams
+  - [x] 8.1 Verify permission gating and the write-action gate, and record the denial audit event
     - Confirm a Principal lacking `run_agents` cannot initiate an agent run that could invoke
       an Integration_Tool, and that a declared write action (`slack.post_message`,
       `gmail.send_message`, `github.create_issue`) is gated behind the same agent-run
@@ -372,7 +372,7 @@ required.
     - _Requirements: 8.1, 8.2, 10.1, 10.2, 10.5, 10.6, 13.6, 15.6_
     - _Design: reuse of enterprise seams; Error Handling_
 
-  - [ ] 8.2 Verify guardrail short-circuit and per-principal rate limiting on integration-driving requests
+  - [x] 8.2 Verify guardrail short-circuit and per-principal rate limiting on integration-driving requests
     - Confirm that when `apply_input_guardrail` blocks an input, no Integration_Tool is
       invoked, and that the existing per-Principal rate limiting applies to requests that
       drive Integration_Tool invocations — reusing the Phase 6 guardrail pipeline and the
@@ -380,7 +380,7 @@ required.
     - _Requirements: 10.3, 10.4_
     - _Design: reuse of guardrail + rate-limit seams_
 
-  - [ ] 8.3 Verify tracing of the tool-call step and export-failure suppression
+  - [x] 8.3 Verify tracing of the tool-call step and export-failure suppression
     - Confirm the existing `Trace_Recorder` records the Integration_Tool call step scoped to
       the acting `org_id`, that no credential value enters recorded/exported observability
       data, and that a failing observability recording/export leaves the invocation outcome
@@ -388,7 +388,7 @@ required.
     - _Requirements: 16.1, 16.2, 16.3, 16.4_
     - _Design: reuse of observability seams; Error Handling (no secrets, no stack traces)_
 
-  - [ ]* 8.4 Write property test for credential non-disclosure across every surface
+  - [x]* 8.4 Write property test for credential non-disclosure across every surface
     - **Property 8: Credential values are never surfaced anywhere**
     - **Validates: Requirements 4.2, 4.3, 4.4, 7.6, 9.2, 11.4, 16.2**
     - Hypothesis over generated credential values: assert the value never appears in a
@@ -396,7 +396,7 @@ required.
       message (which also contains no internal stack trace), recorded/exported trace data, or
       any persisted `Integration_Connection` record.
 
-  - [ ]* 8.5 Write unit tests for the reused enterprise / guardrail / tracing integration points
+  - [x]* 8.5 Write unit tests for the reused enterprise / guardrail / tracing integration points
     - Cover `run_agents` gating with the audit event on denial, the write-action permission
       gate, the guardrail-block short-circuit (Integration_Tool not invoked), rate-limit
       application, the argument-validation (`validation_error`) and contained-`ToolError`
@@ -404,13 +404,13 @@ required.
       invocation, and export-failure suppression.
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 10.1, 10.2, 10.3, 10.4, 10.6, 16.1, 16.3_
 
-- [ ] 9. Checkpoint — governance, status, and persistence surfaces
+- [x] 9. Checkpoint — governance, status, and persistence surfaces
   - Ensure the status, connection, and governance property/unit suite (Properties 8, 9 plus
     their unit tests) is green on the keyless path, the status router renders the `AppError`
     envelope, and migration `0011` parses. Ensure all tests pass, ask the user if questions
     arise.
 
-- [ ] 10. Document the phase (`docs/decisions.md`, top-level `README`, `.env.example`)
+- [x] 10. Document the phase (`docs/decisions.md`, top-level `README`, `.env.example`)
   - Append a "Phase 8 — Third-Party Integrations" ADR section to `docs/decisions.md` covering:
     each integration as an ordinary `Tool_Interface` behind the unchanged `Tool_Registry`; the
     per-integration Connector transport seam mirroring `Search_Provider`
@@ -426,7 +426,7 @@ required.
   - _Requirements: 3.1, 3.8, 4.1, 17.5_
   - _Design: Overview; Extension note; Settings additions (`.env.example`)_
 
-- [ ] 11. Checkpoint — docs + wiring
+- [x] 11. Checkpoint — docs + wiring
   - Ensure `docs/decisions.md` and the `README` render correctly,
     `from agentforge.main import app` still imports under the keyless default (every
     integration Disabled), and the fast (property + unit) suite is green. Ensure all tests

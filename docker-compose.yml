@@ -1,12 +1,64 @@
-# Local development stack: api + postgres(pgvector) + redis (Req 5.1).
-# Start everything with: docker compose up
+# AgentForge — unified one-command KEYLESS local stack (Phase 9, Req 4.x, 11.x, 12.x, 20.x).
+#
+# Brings up the FULL platform behind a single nginx entry point with ZERO credentials:
+#
+#     docker compose up --build
+#
+# Services:
+#   nginx     Reverse_Proxy — the ONLY published service (host 80 -> container 8080).
+#             Routes / -> frontend and the API prefixes (+ SSE) -> api.
+#   frontend  Frontend_Image (static SPA + runtime /config.js), non-root, listens 8080.
+#   api       Backend_Image (uvicorn agentforge.main:app), non-root, listens 8000.
+#   postgres  pgvector/pgvector:pg16 (bundled keyless default creds agentforge/agentforge).
+#   redis     redis:7-alpine.
+#
+# Everything except nginx is internal to the compose network; the browser reaches both
+# the SPA and the API same-origin through http://localhost. No credential is required or
+# committed (PROFILE=local is keyless).
 
 services:
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: agentforge-nginx
+    # The SOLE published entry point: host :80 -> non-root container :8080 (Req 6.4).
+    ports:
+      - "80:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      # busybox wget ships in the alpine nginx image; /healthz returns 200 when serving.
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: agentforge-frontend
+    environment:
+      # Runtime_Config: unset/empty -> config.js emits an empty object and the SPA falls
+      # back to its documented default. The browser reaches the API same-origin through
+      # the nginx proxy, so no explicit base URL is needed locally (Req 8.4).
+      API_BASE_URL: ${API_BASE_URL:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    # Report this service by name if it fails to start.
     container_name: agentforge-api
     depends_on:
       postgres:
@@ -14,23 +66,24 @@ services:
       redis:
         condition: service_healthy
     environment:
+      # Keyless local profile — NO credentials (Req 4.2, 20.2).
       PROFILE: ${PROFILE:-local}
       API_PORT: ${API_PORT:-8000}
-      # Wired to the Configuration_Manager settings.
+      # Bundled non-secret infrastructure DSNs pointing at the compose services (Req 4.5).
       DATABASE_URL: postgresql+asyncpg://agentforge:agentforge@postgres:5432/agentforge
       REDIS_URL: redis://redis:6379/0
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      # Optional provider keys stay blank locally (keyless-safe fallbacks).
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       HOSTED_EMBEDDING_API_KEY: ${HOSTED_EMBEDDING_API_KEY:-}
-    ports:
-      # Documented local port (Req 5.3).
-      - "${API_PORT:-8000}:8000"
     healthcheck:
+      # Slim python image lacks curl; use the stdlib urllib probe against /health/live.
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/live').status==200 else 1)"]
       interval: 10s
       timeout: 5s
-      retries: 6
-      start_period: 20s
+      retries: 5
+      # Generous start_period covers on-startup migrations + dependency warm-up (Req 12).
+      start_period: 40s
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -39,26 +92,24 @@ services:
       POSTGRES_USER: agentforge
       POSTGRES_PASSWORD: agentforge
       POSTGRES_DB: agentforge
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agentforge -d agentforge"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
     container_name: agentforge-redis
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
 volumes:
   pgdata:

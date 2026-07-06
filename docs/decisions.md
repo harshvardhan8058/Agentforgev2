@@ -964,3 +964,322 @@ simulated `text/event-stream` SSE and network failures) and **15/15 correctness 
 (fast-check, ≥100 iterations each) pass; `tsc --noEmit` contract-fidelity, `codegen:check`
 schema-drift, and the `scan:bundle` no-secret checks all pass. Task 30 — the final manual
 Phase Completion checkpoint — is intentionally **left for the user**.
+
+# Phase 8 — Third-Party Integrations (Slack, Gmail, Google Drive, GitHub)
+
+This section records the rationale for the Phase 8 `Integration_Layer` (Requirements 1–17
+of the `agentforge-integrations` spec). Everything here **reuses, never reimplements** the
+Phase 1–6 seams: the abstract `Tool_Interface` + `Tool_Registry` (`tools/base.py` /
+`tools/registry.py`), the `Search_Provider` keyless/credentialed/mockable pattern, the
+`Settings` + `load_settings` + `config/container.py` composition root, the uniform
+`AppError` envelope (`api/errors.py`), the Phase 5 enterprise layer (`Principal`,
+`get_current_principal` / `require_permission` / `get_org_id`, the static `RBAC_Policy`,
+the request-scoped tenancy context, per-principal rate limiting, the 404-never-403
+data-access rule, and the additive migration runner), and the Phase 6 observability layer
+(the `Trace_Recorder` and the ordered `Guardrail_Pipeline`). The whole layer is fully
+runnable and testable **keyless**: with zero integration credentials every integration is
+Disabled, no outbound network call is ever made, and the entire property + unit suite runs
+deterministically against mock connectors.
+
+## 39. Each integration is an ordinary `Tool_Interface` behind the unchanged `Tool_Registry`
+
+Slack, Gmail, Google Drive, and GitHub are each a concrete subclass of the existing
+`Tool_Interface` — the same `name` / `description` / `input_schema` / `available` /
+`invoke` contract the `RAG_Tool` and `Web_Search_Tool` implement. No new tool base class,
+no parallel registry, and no separate `Tool_Result` type is introduced. The
+`Agent_Orchestrator` and `Multi_Agent_Orchestrator` are **not modified**: they discover
+every integration solely through the `Tool_Registry`, exactly as they discover the
+built-in tools. This is the whole point of "interfaces at the seams" carried into Phase 8 —
+adding four external services costs zero edits to the agent core.
+
+_Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 17.3, 17.4._
+
+## 40. A per-integration Connector transport seam mirroring `Search_Provider`
+
+Each integration's real network work sits behind its own abstract `Connector` contract that
+exposes an `available` flag plus exactly the operations its Tool invokes (Slack:
+`read_channel` / `post_message`; Gmail: `search_messages` / `read_message` /
+`send_message`; Google Drive: read-only `list_files` / `search_files` / `read_file`;
+GitHub: `search_code` / `search_issues` / `read_repo` / `create_issue`). This is the direct
+analogue of the Phase 3 `Search_Provider` (`available` + `search`), and each integration
+ships the same trio:
+
+- `Disabled_<Integration>_Connector` — the keyless default; `available == False`, performs
+  no network call, and each operation raises defensively so an accidental call fails loudly
+  rather than hitting the network (the Tool guards on `available` first, so it is never
+  reached in normal operation).
+- `Keyed_<Integration>_Connector` — constructed **only** when the Credential is present,
+  built from the `SecretStr` plaintext obtained in the composition root, with a
+  transport-level timeout.
+- `Mock_<Integration>_Connector` — tests only; available, no network, returns injected
+  canned data / raises injected failures, and spies on calls so "no network while Disabled"
+  and "exactly one write call" are directly assertable.
+
+The `Integration_Tool.available` property **mirrors its connector** exactly as
+`Web_Search_Tool.available` mirrors `Search_Provider.available`, so a Disabled integration
+is never offered to the agent by `Tool_Registry.list_specs()`.
+
+_Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5._
+
+## 41. Enablement is a pure function of Credential presence + Enable_Setting
+
+Enablement is derived, never stored, mirroring the existing `Settings.active_search()`
+helper:
+
+```
+Enabled(integration)  ⇔  Credential present  AND  Enable_Setting ≠ false
+Disabled(integration) ⇔  Credential absent   OR   Enable_Setting = false
+```
+
+Credential presence and the non-secret `Enable_Setting` toggle are **separate** conditions:
+a present Credential alone does not force enablement when the operator sets the toggle to
+`false` (the same master-toggle discipline as Phase 6's `tracing_export_enabled`). The new
+`Settings.integration_enabled(name)` helper returns this boolean and is the single source of
+truth consumed by **both** the composition root's connector selection and the
+`Integration_Status` service — so the two can never disagree. Because enablement is a pure
+function of configuration, it is independent of any `Integration_Connection` persistence:
+with no persistence configured the platform is fully functional and enablement is derived
+solely from Credentials.
+
+_Validates: Requirements 3.1, 3.2, 3.4, 3.5, 3.6, 3.7, 3.8, 11.5._
+
+## 42. The composition root is the only wiring seam (register-only-when-Enabled, startup-abort naming the integration)
+
+`config/container.py` remains the single wiring seam and the only module that names concrete
+Connectors. The existing `build_tool_registry` policy (register `RAG_Tool` always;
+`Web_Search_Tool` only when keyed) is **extended** with "register each Integration_Tool only
+when Enabled": `build_integration_tools` iterates the per-integration builders, selects the
+`Disabled_` connector unless the integration is Enabled (then the `Keyed_` connector), and
+yields a tool for registration only when `connector.available`. A Disabled integration is
+therefore never registered, never listed, and holds no network path. If constructing or
+registering an Enabled integration fails, `build_integration_tools` raises an
+`AppError`-shaped error whose `details` name the offending integration and startup aborts —
+the platform never starts in a partially registered state, matching the existing
+`ConfigError`-aborts-startup discipline. A duplicate name surfaces the existing
+`DuplicateToolNameError` unchanged.
+
+_Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5, 2.6._
+
+## 43. A fixed error-code vocabulary mapped onto `AppError`
+
+Integration failures map onto a closed vocabulary carried in `Tool_Result.data["error_code"]`
+inside a run and rendered through `AppError.code` on HTTP surfaces: `integration_disabled`,
+`integration_unauthorized`, `integration_rate_limited`, `integration_upstream_error`,
+`integration_timeout`. Connectors signal typed failures (`Unauthorized_Error` /
+`Rate_Limited_Error` / `Upstream_Error` / other `ConnectorError`) that the base
+`Integration_Tool` maps totally onto the vocabulary — the Tool never inspects
+provider-specific error text. A Disabled invocation short-circuits to `integration_disabled`
+with **no** connector call; exceeding the `Timeout_Budget` yields `integration_timeout`. The
+mapping is two-layered: anticipated failures return `Tool_Result(ok=False)` (a normal,
+non-raising return the `act` node records as a `tool_result` observation), while a genuinely
+unexpected internal error still surfaces as `ToolError` and is contained by the `act` node —
+so an integration failure never crashes a run.
+
+_Validates: Requirements 6.1, 6.2, 7.1, 7.2, 7.3, 7.4, 7.5, 8.1, 8.2, 8.3, 8.4._
+
+## 44. `SecretStr` redaction and no-secret persistence
+
+Every integration Credential is an optional `SecretStr` on `Settings`, sourced only from the
+environment and absent by default, so pydantic redacts it from `repr` / `str` /
+`model_dump` / logs. The plaintext is obtained exactly once, in the composition root, to
+build a `Keyed_` connector and is held only inside that connector — it is never placed into a
+`Tool_Result`, the `Integration_Status` response, a surfaced error message, recorded/exported
+trace data, or a persisted record. Surfaced messages are constructed from outcome fields and
+fixed strings only, so neither a Credential value nor an internal stack trace ever reaches a
+caller. The optional `Integration_Connection` persistence stores **non-secret** configuration
+only (e.g. a default channel or repository); the `integration_connections` table has no
+column for a token and structurally cannot hold credential material.
+
+_Validates: Requirements 4.1, 4.2, 4.3, 4.4, 7.6, 9.2, 11.4, 16.2._
+
+## 45. Tenant isolation at the data-access layer (404, never 403)
+
+Consistent with Phases 5–6, tenancy for `Integration_Connection` records is enforced **at the
+store, not the handler**. Every store method (`create` / `get` / `list_for_org`) takes
+`org_id` as a required parameter and constrains its query with `WHERE org_id = :org_id`, so a
+cross-tenant read/mutate matches zero rows → `None`/`[]` → `AppError("not_found", 404)`.
+Cross-tenant access is **404, never 403**, because a 403 would leak the existence of a
+resource in another org. Migration `0011_create_integration_connections.sql` is strictly
+additive and idempotent (`CREATE ... IF NOT EXISTS`), carries
+`org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE`, and alters/drops no
+pre-existing column, so an org delete sweeps its connection rows transitively. The
+`InMemory_Integration_Connection_Store` is the keyless default; `Pg_Integration_Connection_Store`
+is the production concrete behind the same seam.
+
+_Validates: Requirements 11.1, 11.2, 11.3, 11.4._
+
+## 46. Observability side-effects never change outcomes
+
+Integration invocations are observable through the **existing** Phase 3/6 tracing seams — no
+separate mechanism is introduced. The `Trace_Recorder` records the tool-call step scoped to
+the acting `org_id`; no credential value ever enters recorded or exported data; and a failing
+observability recording/export leaves the invocation outcome unchanged, reusing the Phase 6
+suppression guarantee. Governance likewise reuses the enterprise seams unchanged: a Principal
+lacking `run_agents` cannot initiate a run that could invoke an integration, declared write
+actions (`slack.post_message`, `gmail.send_message`, `github.create_issue`) are gated behind
+the same agent-run permission model with a security audit event recorded on denial, a
+guardrail-blocked input invokes no integration, and per-principal rate limiting applies to
+integration-driving requests.
+
+_Validates: Requirements 8.x, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 16.1, 16.2, 16.3, 16.4._
+
+## How-to — Adding a fifth integration (adapter + composition edit only)
+
+Adding a fifth integration mirrors the Phase 3 "add a Tool" and Phase 6 "add a provider"
+how-tos — no edit to the orchestrator, the `Tool_Registry`, or the `Tool_Interface`:
+
+1. **Implement the Connector family + Tool** in a new module under `integrations/` (e.g.
+   `integrations/jira.py`): a `Jira_Connector(Integration_Connector)` ABC exposing its
+   operations, the `Disabled_Jira_Connector` (keyless default, `available == False`, no
+   network), the `Keyed_Jira_Connector(token)` (built only with a non-empty token), and a
+   `Mock_Jira_Connector` for tests; plus a `Jira_Tool(Integration_Tool)` subclass supplying
+   `name` / `description` / `input_schema` and `_dispatch(arguments, connector)`. The base
+   `Integration_Tool` provides the availability mirror, the Disabled short-circuit, the
+   timeout wrapper, the failure-class → error-code mapping, result capping, and redaction for
+   free.
+2. **Add its `SecretStr` credential + enable-toggle to `Settings`** (`config/settings.py`) as
+   optional / defaulted fields, and extend `integration_enabled(name)` coverage — mirroring
+   the existing four; then list the new variables in `.env.example` with keyless-safe defaults.
+3. **Register a connector builder in the composition root** (`config/container.py`): add a
+   `build_jira_connector(settings)` returning the `Disabled_` connector unless
+   `settings.integration_enabled("jira")` and append it to `_INTEGRATION_BUILDERS`.
+   `build_integration_tools` and `build_tool_registry` pick it up automatically, and the
+   property suite (parameterized over the integration set) covers the new integration with no
+   test edit.
+
+_Validates: Requirements 1.1, 2.1, 5.1, and the design's Extension note._
+
+---
+
+_Scope note:_ this record now covers Phases 1–6 and 8. Phase 8 ships the four pluggable tools,
+the org-scoped `Integration_Status` introspection API, and the optional non-secret
+`Integration_Connection` persistence; interactive OAuth UI flows, per-org secret vaulting, a
+management frontend, streaming/webhook ingestion, and cloud deployment remain reserved for
+later phases and are enabled — but not designed — by the modular seams established here.
+
+
+
+---
+
+# Phase 9 — Cloud Deployment & Production Infrastructure
+
+This section records the rationale for the Phase 9 deployment infrastructure. Phase 9 is
+**infrastructure only**: it adds Docker/Compose/nginx/CI artifacts and reuses, without
+modifying, the existing application architecture — the `Settings` profile selection
+(`local`/`production`), the `container.py` composition root, the additive startup
+migration runner, the `AppError` envelope, organization tenancy, `/health/live` +
+`/health/ready`, and the keyless-by-default deterministic test promise. The **single
+app-adjacent edit** in the entire phase is the behavior-preserving `resolveConfig()`
+runtime-config plumbing in `frontend/src/config.ts`. No API contract, business logic,
+database-schema semantics, or observability behavior changes (Req 19), and `npm run
+codegen:check` stands as the API-contract guardrail.
+
+## 47. nginx as the single external entry point (routing + unbuffered SSE + security headers)
+
+A single nginx reverse proxy is the sole published service and the single TLS termination
+point; the frontend, backend, Postgres, and Redis stay on the internal Docker network with
+no host ports. Path-based routing sends `/` to the SPA and the concrete backend prefixes
+(+ SSE) to the API, forwarding request/response and event-stream bodies **byte-for-byte**
+so the HTTP/SSE contract and the `AppError` envelope are preserved in transit. SSE
+locations disable buffering/caching (`proxy_buffering off`, raised `proxy_read_timeout`,
+`X-Accel-Buffering` honored) so streams are not held back. Hardened response security
+headers (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, a
+tunable `Content-Security-Policy`) are additive metadata only and never alter bodies; HSTS
+is emitted **only from the TLS/production server block**, never from plain HTTP.
+
+_Validates: Requirements 6.1–6.5, 7.1, 7.4, 19.2._
+
+## 48. Multi-stage, non-root images on non-privileged ports (8080/8443)
+
+All three images (backend, frontend, proxy) are multi-stage and run **non-root**. The
+backend builder installs runtime dependencies into a venv **before** copying `src/`, so a
+source-only change reuses the cached dependency layer, and the slim runtime stage carries
+only the venv + application under a dedicated `appuser` — no build toolchain or dev/test
+tooling. The frontend and proxy use `nginxinc/nginx-unprivileged` (uid 101) listening on
+**8080** (and **8443** for TLS); the runtime publishes host 80/443 to those ports, so no
+container process binds a privileged port as root. `.dockerignore` files keep caches,
+`.venv`, `.git`, `node_modules`, and local env files out of every build context.
+
+_Validates: Requirements 1.1–1.6, 2.1–2.5, 3.1–3.3._
+
+## 49. Runtime `config.js` for build-once / run-anywhere frontend
+
+Vite bakes `VITE_API_BASE_URL` at build time, which would force a rebuild per environment.
+Instead the Frontend_Image entrypoint renders a tiny `/config.js`
+(`window.__AGENTFORGE_CONFIG__ = { apiBaseUrl: "${API_BASE_URL}" }`) at container start via
+`envsubst`; `index.html` loads it before the app bundle, and `resolveConfig()` reads the
+runtime value first, then the build-time value, then the documented default (preserved when
+`API_BASE_URL` is unset). The same image serves byte-identical hashed assets everywhere and
+differs only in `/config.js`, which carries the non-secret base URL only. This is the sole
+app-adjacent edit and is pure config plumbing.
+
+_Validates: Requirements 8.1–8.5, 19.1._
+
+## 50. Unified keyless local compose + a production overlay (same images)
+
+One base `docker-compose.yml` brings up the full platform **keyless** with a single
+`docker compose up --build` (PROFILE=local, bundled non-secret DSNs, no credentials).
+Production is expressed as an **overlay** (`docker-compose.production.yml`) applied on top
+of the base so the service graph is defined once; the overlay only overrides profile,
+injects secrets from a Secret_Source (no committed values, including `JWT_SECRET` and
+non-default Postgres creds), adds `restart: unless-stopped`, enables the TLS block with
+runtime-mounted certs, and pulls pinned GHCR images. `.env.production.example` enumerates
+every production setting with placeholders only. `SecretStr` typing keeps credentials
+redacted; no credential is ever baked into an image or committed.
+
+_Validates: Requirements 4.1–4.6, 5.1–5.6, 7.2, 9.1–9.5, 10.1–10.5, 20.1–20.3._
+
+## 51. On-startup migrations by default; optional one-shot for scale-out
+
+The existing additive `run_migrations` runner keeps running in the `main.py` lifespan on
+backend startup as the single-replica default — preserving One_Command_Startup with zero
+new app code, halting on `MigrationError` and naming the failing id. For scale-out, the
+production overlay adds an optional one-shot `migrate` service that runs the same runner
+once and exits 0, with the backend gating on
+`depends_on: migrate: condition: service_completed_successfully` so replicas never race
+concurrent migrations. The runner stays additive and `schema_migrations`-tracked, so
+re-runs and rollbacks to earlier images are safe.
+
+_Validates: Requirements 12.1–12.4, 13.1–13.5, 18.3._
+
+## 52. Four-job CI/CD → GHCR three-tag strategy; rollback via immutable tag
+
+CI is four jobs chained with `needs:` — `test → build → publish → deploy` — so a red stage
+stops all later stages. `test` runs both keyless lanes (backend `pytest -m 'not
+integration' -q`, frontend `npm run ci`) plus the repo-wide secret scan with **no
+credentials**; `build` builds all three images and runs the image-layer secret scan;
+`publish` (guarded to `main`/`v*`) pushes to GHCR under a **three-tag** strategy — `latest`
+(moving) + `<git-sha>` (immutable, every publish) + `<semver>` (only on a version tag);
+`deploy` is gated on a manual-approval GitHub Environment and wraps the rollback-capable
+`compose pull && up -d` shape. Rollback re-points `AGENTFORGE_IMAGE_TAG` to a prior
+immutable tag and re-pulls; because migrations are additive, no DB rollback is needed.
+
+_Validates: Requirements 14.1–14.4, 15.1–15.4, 18.1–18.2, 21.1–21.3._
+
+## 53. Observability preserved — deployment never changes app behavior
+
+Because the proxy forwards bodies and SSE byte-for-byte and no application source changes
+beyond the runtime-config plumbing, all existing observability surfaces behave exactly as
+before: the `Trace_Recorder` / `Tracing_Exporter` pipeline (NoOp in `local`, real exporter
+when configured), the `/analytics` endpoints, and the guardrails subsystem are unchanged.
+Traces, analytics, and guardrail decisions observed through the proxy are identical to
+those observed hitting the backend directly.
+
+_Validates: Requirements 19.1, 19.2, 19.4._
+
+### Known deployment consideration (future work)
+
+The backend image is **large** because it installs `torch` / `sentence-transformers` for
+the default local embedding provider. Slimming it is **out of scope** for Phase 9; the
+recommended future work is a **CPU-only `torch`** build (and/or making the local-embedding
+dependency optional when a hosted embedding provider is used) to reduce image size and pull
+time. This is a size/performance consideration only — it does not affect correctness or the
+keyless promise.
+
+---
+
+_Scope note:_ this record now covers Phases 1–6, 8, and 9. Phase 9 ships the deployment and
+production infrastructure (images, nginx proxy, compose files, CI/CD, docs) with no
+application behavior or contract change; managed cloud services, Kubernetes/Helm,
+DNS/domain registration, and real certificate issuance/renewal remain out of scope and are
+handled externally.

@@ -1,0 +1,31 @@
+# Build-time pip constraints for the backend image (Dockerfile) ONLY.
+#
+# This file is NOT the dependency manifest — the app's declared dependencies live in
+# pyproject.toml [project].dependencies and are unchanged. It only bounds a heavy
+# TRANSITIVE dependency (`transformers`) to a compatible range so the
+# `pip install -r requirements.txt -c constraints.txt` step in the builder stage is
+# deterministic and fast (no pathological dependency backtracking). Behavior is identical
+# to a normal resolve; this just removes the ambiguity that made pip explore dozens of
+# candidate versions and exhaust the CI runner's disk/time.
+#
+# See the backend image note in docs/INFRASTRUCTURE.md.
+
+# sentence-transformers==3.3.1 depends on an unpinned `transformers`; without this
+# constraint pip backtracks across many transformers releases. We bound it to a
+# COMPATIBLE RANGE (not an exact pin) that satisfies sentence-transformers==3.3.1
+# (which requires transformers>=4.41,<5) — this both prevents pathological backtracking
+# AND stays portable: it never pins an exact version that might not exist on the real
+# upstream PyPI (an exact pin resolved from this sandbox's mirror could fail on a
+# GitHub-hosted runner). The upper bound stays well within transformers 4.x so it never
+# drifts into a release that breaks sentence-transformers==3.3.1.
+transformers>=4.41,<4.48
+
+# NOTE: torch is intentionally NOT pinned here. It is installed as an ordinary transitive
+# dependency of sentence-transformers==3.3.1 (which requires torch>=1.11) directly from
+# PyPI during the constrained `pip install`. We do NOT use the PyTorch CPU wheel index
+# (`--index-url https://download.pytorch.org/whl/cpu`): its downloads redirect to the R2
+# CDN (download-r2.pytorch.org), which is not reliably reachable from CI and fails the TLS
+# handshake. Resolving torch from PyPI is reliable; the resulting image is larger (the PyPI
+# Linux build bundles CUDA/NVIDIA wheels), which is why CI frees runner disk before building.
+# Pinning torch to an exact version is avoided so the runner picks whatever compatible build
+# PyPI actually serves.

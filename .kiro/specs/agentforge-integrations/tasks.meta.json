@@ -31,6 +31,14 @@
     "4.5 Write property test for backward compatibility with zero credentials": {
       "status": "passed",
       "lastRunTimestamp": 1783320414875
+    },
+    "7.4 Write property test for cross-tenant connection isolation": {
+      "status": "passed",
+      "lastRunTimestamp": 1783322547345
+    },
+    "8.4 Write property test for credential non-disclosure across every surface": {
+      "status": "passed",
+      "lastRunTimestamp": 1783322550430
     }
   },
   "executionHistory": {}

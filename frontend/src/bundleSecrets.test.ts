@@ -23,9 +23,15 @@ const distDir = resolve(frontendRoot, "dist");
 
 beforeAll(() => {
   if (!existsSync(resolve(distDir, "index.html"))) {
+    // Build the *production* bundle explicitly. Vitest sets NODE_ENV=test, which
+    // this child process would otherwise inherit — yielding React's development
+    // bundle whose benign DOM attribute table (e.g. `accessKey:"accessKey"`) trips
+    // the `access[_-]?key = "…"` secret pattern. Pinning NODE_ENV=production makes
+    // this self-build match the artifact CI ships and `scan:bundle` validates.
     execFileSync("npm", ["run", "build"], {
       cwd: frontendRoot,
       stdio: "ignore",
+      env: { ...process.env, NODE_ENV: "production" },
     });
   }
 }, 180_000);

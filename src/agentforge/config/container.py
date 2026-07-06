@@ -64,10 +64,11 @@ from agentforge.multiagent.store import (
 from agentforge.multiagent.streaming import Multi_Agent_Streaming_Service
 from agentforge.streaming.sse import SSE_Streaming_Service
 from agentforge.api.errors import AppError
-from agentforge.integrations.base import Integration_Connector
+from agentforge.integrations.base import Integration_Connector, Integration_Tool
 from agentforge.integrations.connection import (
     InMemory_Integration_Connection_Store,
     Integration_Connection_Store,
+    Pg_Integration_Connection_Store,
 )
 from agentforge.integrations.github import (
     Disabled_GitHub_Connector,
@@ -571,13 +572,16 @@ def build_integration_status_service(settings: Settings) -> Integration_Status_S
 def build_integration_connection_store(
     settings: Settings,
 ) -> Integration_Connection_Store:
-    """Return the Integration_Connection_Store (in-memory keyless default) (Req 11.5).
+    """Return the Integration_Connection_Store: Postgres in production, in-memory otherwise.
 
-    The in-memory default keeps standalone/keyless runs fully functional without a database.
-    The Postgres-backed ``Pg_Integration_Connection_Store`` (production profile) and its
-    migration ``0011`` are added in task 7; until then the in-memory store is used in every
-    profile so the keyless path and tests remain green.
+    Mirrors :func:`build_conversation_store` / :func:`build_usage_store`: the in-memory
+    default keeps standalone/keyless runs fully functional without a database, while the
+    production profile persists non-secret per-org configuration to Postgres via
+    ``Pg_Integration_Connection_Store`` over the ``integration_connections`` table
+    (migration ``0011``). Enablement never depends on this store (Req 11.5).
     """
+    if settings.profile == "production":
+        return Pg_Integration_Connection_Store(settings.database_url)
     return InMemory_Integration_Connection_Store()
 
 
