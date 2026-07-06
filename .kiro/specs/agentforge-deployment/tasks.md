@@ -51,8 +51,8 @@ guardrail (Req 14, 19.2, 21).
 
 ## Tasks
 
-- [ ] 1. Backend build-context exclusions and optimized, non-root Backend_Image
-  - [ ] 1.1 Add the root `.dockerignore`
+- [x] 1. Backend build-context exclusions and optimized, non-root Backend_Image
+  - [x] 1.1 Add the root `.dockerignore`
     - Create a repository-root `.dockerignore` that excludes `.venv`, `.git`, Python caches
       (`.pytest_cache`, `.ruff_cache`, `.hypothesis`, `__pycache__`), test artifacts, docs,
       the `frontend/` tree (built as its own image), and all local env files (`.env`,
@@ -61,7 +61,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 3.1, 3.3, 10.2, 10.3_
     - _Design: Backend_Image (`Dockerfile`) — `.dockerignore` bullet; Secrets management + environment separation_
 
-  - [ ] 1.2 Optimize the root `Dockerfile` (multi-stage, layer-cached deps, non-root, API_PORT)
+  - [x] 1.2 Optimize the root `Dockerfile` (multi-stage, layer-cached deps, non-root, API_PORT)
     - Evolve the existing root `Dockerfile` into an explicit two-stage build: a
       `python:3.11-slim` builder stage that copies dependency manifests (`pyproject.toml`,
       `README.md`) and installs project runtime dependencies **before** copying `src/` (so a
@@ -76,7 +76,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 3.1, 19.1_
     - _Design: Backend_Image (`Dockerfile`)_
 
-  - [ ]* 1.3 Verify the Backend_Image builds, runs non-root, and serves `/health/live`
+  - [x]* 1.3 Verify the Backend_Image builds, runs non-root, and serves `/health/live`
     - Build the image; assert a source-only change reuses the cached dependency layer;
       assert the runtime container's effective user is non-root (`id -u` ≠ 0); start the
       container and assert `GET /health/live` returns 200; assert no build toolchain or
@@ -84,8 +84,8 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.6_
     - _Design: Testing Strategy — Dockerfile / image checks_
 
-- [ ] 2. Frontend Runtime_Config plumbing (the single app-adjacent edit)
-  - [ ] 2.1 Extend `resolveConfig()` to read runtime → build-time → default
+- [x] 2. Frontend Runtime_Config plumbing (the single app-adjacent edit)
+  - [x] 2.1 Extend `resolveConfig()` to read runtime → build-time → default
     - Make the minimal, behavior-preserving edit to `frontend/src/config.ts`: add a
       `runtimeBaseUrl()` helper that reads `window.__AGENTFORGE_CONFIG__?.apiBaseUrl` only
       when `window` is defined, and change `resolveConfig` to resolve
@@ -96,7 +96,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 8.1, 8.2, 8.4, 8.5, 10.2, 19.1_
     - _Design: Runtime_Config (solving the Vite build-time baking); One small app-adjacent change_
 
-  - [ ] 2.2 Add the runtime `config.js` template and load it from `index.html`
+  - [x] 2.2 Add the runtime `config.js` template and load it from `index.html`
     - Add the `config.js` template rendered at container start
       (`window.__AGENTFORGE_CONFIG__ = { apiBaseUrl: "${API_BASE_URL}" };` via `envsubst`,
       emitting an empty/absent value when `API_BASE_URL` is unset), and add
@@ -107,7 +107,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
     - _Design: Runtime_Config — Entrypoint generates `config.js`; `index.html` loads it_
 
-  - [ ]* 2.3 Write the property test for build-once / run-anywhere
+  - [x]* 2.3 Write the property test for build-once / run-anywhere
     - **Property 4: Frontend image is build-once / run-anywhere**
     - **Validates: Requirements 8.1, 8.2, 8.3, 8.4**
     - Tag: `Feature: agentforge-deployment, Property 4: Frontend image is build-once / run-anywhere`.
@@ -117,7 +117,7 @@ guardrail (Req 14, 19.2, 21).
       default when none is supplied). Minimum 100 iterations.
     - _Design: Testing Strategy — Property 4 (build-once/run-anywhere)_
 
-  - [ ]* 2.4 Confirm the existing frontend suite still passes unchanged
+  - [x]* 2.4 Confirm the existing frontend suite still passes unchanged
     - Run `npm run ci` and assert the codegen check, typecheck, existing `config` tests
       (jsdom: `window.__AGENTFORGE_CONFIG__` absent ⇒ default preserved), build, and
       bundle-secret scan all remain green with no test modified, evidencing no behavior
