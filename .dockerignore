@@ -1,0 +1,60 @@
+# Root build-context exclusions for the Backend_Image (Req 3.1, 3.3, 10.2, 10.3).
+# Keeps the build context small and guarantees no dev artifact or real credential
+# is ever sent to the image builder. The Dockerfile copies only pyproject.toml,
+# README.md, src/, and migrations/.
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Python caches / build artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Test / lint / type caches and artifacts
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.mypy_cache/
+.coverage
+htmlcov/
+tests/
+
+# Documentation (not needed at runtime; README.md is copied explicitly)
+docs/
+
+# Frontend tree (built as its own Frontend_Image, never in the backend context)
+frontend/
+
+# Local environment / secret files — never copy real credentials into an image.
+# `.env.example` templates are intentionally kept out of the image too (no COPY
+# references them); the negations preserve their "example only" semantics for any
+# tooling that consults this file.
+.env
+.env.*
+*.env
+!.env.example
+!*.env.example
+
+# Node / editor / OS artifacts (defensive)
+node_modules/
+**/node_modules/
+.DS_Store
+.idea/
+.vscode/
+
+# Spec / agent scaffolding
+.kiro/
+.agents/
