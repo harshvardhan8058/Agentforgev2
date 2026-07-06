@@ -26,6 +26,7 @@ from agentforge.api.routers import evaluations as evaluations_router
 from agentforge.api.routers import guardrails as guardrails_router
 from agentforge.api.routers import health as health_router
 from agentforge.api.routers import ingest as ingest_router
+from agentforge.api.routers import integrations as integrations_router
 from agentforge.api.routers import multi_agent as multi_agent_router
 from agentforge.api.routers import orgs as orgs_router
 from agentforge.api.routers import prompts as prompts_router
@@ -189,6 +190,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(prompts_router.router)
     app.include_router(guardrails_router.router)
     app.include_router(evaluations_router.router)
+    # Phase 8 integrations router (status introspection).
+    app.include_router(integrations_router.router)
 
     return app
 

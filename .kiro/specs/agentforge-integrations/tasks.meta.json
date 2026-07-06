@@ -1,0 +1,45 @@
+{
+  "pbtResults": {
+    "1.3 Write property test for the Disabled short-circuit": {
+      "status": "passed",
+      "lastRunTimestamp": 1783319104407
+    },
+    "1.4 Write property test for total connector-failure mapping": {
+      "status": "passed",
+      "lastRunTimestamp": 1783319105498
+    },
+    "1.5 Write property test for the Timeout_Budget guarantee": {
+      "status": "passed",
+      "lastRunTimestamp": 1783319108331
+    },
+    "1.6 Write property test for the result cap": {
+      "status": "passed",
+      "lastRunTimestamp": 1783319108744
+    },
+    "2.3 Write property test for enablement equivalence": {
+      "status": "passed",
+      "lastRunTimestamp": 1783319108981
+    },
+    "3.5 Write property test for single-write dispatch and Drive read-only": {
+      "status": "passed",
+      "lastRunTimestamp": 1783319812710
+    },
+    "4.4 Write property test for Disabled-never-registered and the availability mirror": {
+      "status": "passed",
+      "lastRunTimestamp": 1783320414293
+    },
+    "4.5 Write property test for backward compatibility with zero credentials": {
+      "status": "passed",
+      "lastRunTimestamp": 1783320414875
+    },
+    "7.4 Write property test for cross-tenant connection isolation": {
+      "status": "passed",
+      "lastRunTimestamp": 1783322547345
+    },
+    "8.4 Write property test for credential non-disclosure across every surface": {
+      "status": "passed",
+      "lastRunTimestamp": 1783322550430
+    }
+  },
+  "executionHistory": {}
+}

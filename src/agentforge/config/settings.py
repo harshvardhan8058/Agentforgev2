@@ -145,6 +145,29 @@ class Settings(BaseSettings):
     # Absence disables the Web_Search_Tool entirely (Req 5.4).
     search_api_key: SecretStr | None = None
 
+    # --- integrations (Phase 8; all optional / defaulted to preserve keyless boot) ---
+    # Per-integration Credentials: optional ``SecretStr``, env-only, absent by default, so
+    # every integration is Disabled and the platform boots with zero integration
+    # credentials (Req 3.3, 3.8, 4.1). ``SecretStr`` keeps them out of logs / repr /
+    # model_dump (Req 4.2). Note Slack's credential is a bot token named ``slack_bot_token``.
+    slack_bot_token: SecretStr | None = None
+    gmail_token: SecretStr | None = None
+    google_drive_token: SecretStr | None = None
+    github_token: SecretStr | None = None
+
+    # Per-integration Enable_Settings: non-secret master toggles, default True (mirroring
+    # ``tracing_export_enabled``). A present Credential + a toggle set False ⇒ Disabled, so
+    # an operator can hold an Integration Disabled even when its Credential is present
+    # (Req 3.5, 3.6, 3.7). Kept separate from Credential presence.
+    slack_enabled: bool = True
+    gmail_enabled: bool = True
+    google_drive_enabled: bool = True
+    github_enabled: bool = True
+
+    # Bounded, keyless-safe execution limits shared by every Integration_Tool (Req 6.4).
+    integration_timeout_seconds: int = 10  # Timeout_Budget for a single invocation
+    integration_max_results: int = 20  # single-invocation result-count cap (Req 6.3)
+
     def active_llm(self) -> str:
         """Return the active LLM provider name based on credential presence."""
         return "groq" if self.groq_api_key else "fallback"
@@ -161,6 +184,23 @@ class Settings(BaseSettings):
     def active_vector_store(self) -> str:
         """Return the active vector store based on the selected profile."""
         return "pgvector" if self.profile == "production" else "chroma"
+
+    def integration_enabled(self, name: str) -> bool:
+        """Return whether the named integration is Enabled (Req 3.4, 3.6, 3.7).
+
+        Enabled ⇔ the Credential is present AND the Enable_Setting is not ``false``;
+        Disabled otherwise. This is a pure, total function of configuration alone —
+        independent of any Integration_Connection persistence — mirroring
+        ``active_search()``. It is the single enablement authority used by both the
+        composition root's connector selection and the Integration_Status service.
+
+        Args:
+            name: one of ``"slack"``, ``"gmail"``, ``"google_drive"``, ``"github"``.
+        """
+        credential_attr = "slack_bot_token" if name == "slack" else f"{name}_token"
+        credential = getattr(self, credential_attr)
+        toggle = getattr(self, f"{name}_enabled")
+        return credential is not None and toggle is not False
 
     def active_tracing_exporter(self) -> str:
         """Return the active Tracing_Exporter name based on credential presence.
