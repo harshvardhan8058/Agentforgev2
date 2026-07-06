@@ -813,3 +813,198 @@ _Validates: Requirement 12.4._
 _Scope note:_ this record now covers Phases 1–6. The React frontend, third-party integrations
 (Slack, Gmail, Drive, GitHub), and cloud deployment remain reserved for later phases and are
 enabled — but not designed — by the modular seams established here.
+
+
+---
+
+# Phase 8 — Third-Party Integrations (Slack, Gmail, Google Drive, GitHub)
+
+This section records the rationale for the Phase 8 `Integration_Layer` (Requirements 1–17
+of the `agentforge-integrations` spec). Everything here **reuses, never reimplements** the
+Phase 1–6 seams: the abstract `Tool_Interface` + `Tool_Registry` (`tools/base.py` /
+`tools/registry.py`), the `Search_Provider` keyless/credentialed/mockable pattern, the
+`Settings` + `load_settings` + `config/container.py` composition root, the uniform
+`AppError` envelope (`api/errors.py`), the Phase 5 enterprise layer (`Principal`,
+`get_current_principal` / `require_permission` / `get_org_id`, the static `RBAC_Policy`,
+the request-scoped tenancy context, per-principal rate limiting, the 404-never-403
+data-access rule, and the additive migration runner), and the Phase 6 observability layer
+(the `Trace_Recorder` and the ordered `Guardrail_Pipeline`). The whole layer is fully
+runnable and testable **keyless**: with zero integration credentials every integration is
+Disabled, no outbound network call is ever made, and the entire property + unit suite runs
+deterministically against mock connectors.
+
+## 39. Each integration is an ordinary `Tool_Interface` behind the unchanged `Tool_Registry`
+
+Slack, Gmail, Google Drive, and GitHub are each a concrete subclass of the existing
+`Tool_Interface` — the same `name` / `description` / `input_schema` / `available` /
+`invoke` contract the `RAG_Tool` and `Web_Search_Tool` implement. No new tool base class,
+no parallel registry, and no separate `Tool_Result` type is introduced. The
+`Agent_Orchestrator` and `Multi_Agent_Orchestrator` are **not modified**: they discover
+every integration solely through the `Tool_Registry`, exactly as they discover the
+built-in tools. This is the whole point of "interfaces at the seams" carried into Phase 8 —
+adding four external services costs zero edits to the agent core.
+
+_Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 17.3, 17.4._
+
+## 40. A per-integration Connector transport seam mirroring `Search_Provider`
+
+Each integration's real network work sits behind its own abstract `Connector` contract that
+exposes an `available` flag plus exactly the operations its Tool invokes (Slack:
+`read_channel` / `post_message`; Gmail: `search_messages` / `read_message` /
+`send_message`; Google Drive: read-only `list_files` / `search_files` / `read_file`;
+GitHub: `search_code` / `search_issues` / `read_repo` / `create_issue`). This is the direct
+analogue of the Phase 3 `Search_Provider` (`available` + `search`), and each integration
+ships the same trio:
+
+- `Disabled_<Integration>_Connector` — the keyless default; `available == False`, performs
+  no network call, and each operation raises defensively so an accidental call fails loudly
+  rather than hitting the network (the Tool guards on `available` first, so it is never
+  reached in normal operation).
+- `Keyed_<Integration>_Connector` — constructed **only** when the Credential is present,
+  built from the `SecretStr` plaintext obtained in the composition root, with a
+  transport-level timeout.
+- `Mock_<Integration>_Connector` — tests only; available, no network, returns injected
+  canned data / raises injected failures, and spies on calls so "no network while Disabled"
+  and "exactly one write call" are directly assertable.
+
+The `Integration_Tool.available` property **mirrors its connector** exactly as
+`Web_Search_Tool.available` mirrors `Search_Provider.available`, so a Disabled integration
+is never offered to the agent by `Tool_Registry.list_specs()`.
+
+_Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5._
+
+## 41. Enablement is a pure function of Credential presence + Enable_Setting
+
+Enablement is derived, never stored, mirroring the existing `Settings.active_search()`
+helper:
+
+```
+Enabled(integration)  ⇔  Credential present  AND  Enable_Setting ≠ false
+Disabled(integration) ⇔  Credential absent   OR   Enable_Setting = false
+```
+
+Credential presence and the non-secret `Enable_Setting` toggle are **separate** conditions:
+a present Credential alone does not force enablement when the operator sets the toggle to
+`false` (the same master-toggle discipline as Phase 6's `tracing_export_enabled`). The new
+`Settings.integration_enabled(name)` helper returns this boolean and is the single source of
+truth consumed by **both** the composition root's connector selection and the
+`Integration_Status` service — so the two can never disagree. Because enablement is a pure
+function of configuration, it is independent of any `Integration_Connection` persistence:
+with no persistence configured the platform is fully functional and enablement is derived
+solely from Credentials.
+
+_Validates: Requirements 3.1, 3.2, 3.4, 3.5, 3.6, 3.7, 3.8, 11.5._
+
+## 42. The composition root is the only wiring seam (register-only-when-Enabled, startup-abort naming the integration)
+
+`config/container.py` remains the single wiring seam and the only module that names concrete
+Connectors. The existing `build_tool_registry` policy (register `RAG_Tool` always;
+`Web_Search_Tool` only when keyed) is **extended** with "register each Integration_Tool only
+when Enabled": `build_integration_tools` iterates the per-integration builders, selects the
+`Disabled_` connector unless the integration is Enabled (then the `Keyed_` connector), and
+yields a tool for registration only when `connector.available`. A Disabled integration is
+therefore never registered, never listed, and holds no network path. If constructing or
+registering an Enabled integration fails, `build_integration_tools` raises an
+`AppError`-shaped error whose `details` name the offending integration and startup aborts —
+the platform never starts in a partially registered state, matching the existing
+`ConfigError`-aborts-startup discipline. A duplicate name surfaces the existing
+`DuplicateToolNameError` unchanged.
+
+_Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5, 2.6._
+
+## 43. A fixed error-code vocabulary mapped onto `AppError`
+
+Integration failures map onto a closed vocabulary carried in `Tool_Result.data["error_code"]`
+inside a run and rendered through `AppError.code` on HTTP surfaces: `integration_disabled`,
+`integration_unauthorized`, `integration_rate_limited`, `integration_upstream_error`,
+`integration_timeout`. Connectors signal typed failures (`Unauthorized_Error` /
+`Rate_Limited_Error` / `Upstream_Error` / other `ConnectorError`) that the base
+`Integration_Tool` maps totally onto the vocabulary — the Tool never inspects
+provider-specific error text. A Disabled invocation short-circuits to `integration_disabled`
+with **no** connector call; exceeding the `Timeout_Budget` yields `integration_timeout`. The
+mapping is two-layered: anticipated failures return `Tool_Result(ok=False)` (a normal,
+non-raising return the `act` node records as a `tool_result` observation), while a genuinely
+unexpected internal error still surfaces as `ToolError` and is contained by the `act` node —
+so an integration failure never crashes a run.
+
+_Validates: Requirements 6.1, 6.2, 7.1, 7.2, 7.3, 7.4, 7.5, 8.1, 8.2, 8.3, 8.4._
+
+## 44. `SecretStr` redaction and no-secret persistence
+
+Every integration Credential is an optional `SecretStr` on `Settings`, sourced only from the
+environment and absent by default, so pydantic redacts it from `repr` / `str` /
+`model_dump` / logs. The plaintext is obtained exactly once, in the composition root, to
+build a `Keyed_` connector and is held only inside that connector — it is never placed into a
+`Tool_Result`, the `Integration_Status` response, a surfaced error message, recorded/exported
+trace data, or a persisted record. Surfaced messages are constructed from outcome fields and
+fixed strings only, so neither a Credential value nor an internal stack trace ever reaches a
+caller. The optional `Integration_Connection` persistence stores **non-secret** configuration
+only (e.g. a default channel or repository); the `integration_connections` table has no
+column for a token and structurally cannot hold credential material.
+
+_Validates: Requirements 4.1, 4.2, 4.3, 4.4, 7.6, 9.2, 11.4, 16.2._
+
+## 45. Tenant isolation at the data-access layer (404, never 403)
+
+Consistent with Phases 5–6, tenancy for `Integration_Connection` records is enforced **at the
+store, not the handler**. Every store method (`create` / `get` / `list_for_org`) takes
+`org_id` as a required parameter and constrains its query with `WHERE org_id = :org_id`, so a
+cross-tenant read/mutate matches zero rows → `None`/`[]` → `AppError("not_found", 404)`.
+Cross-tenant access is **404, never 403**, because a 403 would leak the existence of a
+resource in another org. Migration `0011_create_integration_connections.sql` is strictly
+additive and idempotent (`CREATE ... IF NOT EXISTS`), carries
+`org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE`, and alters/drops no
+pre-existing column, so an org delete sweeps its connection rows transitively. The
+`InMemory_Integration_Connection_Store` is the keyless default; `Pg_Integration_Connection_Store`
+is the production concrete behind the same seam.
+
+_Validates: Requirements 11.1, 11.2, 11.3, 11.4._
+
+## 46. Observability side-effects never change outcomes
+
+Integration invocations are observable through the **existing** Phase 3/6 tracing seams — no
+separate mechanism is introduced. The `Trace_Recorder` records the tool-call step scoped to
+the acting `org_id`; no credential value ever enters recorded or exported data; and a failing
+observability recording/export leaves the invocation outcome unchanged, reusing the Phase 6
+suppression guarantee. Governance likewise reuses the enterprise seams unchanged: a Principal
+lacking `run_agents` cannot initiate a run that could invoke an integration, declared write
+actions (`slack.post_message`, `gmail.send_message`, `github.create_issue`) are gated behind
+the same agent-run permission model with a security audit event recorded on denial, a
+guardrail-blocked input invokes no integration, and per-principal rate limiting applies to
+integration-driving requests.
+
+_Validates: Requirements 8.x, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 16.1, 16.2, 16.3, 16.4._
+
+## How-to — Adding a fifth integration (adapter + composition edit only)
+
+Adding a fifth integration mirrors the Phase 3 "add a Tool" and Phase 6 "add a provider"
+how-tos — no edit to the orchestrator, the `Tool_Registry`, or the `Tool_Interface`:
+
+1. **Implement the Connector family + Tool** in a new module under `integrations/` (e.g.
+   `integrations/jira.py`): a `Jira_Connector(Integration_Connector)` ABC exposing its
+   operations, the `Disabled_Jira_Connector` (keyless default, `available == False`, no
+   network), the `Keyed_Jira_Connector(token)` (built only with a non-empty token), and a
+   `Mock_Jira_Connector` for tests; plus a `Jira_Tool(Integration_Tool)` subclass supplying
+   `name` / `description` / `input_schema` and `_dispatch(arguments, connector)`. The base
+   `Integration_Tool` provides the availability mirror, the Disabled short-circuit, the
+   timeout wrapper, the failure-class → error-code mapping, result capping, and redaction for
+   free.
+2. **Add its `SecretStr` credential + enable-toggle to `Settings`** (`config/settings.py`) as
+   optional / defaulted fields, and extend `integration_enabled(name)` coverage — mirroring
+   the existing four; then list the new variables in `.env.example` with keyless-safe defaults.
+3. **Register a connector builder in the composition root** (`config/container.py`): add a
+   `build_jira_connector(settings)` returning the `Disabled_` connector unless
+   `settings.integration_enabled("jira")` and append it to `_INTEGRATION_BUILDERS`.
+   `build_integration_tools` and `build_tool_registry` pick it up automatically, and the
+   property suite (parameterized over the integration set) covers the new integration with no
+   test edit.
+
+_Validates: Requirements 1.1, 2.1, 5.1, and the design's Extension note._
+
+---
+
+_Scope note:_ this record now covers Phases 1–6 and 8. Phase 8 ships the four pluggable tools,
+the org-scoped `Integration_Status` introspection API, and the optional non-secret
+`Integration_Connection` persistence; interactive OAuth UI flows, per-org secret vaulting, a
+management frontend, streaming/webhook ingestion, and cloud deployment remain reserved for
+later phases and are enabled — but not designed — by the modular seams established here.

@@ -410,7 +410,7 @@ required.
     envelope, and migration `0011` parses. Ensure all tests pass, ask the user if questions
     arise.
 
-- [ ] 10. Document the phase (`docs/decisions.md`, top-level `README`, `.env.example`)
+- [x] 10. Document the phase (`docs/decisions.md`, top-level `README`, `.env.example`)
   - Append a "Phase 8 — Third-Party Integrations" ADR section to `docs/decisions.md` covering:
     each integration as an ordinary `Tool_Interface` behind the unchanged `Tool_Registry`; the
     per-integration Connector transport seam mirroring `Search_Provider`
@@ -426,7 +426,7 @@ required.
   - _Requirements: 3.1, 3.8, 4.1, 17.5_
   - _Design: Overview; Extension note; Settings additions (`.env.example`)_
 
-- [ ] 11. Checkpoint — docs + wiring
+- [x] 11. Checkpoint — docs + wiring
   - Ensure `docs/decisions.md` and the `README` render correctly,
     `from agentforge.main import app` still imports under the keyless default (every
     integration Disabled), and the fast (property + unit) suite is green. Ensure all tests
