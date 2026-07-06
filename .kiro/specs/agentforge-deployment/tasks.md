@@ -125,15 +125,15 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 8.4, 19.1, 21.2_
     - _Design: Testing Strategy — Frontend lane, Contract guardrail_
 
-- [ ] 3. Frontend build-context exclusions and Frontend_Image
-  - [ ] 3.1 Add the `frontend/.dockerignore`
+- [x] 3. Frontend build-context exclusions and Frontend_Image
+  - [x] 3.1 Add the `frontend/.dockerignore`
     - Create `frontend/.dockerignore` excluding `node_modules`, `dist`, `.git`, test output,
       caches, and local env files (`.env`, `.env.*`) from the Frontend_Image build context so
       they neither slow the build nor leak into any layer.
     - _Requirements: 2.5, 3.2, 3.3, 10.2, 10.3_
     - _Design: Frontend_Image — `.dockerignore` bullet_
 
-  - [ ] 3.2 Author the multi-stage `frontend/Dockerfile` with SPA fallback, `/healthz`, and config.js entrypoint
+  - [x] 3.2 Author the multi-stage `frontend/Dockerfile` with SPA fallback, `/healthz`, and config.js entrypoint
     - Stage 1 (`node:22-alpine`): `npm ci` then `npm run build` producing `/frontend/dist`.
       Stage 2 (non-root nginx runtime — `nginxinc/nginx-unprivileged` or an equivalently
       reconfigured nginx with writable pid/temp paths and a non-root listen port): copy only
@@ -144,15 +144,15 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 1.3, 8.1, 8.2_
     - _Design: Frontend_Image (`frontend/Dockerfile`); Runtime_Config entrypoint_
 
-  - [ ]* 3.3 Verify the Frontend_Image serves the SPA + `/healthz`, runs non-root, and excludes the toolchain
+  - [x]* 3.3 Verify the Frontend_Image serves the SPA + `/healthz`, runs non-root, and excludes the toolchain
     - Build the image; assert the final image contains no `node_modules`/Node toolchain;
       start it and assert it serves `index.html`, returns 200 at `/healthz`, and serves a
       generated `/config.js`; assert the effective container user is non-root.
     - _Requirements: 2.2, 2.3, 2.4, 1.3_
     - _Design: Testing Strategy — Dockerfile / image checks_
 
-- [ ] 4. Reverse_Proxy nginx configuration (routing, SSE, TLS, security headers)
-  - [ ] 4.1 Author the routing config (frontend + backend upstreams, SSE unbuffered)
+- [x] 4. Reverse_Proxy nginx configuration (routing, SSE, TLS, security headers)
+  - [x] 4.1 Author the routing config (frontend + backend upstreams, SSE unbuffered)
     - Create the `nginx/` config with `frontend` (:80) and `backend` (:8000) upstreams;
       `location /` → frontend; the concrete backend route prefixes from `main.py`
       (`/health`, `/auth`, `/orgs`, `/agent`, `/query`, `/ingest`, `/documents`,
@@ -164,7 +164,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 19.2_
     - _Design: Reverse_Proxy (`nginx/`); Request routing_
 
-  - [ ] 4.2 Add the TLS server block, HTTP fallback, and non-root proxy
+  - [x] 4.2 Add the TLS server block, HTTP fallback, and non-root proxy
     - Add a `listen 443 ssl` production server block reading cert/key mounted read-only at
       runtime (`/etc/nginx/tls/fullchain.pem`, `/etc/nginx/tls/privkey.pem`) from a
       Secret_Source — never baked into an image — with an optional `listen 80` → 443 redirect;
@@ -175,7 +175,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 7.1, 7.2, 7.4, 1.3, 11.5, 10.2_
     - _Design: Reverse_Proxy — TLS server block, HTTP fallback, Non-root_
 
-  - [ ] 4.3 Add the hardened response security headers
+  - [x] 4.3 Add the hardened response security headers
     - Attach `add_header ... always;` security headers on served responses:
       `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
       `Referrer-Policy: strict-origin-when-cross-origin`, and a tunable
@@ -189,7 +189,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 6.5, 7.1, 19.2_
     - _Design: Reverse_Proxy — Response security headers_
 
-  - [ ]* 4.4 Validate the proxy config and smoke-check security headers
+  - [x]* 4.4 Validate the proxy config and smoke-check security headers
     - Run `nginx -t` (including the security-header and CSP directives); issue a request for
       a proxied response and assert `X-Content-Type-Options: nosniff`,
       `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and a
@@ -199,7 +199,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 6.3, 6.5, 7.1, 7.4, 19.2_
     - _Design: Testing Strategy — Security header smoke check; nginx config validation_
 
-- [ ] 5. Checkpoint — images and proxy build and validate
+- [x] 5. Checkpoint — images and proxy build and validate
   - Ensure both images build (Backend_Image and Frontend_Image), each runs non-root and
     serves its health endpoint, and the nginx config passes `nginx -t` with security headers.
     Ensure all checks pass, ask the user if questions arise.
