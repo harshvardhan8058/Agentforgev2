@@ -138,14 +138,17 @@ full `<git-sha>` (immutable) on every publish, plus `<semver>` (immutable) only 
 release tag. Production Compose pulls by `${AGENTFORGE_IMAGE_TAG:-latest}`; rollback pins a
 prior immutable tag.
 
-### Known deployment consideration — backend image size
+### Backend image size — CPU-only torch
 
-The backend image is **large** because it installs `torch` / `sentence-transformers` for the
-default local embedding provider. This is expected for Phase 9 and does not affect
-correctness or the keyless promise. Slimming it is **out of scope** for Phase 9; the
-recommended future work is to install a **CPU-only `torch`** build (and/or make the local
-embedding dependency optional for deployments that use a hosted embedding provider), which
-would substantially reduce image size and pull time.
+The backend image installs `torch` / `sentence-transformers` for the default local embedding
+provider. Because the app is **CPU-only** (keyless all-MiniLM-L6-v2 embeddings; no GPU
+target), the builder stage installs a **CPU-only `torch`** from the PyTorch CPU wheel index
+before resolving the rest, so pip never pulls the multi-GB CUDA/NVIDIA build, and resolves
+the remaining stack under a build-time `constraints.txt` (pinning already-resolved transitive
+versions such as `transformers`) to keep the resolve deterministic and fast. This is a
+**build-only** optimization — `pyproject.toml` `[project].dependencies` and all application
+behavior are unchanged — that substantially reduces image size and pull time and keeps the
+backend image build within the CI runner's disk/time budget.
 
 ---
 

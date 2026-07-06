@@ -116,6 +116,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      # The backend image installs the ML embedding stack (torch/sentence-transformers).
+      # Reclaim the pre-installed toolchains the runner ships with so the large backend
+      # build has ample headroom on the ~14GB runner disk (insurance; the CPU-only torch
+      # pin already keeps the image small).
+      - name: Free up runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
+          sudo docker system prune -af || true
+          df -h /
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -172,6 +182,14 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      # Same disk headroom insurance as the build job — the backend image is the large
+      # one, and publish builds + pushes all three images on the runner.
+      - name: Free up runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
+          sudo docker system prune -af || true
+          df -h /
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

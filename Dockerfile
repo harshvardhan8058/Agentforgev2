@@ -23,13 +23,30 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
-# 1) Dependency layer: copy only the manifest, derive the pinned runtime
-#    requirements from it, and install them. This layer is cached and only
-#    rebuilds when pyproject.toml changes — a source-only change reuses it.
-COPY pyproject.toml README.md ./
+# 1) Dependency layer: copy only the manifest (+ the build-time constraints),
+#    derive the pinned runtime requirements from it, and install them. This layer
+#    is cached and only rebuilds when these inputs change — a source-only change
+#    reuses it.
+#
+#    Two build-only measures keep the image CPU-sized and the resolve deterministic
+#    WITHOUT touching pyproject's [project].dependencies (behavior is identical):
+#
+#      a) Install a CPU-only `torch` from the PyTorch CPU wheel index FIRST. The app
+#         is CPU-only (keyless all-MiniLM-L6-v2 embeddings; no GPU target), so an
+#         unpinned `torch` (pulled transitively by sentence-transformers) would
+#         otherwise resolve to the multi-GB CUDA/NVIDIA build on Linux. Installing
+#         the CPU build up front means sentence-transformers finds `torch` already
+#         satisfied and pip never downloads any nvidia-* wheel.
+#
+#      b) Resolve the rest under a build-time constraints file (constraints.txt) that
+#         pins already-resolved transitive versions (e.g. `transformers`) to exactly
+#         what the app uses today. This stops pip from backtracking through dozens of
+#         `transformers` releases — deterministic and fast, same resulting versions.
+COPY pyproject.toml README.md constraints.txt ./
 RUN python -c "import tomllib; d = tomllib.load(open('pyproject.toml','rb')); open('requirements.txt','w').write(chr(10).join(d['project']['dependencies']) + chr(10))" \
     && pip install --upgrade pip \
-    && pip install -r requirements.txt
+    && pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install -r requirements.txt -c constraints.txt
 
 # 2) Application layer: copy the frequently-changing source and install the
 #    project itself WITHOUT re-resolving dependencies. An editable install keeps

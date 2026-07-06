@@ -1,0 +1,21 @@
+# Build-time pip constraints for the backend image (Dockerfile) ONLY.
+#
+# This file is NOT the dependency manifest — the app's declared dependencies live in
+# pyproject.toml [project].dependencies and are unchanged. These entries only pin
+# already-resolved TRANSITIVE versions to exactly what the app uses today, so the
+# `pip install -r requirements.txt -c constraints.txt` step in the builder stage is
+# deterministic and fast (no dependency backtracking). Behavior is identical to a
+# normal resolve; this just removes the ambiguity that made pip explore dozens of
+# candidate versions and exhaust the CI runner's disk/time.
+#
+# Keep these in sync with the versions the app currently resolves to. See the
+# backend image note in docs/INFRASTRUCTURE.md.
+
+# sentence-transformers==3.3.1 depends on an unpinned `transformers`; without this
+# constraint pip backtracks across many transformers releases. Pin to the resolved one.
+transformers==4.46.3
+
+# CPU-only torch is installed from the PyTorch CPU index in the builder stage before
+# this step, so `torch` is already satisfied here. Recording the resolved version keeps
+# the constraint set self-documenting (the +cpu local version satisfies `==2.12.1`).
+torch==2.12.1
