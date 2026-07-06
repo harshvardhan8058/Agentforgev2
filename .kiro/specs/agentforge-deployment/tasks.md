@@ -286,8 +286,8 @@ guardrail (Req 14, 19.2, 21).
       existing runner; no app change. Minimum 100 iterations over the generated prefix space.
     - _Design: Testing Strategy — Property 3 (migration idempotence)_
 
-- [ ] 9. CI/CD pipeline — four chained jobs (`.github/workflows`)
-  - [ ] 9.1 Add the keyless `test` job
+- [x] 9. CI/CD pipeline — four chained jobs (`.github/workflows`)
+  - [x] 9.1 Add the keyless `test` job
     - Add the workflow triggered on push and pull request with a `test` job running both
       keyless lanes with **no credentials**: backend `pytest -m 'not integration' -q` and
       frontend `npm ci` + `npm run ci` (codegen check, typecheck, tests, build,
@@ -295,14 +295,14 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 14.1, 14.2, 14.3, 14.4, 21.1, 21.2, 21.3_
     - _Design: CI/CD — `test` job_
 
-  - [ ] 9.2 Add the `build` job (`needs: test`)
+  - [x] 9.2 Add the `build` job (`needs: test`)
     - Add a `build` job gated `needs: test` that builds **both** images via the multi-stage
       Dockerfiles (build-and-verify only; no push), using layer cache; it runs only after both
       keyless lanes are green.
     - _Requirements: 15.1, 14.4, 15.4_
     - _Design: CI/CD — `build` job_
 
-  - [ ] 9.3 Add the `publish` job (`needs: build`) with the three-tag GHCR strategy
+  - [x] 9.3 Add the `publish` job (`needs: build`) with the three-tag GHCR strategy
     - Add a `publish` job gated `needs: build` and guarded by `if:` on `github.ref`/event
       (e.g. push to `main` and version tags) that pushes both images to GHCR applying the
       three-tag strategy: `latest` (moving) and `<git-sha>` (`${{ github.sha }}`, immutable)
@@ -311,7 +311,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 15.2, 15.3, 15.4_
     - _Design: CI/CD — `publish` job; Image tags (three-tag strategy)_
 
-  - [ ] 9.4 Add the guarded `deploy` job (`needs: publish`)
+  - [x] 9.4 Add the guarded `deploy` job (`needs: publish`)
     - Add a `deploy` job gated `needs: publish` and guarded by trigger, implemented as a
       manual-approval GitHub Environment or a `docker compose pull` + `up -d` step against the
       target host, encapsulating the documented rollback command shape (re-point
@@ -320,8 +320,8 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 15.4, 18.1, 18.2_
     - _Design: CI/CD — `deploy` job; Rollback plan_
 
-- [ ] 10. Cross-image secret scan (extend the existing bundle-secret scan)
-  - [ ] 10.1 Extend the secret scan across image layers, served assets, and env examples
+- [x] 10. Cross-image secret scan (extend the existing bundle-secret scan)
+  - [x] 10.1 Extend the secret scan across image layers, served assets, and env examples
     - Extend the existing frontend bundle-secret scanner so it iterates over every built
       Backend_Image and Frontend_Image layer, every served static asset (including the
       generated `config.js`), and every committed `*.env.example`, asserting only
@@ -330,7 +330,7 @@ guardrail (Req 14, 19.2, 21).
     - _Requirements: 10.2, 10.3, 3.3, 8.5_
     - _Design: Testing Strategy — Property 1 (no baked secrets)_
 
-  - [ ]* 10.2 Write the no-baked-secrets property test
+  - [x]* 10.2 Write the no-baked-secrets property test
     - **Property 1: No credential is baked into any image or served asset**
     - **Validates: Requirements 10.2, 10.3, 10.5, 3.3, 8.5**
     - Tag: `Feature: agentforge-deployment, Property 1: No credential is baked into any image or served asset`.

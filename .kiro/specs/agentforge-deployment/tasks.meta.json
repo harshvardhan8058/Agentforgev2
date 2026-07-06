@@ -11,6 +11,10 @@
     "6.3 Compose smoke + keyless all-healthy property": {
       "status": "not_run",
       "lastRunTimestamp": 1783355782489
+    },
+    "10.2 Write the no-baked-secrets property test": {
+      "status": "passed",
+      "lastRunTimestamp": 1783356917949
     }
   },
   "executionHistory": {}

@@ -1,0 +1,251 @@
+# AgentForge CI/CD pipeline (Phase 9, Req 14.x, 15.x, 18.x).
+#
+# Four jobs chained strictly with `needs:` so each stage only runs after the prior
+# stage is green:
+#
+#     test  ->  build  ->  publish  ->  deploy
+#
+#   test     Keyless, credential-free gate. Runs BOTH keyless lanes — the backend
+#            `pytest -m 'not integration' -q` and the frontend `npm run ci` — plus the
+#            repo-wide secret scan (Property 1, source/env/config render). NO secrets
+#            are configured in this job (Req 14.1-14.3, 21.x).
+#   build    needs: test. Builds ALL THREE images (backend, frontend, proxy) with
+#            push:false to verify they build, then runs the image-layer secret scan on
+#            the built images (Req 15.1, 14.4, 10.2). Runs on every trigger.
+#   publish  needs: build. GUARDED to run only on the publish trigger (push to `main`
+#            and `v*` tags). Logs in to GHCR and pushes all three images with the
+#            three-tag strategy: `latest` (moving) + `<git-sha>` (immutable, always) +
+#            `<semver>` (only on a `v*` tag) (Req 15.2-15.4).
+#   deploy   needs: publish. GUARDED + gated on the `production` GitHub Environment
+#            (manual approval / required reviewers). Documented rollback-capable
+#            `compose pull && up -d` promotion step (Req 15.4, 18.1, 18.2).
+#
+# A failure at any stage stops all later stages, so no image is built/published/
+# deployed for a run whose tests failed (Req 14.4, 15.4).
+
+name: ci-cd
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+# Least privilege by default; individual jobs widen only what they need.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Full commit SHA is the canonical immutable tag applied on every publish.
+  IMAGE_REGISTRY: ghcr.io
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1) test — keyless, credential-free gate (Req 14.1-14.3, 21.1-21.3).
+  #    NO secrets are referenced anywhere in this job.
+  # ---------------------------------------------------------------------------
+  test:
+    name: test (keyless)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # --- backend keyless lane ---
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend runtime + test dependencies
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: Backend keyless test lane
+        run: pytest -m 'not integration' -q
+
+      # --- repo-wide secret scan (Property 1 — source / env / config render) ---
+      - name: Repo-wide secret scan (sources, *.env.example, config.js renders)
+        run: python scripts/scan_secrets.py
+
+      # --- frontend keyless lane ---
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Frontend keyless CI lane (codegen check, typecheck, tests, build, bundle-secret scan)
+        working-directory: ./frontend
+        run: npm run ci
+
+  # ---------------------------------------------------------------------------
+  # 2) build — build all three images to verify they build (no push).
+  #    Also runs the image-layer secret scan on the built images (Req 10.2).
+  # ---------------------------------------------------------------------------
+  build:
+    name: build (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: agentforge-backend
+            context: .
+            dockerfile: ./Dockerfile
+          - image: agentforge-frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+          - image: agentforge-proxy
+            context: ./nginx
+            dockerfile: ./nginx/Dockerfile
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (verify only, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: ${{ matrix.image }}:ci
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      # Image-layer secret scan: export the built image filesystem and scan every
+      # layer for credential-shaped values (Property 1 image-scan step, Req 10.2).
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Image-layer secret scan
+        run: |
+          docker save "${{ matrix.image }}:ci" -o /tmp/${{ matrix.image }}.tar
+          python scripts/scan_secrets.py --image-tar /tmp/${{ matrix.image }}.tar
+
+  # ---------------------------------------------------------------------------
+  # 3) publish — push all three images to GHCR with the three-tag strategy.
+  #    Runs ONLY on the publish trigger (push to main or a v* tag) (Req 15.2-15.4).
+  # ---------------------------------------------------------------------------
+  publish:
+    name: publish (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: build
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: agentforge-backend
+            context: .
+            dockerfile: ./Dockerfile
+          - image: agentforge-frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+          - image: agentforge-proxy
+            context: ./nginx
+            dockerfile: ./nginx/Dockerfile
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Three-tag strategy (Req 15.3, design "Image tags"):
+      #   * latest              — moving, applied on every publish.
+      #   * <git-sha>           — immutable full commit SHA, applied on EVERY publish.
+      #   * <semver>            — applied ONLY when a v* tag triggers the run; derived
+      #                           from github.ref_name (refs/tags/ stripped). Omitted on
+      #                           plain branch pushes.
+      - name: Derive image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=,format=long
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push to GHCR
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  # ---------------------------------------------------------------------------
+  # 4) deploy — controlled, manual-approval promotion (Req 15.4, 18.1, 18.2).
+  #    Gated on the `production` GitHub Environment (required reviewers). Runs only
+  #    on the publish trigger, after images are published. Documents the
+  #    rollback-capable compose promotion command shape; no live infra credentials
+  #    are stored in this repository.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: deploy (production)
+    runs-on: ubuntu-latest
+    needs: publish
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    environment:
+      name: production
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Documented rollback-capable promotion (placeholder)
+        env:
+          # Pin the immutable tag to promote (defaults to the commit that triggered
+          # the run). Roll back by re-pointing this to a PRIOR immutable tag.
+          AGENTFORGE_IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "Promoting AgentForge image set: tag=${AGENTFORGE_IMAGE_TAG}"
+          echo "On the target host, this controlled step runs the rollback-capable shape:"
+          echo ""
+          echo "  export AGENTFORGE_IMAGE_TAG=${AGENTFORGE_IMAGE_TAG}"
+          echo "  docker compose -f docker-compose.yml -f docker-compose.production.yml pull"
+          echo "  docker compose -f docker-compose.yml -f docker-compose.production.yml up -d"
+          echo "  curl -fsS https://<host>/health/ready   # verify healthy through the proxy"
+          echo ""
+          echo "Rollback: re-point AGENTFORGE_IMAGE_TAG to a PRIOR immutable <git-sha>/<semver>"
+          echo "then re-run pull + up -d. Migrations are additive, so no DB rollback is needed."
