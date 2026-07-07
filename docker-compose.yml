@@ -32,7 +32,8 @@ services:
         condition: service_healthy
     healthcheck:
       # busybox wget ships in the alpine nginx image; /healthz returns 200 when serving.
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      # Use 127.0.0.1 (not localhost) so the probe hits nginx's IPv4 listener, not ::1.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -49,7 +50,7 @@ services:
       # the nginx proxy, so no explicit base URL is needed locally (Req 8.4).
       API_BASE_URL: ${API_BASE_URL:-}
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s
       timeout: 3s
       retries: 5
