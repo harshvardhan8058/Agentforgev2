@@ -914,7 +914,20 @@ def build_rate_limiter(
         }
         if clock is not None:
             kwargs["clock"] = clock
-        return Redis_Rate_Limiter(redis, **kwargs)
+        # Redis_Rate_Limiter.check() is synchronous — it runs inside the sync
+        # get_current_principal dependency (executed in a threadpool). The application's
+        # shared redis.asyncio client CANNOT be driven from sync code: its
+        # pipeline().execute() returns a coroutine, which made the limiter raise on every
+        # authenticated request. Build a dedicated SYNCHRONOUS client from the same DSN
+        # for the limiter's blocking INCR/EXPIRE. The passed ``redis`` (async client)
+        # stays the "Redis is configured" gate; from_url() is lazy (no connection here),
+        # so unit tests passing a sentinel still select the Redis limiter.
+        import redis as _redis_sync
+
+        sync_client = _redis_sync.Redis.from_url(
+            settings.redis_url, encoding="utf-8", decode_responses=True
+        )
+        return Redis_Rate_Limiter(sync_client, **kwargs)
     return NoOp_Rate_Limiter()
 
 

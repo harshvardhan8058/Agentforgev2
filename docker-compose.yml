@@ -76,6 +76,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://agentforge:agentforge@postgres:5432/agentforge
       REDIS_URL: redis://redis:6379/0
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      # Per-principal rate limiting is Redis-backed; keep it OFF for the local single-user
+      # keyless stack (the documented keyless default). Override to "true" to exercise it.
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-false}
       # Optional provider keys stay blank locally (keyless-safe fallbacks).
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       HOSTED_EMBEDDING_API_KEY: ${HOSTED_EMBEDDING_API_KEY:-}
