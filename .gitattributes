@@ -1,0 +1,25 @@
+# Line-ending normalization (fixes the frontend container entrypoint failure).
+#
+# A container entrypoint / shell script committed with CRLF makes the Linux kernel
+# read the shebang as the interpreter "/bin/sh\r" (which does not exist), producing
+#     exec /docker-entrypoint-agentforge.sh: no such file or directory
+# at container start. Forcing LF on checkout — regardless of the developer's OS or
+# core.autocrlf setting — guarantees the script is executable inside the image.
+
+* text=auto eol=lf
+
+# Explicit LF for executable container assets.
+*.sh                             text eol=lf
+*.template                       text eol=lf
+*.conf                           text eol=lf
+frontend/docker/entrypoint.sh    text eol=lf
+
+# Do not touch real binaries.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.gz    binary
+*.woff  binary
+*.woff2 binary

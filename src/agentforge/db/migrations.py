@@ -8,6 +8,19 @@ startup (Req 4.2). The runner:
 * Tracks applied migrations in a ``schema_migrations`` table so re-running is safe.
 * Halts on the first failure and reports the failing migration identifier via
   ``MigrationError`` (Req 4.4).
+
+Each migration file is a multi-statement DDL *script*. asyncpg sends statements
+issued through SQLAlchemy over the *extended* query (prepared-statement) protocol,
+which rejects a script containing more than one command with::
+
+    asyncpg.exceptions.PostgresSyntaxError:
+    cannot insert multiple commands into a prepared statement
+
+To run these scripts correctly we execute them through the underlying asyncpg
+connection's ``execute()``, which uses the *simple* query protocol and natively
+supports multiple ``;``-separated statements in a single call. The call runs on the
+same connection/transaction opened by ``engine.begin()``, so a migration and its
+bookkeeping row commit atomically.
 """
 
 from __future__ import annotations
@@ -16,7 +29,7 @@ from pathlib import Path
 from string import Template
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 # migrations/ lives at the repository root: <repo>/migrations, and this file is at
 # <repo>/src/agentforge/db/migrations.py -> parents[3] is the repo root.
@@ -56,6 +69,20 @@ def render_migration(sql: str, embedding_dimension: int) -> str:
     return Template(sql).safe_substitute(EMBEDDING_DIMENSION=str(embedding_dimension))
 
 
+async def _execute_script(conn: AsyncConnection, sql: str) -> None:
+    """Execute a (possibly multi-statement) SQL migration script.
+
+    Runs the script through the underlying asyncpg connection's ``execute()`` — the
+    simple query protocol — which supports multiple ``;``-separated statements in one
+    call, unlike the prepared-statement path used by ``exec_driver_sql``. Executes on
+    the transaction already opened by the caller via ``engine.begin()``.
+    """
+    raw_connection = await conn.get_raw_connection()
+    # SQLAlchemy exposes the real asyncpg.Connection via ``driver_connection``.
+    asyncpg_connection = raw_connection.driver_connection
+    await asyncpg_connection.execute(sql)
+
+
 async def run_migrations(
     engine: AsyncEngine,
     embedding_dimension: int,
@@ -78,12 +105,12 @@ async def run_migrations(
         migration_id = path.stem
         if migration_id in already:
             continue
-        raw = path.read_text(encoding="utf-8")
-        rendered = render_migration(raw, embedding_dimension)
+        rendered = render_migration(path.read_text(encoding="utf-8"), embedding_dimension)
         try:
             async with engine.begin() as conn:
-                # exec_driver_sql runs the full script (multiple statements) as-is.
-                await conn.exec_driver_sql(rendered)
+                # Multi-statement script via asyncpg's simple protocol, then record
+                # the migration in the SAME transaction so both commit atomically.
+                await _execute_script(conn, rendered)
                 await conn.execute(_INSERT_APPLIED, {"id": migration_id})
         except Exception as exc:  # noqa: BLE001 - re-wrapped with the failing id
             raise MigrationError(migration_id, exc) from exc
