@@ -45,7 +45,14 @@ COPY docker/entrypoint.sh /docker-entrypoint-agentforge.sh
 # Compiled static assets ONLY — no node_modules, no source, no Node toolchain.
 COPY --from=build /app/dist /usr/share/nginx/html
 
-RUN chmod +x /docker-entrypoint-agentforge.sh \
+# Normalize line endings so the entrypoint execs correctly even when the repo was
+# checked out with CRLF on a Windows host. A CRLF shebang makes the Linux kernel
+# look for the interpreter "/bin/sh\r" (which does not exist), failing at container
+# start with: exec /docker-entrypoint-agentforge.sh: no such file or directory.
+# Stripping CR here makes the image build correct regardless of the developer's OS
+# or git core.autocrlf setting (belt-and-suspenders with the repo .gitattributes).
+RUN sed -i 's/\r$//' /docker-entrypoint-agentforge.sh /etc/nginx/templates/config.js.template \
+    && chmod +x /docker-entrypoint-agentforge.sh \
     && chown -R nginx:nginx /usr/share/nginx/html
 
 # Drop back to the built-in unprivileged user for all runtime processes (Req 1.3).
