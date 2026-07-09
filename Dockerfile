@@ -28,26 +28,31 @@ WORKDIR /app
 #    is cached and only rebuilds when these inputs change — a source-only change
 #    reuses it.
 #
-#    `torch` is installed as an ordinary transitive dependency (pulled by
-#    sentence-transformers==3.3.1) from PyPI (files.pythonhosted.org) during the single
-#    `pip install -r requirements.txt -c constraints.txt` below. We deliberately do NOT
-#    use the PyTorch CPU wheel index (`--index-url https://download.pytorch.org/whl/cpu`):
-#    its wheel downloads redirect to the R2 CDN (download-r2.pytorch.org), which is not
-#    reliably reachable from the CI runner and fails the TLS handshake
-#    (SSLV3_ALERT_HANDSHAKE_FAILURE). Resolving torch from PyPI is reliable; the trade-off
-#    is a larger image (the PyPI Linux build bundles CUDA/NVIDIA wheels), which is why the
-#    CI build/publish jobs free runner disk before building (see .github/workflows).
+#    `torch` is a heavy transitive dependency of sentence-transformers==3.3.1. The PyPI
+#    Linux wheel bundles the full CUDA/NVIDIA payload (multi-GB `nvidia-cu*` wheels), which
+#    ballooned the image to ~17.8 GB. We install a pinned CPU-only torch build FIRST from the
+#    PyTorch CPU wheel index, so the later `pip install -r requirements.txt` sees `torch`
+#    already satisfied and never pulls the CUDA build (R4.1). This yields byte-identical
+#    application behavior — no source and no pinned app dependency changes — while dropping
+#    the image well under the 4 GB budget (R4.2, R4.3, R4.4). `--retries`/`--timeout` add
+#    resilience against transient network hiccups reaching download.pytorch.org.
 #
 #    One build-only measure keeps the resolve deterministic WITHOUT touching pyproject's
 #    [project].dependencies (behavior is identical): resolve under a build-time constraints
 #    file (constraints.txt) that bounds the heavy transitive `transformers` dependency to a
 #    compatible RANGE. This stops pip from backtracking through dozens of `transformers`
 #    releases — deterministic and fast — while staying portable across runners (no exact
-#    pin that might not exist on the real upstream index). `--retries`/`--timeout` add
-#    resilience against transient network hiccups on the runner.
+#    pin that might not exist on the real upstream index).
 COPY pyproject.toml README.md constraints.txt ./
+
+# CPU-only torch: no CUDA/NVIDIA runtime libraries. Installed BEFORE the requirements
+# resolve so the sentence-transformers dependency reuses it instead of the CUDA PyPI wheel.
+RUN pip install --upgrade pip \
+    && pip install --retries 5 --timeout 120 \
+        --index-url https://download.pytorch.org/whl/cpu \
+        "torch==2.5.1"
+
 RUN python -c "import tomllib; d = tomllib.load(open('pyproject.toml','rb')); open('requirements.txt','w').write(chr(10).join(d['project']['dependencies']) + chr(10))" \
-    && pip install --upgrade pip \
     && pip install --retries 5 --timeout 120 -r requirements.txt -c constraints.txt
 
 # 2) Application layer: copy the frequently-changing source and install the

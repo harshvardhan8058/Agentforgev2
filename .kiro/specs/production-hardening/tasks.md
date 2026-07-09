@@ -104,7 +104,7 @@ placed next to the implementation they validate.
       credentials. Run on a Docker host only.
     - _Requirements: 1.2, 1.5, 9.1_
 
-- [ ] 6. B2 configuration boundary documentation (no behavior change)
+- [x] 6. B2 configuration boundary documentation (no behavior change)
   - Document, per setting and by name, which settings are required vs optional in the `production` and
     `local` profiles (config model table from the design), placed in a docs file and/or
     `.env.production.example`. Include `DATABASE_URL`, `REDIS_URL`, `PROFILE`, `USE_DATABASE`, `JWT_SECRET`,
@@ -115,7 +115,7 @@ placed next to the implementation they validate.
     the per-boot dev secret under `production`. No code behavior change.
   - _Requirements: 2.2, 2.3, 2.5, 2.6, 2.7_
 
-- [ ] 7. B3 nginx SSE proxy directives
+- [x] 7. B3 nginx SSE proxy directives
   - In `nginx/snippets/proxy_backend.conf`, add `proxy_http_version 1.1;` and an explicit
     `proxy_set_header X-Accel-Buffering no;` (alongside the existing `proxy_buffering off`, `proxy_cache off`,
     and 3600s read/send timeouts). This shared snippet is included by all backend routes, including the
@@ -124,7 +124,7 @@ placed next to the implementation they validate.
     bodies).
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
 
-  - [ ]* 7.1 Add integration-lane property test — Property 5 (SSE ordering/byte-identity)
+  - [x]* 7.1 Add integration-lane property test — Property 5 (SSE ordering/byte-identity)
     - **Property 5: SSE ordering and byte-identity through the proxy**
     - For a finite sequence of SSE events emitted on an SSE_Route, the bytes and ordering received through
       the running nginx are identical to those emitted, with no coalescing. Integration harness against
@@ -132,7 +132,7 @@ placed next to the implementation they validate.
     - Tag: `Feature: production-hardening, Property 5: SSE ordering and byte-identity through the proxy`
     - **Validates: Requirements 3.1, 3.4**
 
-- [ ] 8. B4 CPU-only backend image
+- [x] 8. B4 CPU-only backend image
   - In the `Dockerfile` builder stage, add a pinned CPU-only torch install BEFORE the
     `pip install -r requirements.txt -c constraints.txt` step:
     `pip install --retries 5 --timeout 120 --index-url https://download.pytorch.org/whl/cpu "torch==2.5.1"`
@@ -142,39 +142,39 @@ placed next to the implementation they validate.
     CMD unchanged.
   - _Requirements: 4.1, 4.3, 4.4, 4.5, 4.6_
 
-  - [ ]* 8.1 Add CI build-job image-size gate and CUDA-absence assertion
+  - [x]* 8.1 Add CI build-job image-size gate and CUDA-absence assertion
     - In `.github/workflows/ci-cd.yml` `build` job, after building `agentforge-backend`, assert
       `docker image inspect` size ≤ 4 GB and assert no `nvidia-*`/CUDA libraries exist in the venv.
     - _Requirements: 4.1, 4.2_
 
-- [ ] 9. B5 remove stray build artifact
+- [x] 9. B5 remove stray build artifact
   - Delete `Dockerfile.verify` from the repository root (untracked and unreferenced by any tracked build/CI
     file).
   - Verify `git status` reports zero untracked build-artifact entries at the repository root.
   - _Requirements: 5.1, 5.3, 5.4_
 
-- [ ] 10. B6 regenerate API contract and add keyless drift check
-  - [ ] 10.1 Regenerate the committed contract and client types
+- [x] 10. B6 regenerate API contract and add keyless drift check
+  - [x] 10.1 Regenerate the committed contract and client types
     - Dump `create_app().openapi()` to `frontend/openapi.json` (now including `GET /integrations/status`),
       then run `npm run codegen` to regenerate `frontend/src/api/schema.d.ts` so the existing client-side
       `codegen:check` passes.
     - _Requirements: 6.1, 6.2, 7.2, 7.3_
 
-  - [ ] 10.2 Add keyless server-side drift check `scripts/check_openapi.py`
+  - [x] 10.2 Add keyless server-side drift check `scripts/check_openapi.py`
     - New backend script builds the app keyless (`create_app()`, no credentials), serializes `app.openapi()`,
       and compares it to committed `frontend/openapi.json`; on mismatch exit non-zero and print each
       differing path/method; on match report success. Deterministic, reads no credential. Mirror the existing
       `check-codegen.mjs` pattern.
     - _Requirements: 6.3, 6.4, 6.5_
 
-  - [ ]* 10.3 Write property test — Property 6 (committed contract matches mounted routes)
+  - [x]* 10.3 Write property test — Property 6 (committed contract matches mounted routes)
     - **Property 6: Committed contract matches the mounted routes exactly**
     - The committed `frontend/openapi.json` equals `app.openapi()` — every mounted route present, nothing
       extra. Deterministic keyless test.
     - Tag: `Feature: production-hardening, Property 6: committed contract matches the mounted routes exactly`
     - **Validates: Requirements 6.1, 6.2, 7.2, 7.3**
 
-  - [ ]* 10.4 Write property test — Property 7 (drift check is sound, keyless, deterministic)
+  - [x]* 10.4 Write property test — Property 7 (drift check is sound, keyless, deterministic)
     - **Property 7: Drift check is sound, keyless, and deterministic**
     - Inject synthetic divergences (add/remove/modify a route) and assert the check fails and names them;
       assert identity passes; assert determinism and no credential read. `hypothesis` for divergence
@@ -182,12 +182,12 @@ placed next to the implementation they validate.
     - Tag: `Feature: production-hardening, Property 7: drift check is sound, keyless, and deterministic`
     - **Validates: Requirements 6.3, 6.4, 6.5**
 
-  - [ ] 10.5 Wire the drift check into CI
+  - [x] 10.5 Wire the drift check into CI
     - Add `python scripts/check_openapi.py` to the keyless `test` job in `.github/workflows/ci-cd.yml`,
       beside the existing backend lane and the frontend `npm run ci` (which already runs `codegen:check`).
     - _Requirements: 6.3, 6.5_
 
-- [ ] 11. Checkpoint — keyless lane + frontend CI green after B3–B6
+- [x] 11. Checkpoint — keyless lane + frontend CI green after B3–B6
   - Ensure all keyless tests pass (`pytest -m "not integration" -q`) and the frontend `npm run ci` passes;
     ask the user if questions arise.
 

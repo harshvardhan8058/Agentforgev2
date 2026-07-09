@@ -69,6 +69,11 @@ jobs:
       - name: Backend keyless test lane
         run: pytest -m 'not integration' -q
 
+      # --- server-side OpenAPI contract drift check (B6, Req 6.3, 6.5) ---
+      # Keyless and deterministic: asserts frontend/openapi.json matches app.openapi().
+      - name: OpenAPI contract drift check
+        run: python scripts/check_openapi.py
+
       # --- repo-wide secret scan (Property 1 — source / env / config render) ---
       - name: Repo-wide secret scan (sources, *.env.example, config.js renders)
         run: python scripts/scan_secrets.py
@@ -155,6 +160,30 @@ jobs:
           tags: ${{ matrix.image }}:ci
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      # Backend image budget (Req 4.1, 4.2): assert the built (uncompressed) image is
+      # <= 4 GB and that the CPU-only torch install left no NVIDIA/CUDA runtime libraries
+      # in the venv. Applies to the backend image only.
+      - name: Assert backend image size <= 4 GB and no CUDA libraries
+        if: matrix.image == 'agentforge-backend'
+        run: |
+          set -euo pipefail
+          MAX_BYTES=$((4 * 1024 * 1024 * 1024))
+          SIZE=$(docker image inspect agentforge-backend:ci --format '{{.Size}}')
+          echo "Backend image size: ${SIZE} bytes (budget: ${MAX_BYTES} bytes / 4 GB)"
+          if [ "${SIZE}" -gt "${MAX_BYTES}" ]; then
+            echo "::error::backend image ${SIZE} bytes exceeds the 4 GB budget"
+            exit 1
+          fi
+          echo "Scanning the venv for NVIDIA/CUDA runtime libraries..."
+          CUDA_HITS=$(docker run --rm --entrypoint sh agentforge-backend:ci -c \
+            'ls /opt/venv/lib/python*/site-packages 2>/dev/null | grep -iE "^(nvidia|cuda)" || true')
+          if [ -n "${CUDA_HITS}" ]; then
+            echo "::error::found NVIDIA/CUDA packages in the venv:"
+            echo "${CUDA_HITS}"
+            exit 1
+          fi
+          echo "No NVIDIA/CUDA runtime libraries present — image is CPU-only."
 
       # Image-layer secret scan: export the built image filesystem and scan every
       # layer for credential-shaped values (Property 1 image-scan step, Req 10.2).

@@ -420,6 +420,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/integrations/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Integration Status
+         * @description Return each integration's ``{name, enabled}`` status for the caller (Req 9.1, 9.5).
+         *
+         *     Enablement is derived at request time from ``Settings.integration_enabled`` — a pure
+         *     function of the configured Credential presence and Enable_Setting — so the response
+         *     reflects current configuration and contains only ``{name, enabled}`` pairs, never a
+         *     credential (Req 9.2). Authorization is enforced entirely by the declared
+         *     ``require_permission(Permission.READ)`` dependency (Req 9.3, 9.4).
+         */
+        get: operations["get_integration_status_integrations_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/multi-agent/runs": {
         parameters: {
             query?: never;
@@ -1205,6 +1231,29 @@ export interface components {
              * @constant
              */
             status: "ingested";
+        };
+        /**
+         * IntegrationStatusEntry
+         * @description One integration's public status: its stable name and whether it is Enabled.
+         *
+         *     Contains only ``{name, enabled}`` — never a credential, token, or secret-derived
+         *     field (Req 9.2, 9.5).
+         */
+        IntegrationStatusEntry: {
+            /** Enabled */
+            enabled: boolean;
+            /** Name */
+            name: string;
+        };
+        /**
+         * IntegrationStatusResponse
+         * @description The org-scoped Integration_Status view: one ``{name, enabled}`` entry per integration.
+         *
+         *     No credential, token, or secret-derived field appears anywhere in the response (Req 9.2).
+         */
+        IntegrationStatusResponse: {
+            /** Integrations */
+            integrations?: components["schemas"]["IntegrationStatusEntry"][];
         };
         /** LivenessResponse */
         LivenessResponse: {
@@ -2070,6 +2119,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadinessResponse"];
+                };
+            };
+        };
+    };
+    get_integration_status_integrations_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationStatusResponse"];
                 };
             };
         };
