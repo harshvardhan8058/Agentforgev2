@@ -76,6 +76,12 @@ services:
       DATABASE_URL: postgresql+asyncpg://agentforge:agentforge@postgres:5432/agentforge
       REDIS_URL: redis://redis:6379/0
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      # Persist the ten Domain_Stores to the already-running Postgres over the non-secret
+      # DSN above, so the default keyless local stack survives `docker compose restart`
+      # (B1, Req 1.2). This adds NO credential — it only flips store selection to the
+      # DB-backed Pg_* implementations via Settings.persist_domain_stores(). Override to
+      # "false" to keep the (ephemeral) in-memory stores.
+      USE_DATABASE: ${USE_DATABASE:-true}
       # Per-principal rate limiting is Redis-backed; keep it OFF for the local single-user
       # keyless stack (the documented keyless default). Override to "true" to exercise it.
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-false}

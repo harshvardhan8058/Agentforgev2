@@ -418,14 +418,14 @@ def build_conversation_store(settings: Settings) -> Conversation_Store:
     database; the production profile persists to Postgres. Tests inject an in-memory
     double directly via ``build_agent_context`` overrides.
     """
-    if settings.profile == "production":
+    if settings.persist_domain_stores():
         return PgConversation_Store(settings.database_url)
     return InMemory_Conversation_Store()
 
 
 def build_trace_recorder(settings: Settings) -> Trace_Recorder:
     """Return the Trace_Recorder: Postgres-backed in production, in-memory otherwise."""
-    if settings.profile == "production":
+    if settings.persist_domain_stores():
         return Pg_Trace_Recorder(settings.database_url)
     return InMemory_Trace_Recorder()
 
@@ -580,7 +580,7 @@ def build_integration_connection_store(
     ``Pg_Integration_Connection_Store`` over the ``integration_connections`` table
     (migration ``0011``). Enablement never depends on this store (Req 11.5).
     """
-    if settings.profile == "production":
+    if settings.persist_domain_stores():
         return Pg_Integration_Connection_Store(settings.database_url)
     return InMemory_Integration_Connection_Store()
 
@@ -687,7 +687,7 @@ def build_multi_agent_run_store(settings: Settings) -> Multi_Agent_Run_Store:
     in-memory default keeps standalone/keyless runs fully functional without a database;
     the production profile persists to Postgres via ``Pg_Multi_Agent_Run_Store``.
     """
-    if settings.profile == "production":
+    if settings.persist_domain_stores():
         # Local import so the keyless in-memory path never depends on SQLAlchemy/psycopg.
         from agentforge.multiagent.store import Pg_Multi_Agent_Run_Store
 
@@ -823,7 +823,7 @@ def build_identity_store(settings: Settings) -> Identity_Store:
     profile persists to Postgres via ``Pg_Identity_Store`` (Req 9.3, 9.5, 10.1). The
     Postgres adapter is imported lazily so the keyless path never depends on it.
     """
-    if settings.profile == "production":
+    if settings.persist_domain_stores():
         from agentforge.enterprise.identity import Pg_Identity_Store  # local import
 
         return Pg_Identity_Store(settings.database_url)
@@ -872,7 +872,7 @@ def build_auth_service(settings: Settings, identity: Identity_Store) -> Auth_Ser
 
 def build_api_key_store(settings: Settings) -> API_Key_Store:
     """Return the API_Key_Store: Postgres in production, in-memory otherwise."""
-    if settings.profile == "production":
+    if settings.persist_domain_stores():
         from agentforge.enterprise.api_keys import Pg_API_Key_Store  # local import
 
         return Pg_API_Key_Store(settings.database_url)
@@ -1018,7 +1018,7 @@ def build_cost_model(settings: Settings) -> Cost_Model:
 
 def build_usage_store(settings: Settings) -> Usage_Store:
     """Return the Usage_Store: Postgres in production, in-memory otherwise (Req 10.3)."""
-    if settings.profile == "production":
+    if settings.persist_domain_stores():
         return Pg_Usage_Store(settings.database_url)
     return InMemory_Usage_Store()
 
@@ -1032,7 +1032,7 @@ def build_usage_recorder(
 
 def build_prompt_store(settings: Settings) -> Prompt_Store:
     """Return the Prompt_Store: Postgres in production, in-memory otherwise (Req 10.3)."""
-    if settings.profile == "production":
+    if settings.persist_domain_stores():
         return Pg_Prompt_Store(settings.database_url)
     return InMemory_Prompt_Store()
 
@@ -1071,7 +1071,7 @@ def build_guardrail_pipeline(settings: Settings) -> Guardrail_Pipeline:
 
 def build_evaluation_store(settings: Settings) -> Evaluation_Store:
     """Return the Evaluation_Store: Postgres in production, in-memory otherwise (Req 10.3)."""
-    if settings.profile == "production":
+    if settings.persist_domain_stores():
         return Pg_Evaluation_Store(settings.database_url)
     return InMemory_Evaluation_Store()
 
