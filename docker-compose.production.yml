@@ -58,6 +58,9 @@ services:
       REDIS_URL: ${REDIS_URL}
       JWT_SECRET: ${JWT_SECRET}
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      # Explicit persistence (belt-and-suspenders; PROFILE=production already satisfies
+      # Settings.persist_domain_stores()). Behavior is identical either way (B1).
+      USE_DATABASE: "true"
     # Invoke the existing run_migrations once via the app's own callable (no app change),
     # then exit. A failure names the migration id and returns non-zero, blocking the api.
     command:
@@ -100,6 +103,9 @@ services:
       REDIS_URL: ${REDIS_URL}
       JWT_SECRET: ${JWT_SECRET}
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      # Explicit persistence (belt-and-suspenders; PROFILE=production already satisfies
+      # Settings.persist_domain_stores()). Behavior is identical either way (B1).
+      USE_DATABASE: "true"
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       HOSTED_EMBEDDING_API_KEY: ${HOSTED_EMBEDDING_API_KEY:-}
       SEARCH_API_KEY: ${SEARCH_API_KEY:-}

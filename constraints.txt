@@ -20,12 +20,12 @@
 # drifts into a release that breaks sentence-transformers==3.3.1.
 transformers>=4.41,<4.48
 
-# NOTE: torch is intentionally NOT pinned here. It is installed as an ordinary transitive
-# dependency of sentence-transformers==3.3.1 (which requires torch>=1.11) directly from
-# PyPI during the constrained `pip install`. We do NOT use the PyTorch CPU wheel index
-# (`--index-url https://download.pytorch.org/whl/cpu`): its downloads redirect to the R2
-# CDN (download-r2.pytorch.org), which is not reliably reachable from CI and fails the TLS
-# handshake. Resolving torch from PyPI is reliable; the resulting image is larger (the PyPI
-# Linux build bundles CUDA/NVIDIA wheels), which is why CI frees runner disk before building.
-# Pinning torch to an exact version is avoided so the runner picks whatever compatible build
-# PyPI actually serves.
+# NOTE: torch is NOT resolved from PyPI. The Dockerfile builder stage installs a pinned
+# CPU-only build FIRST from the PyTorch CPU wheel index
+# (`pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.5.1"`), before the
+# `pip install -r requirements.txt -c constraints.txt` step. Because torch is already
+# satisfied, the sentence-transformers==3.3.1 resolve (which requires torch>=1.11) reuses the
+# CPU build instead of pulling the CUDA/NVIDIA PyPI wheel. This removes the multi-GB
+# `nvidia-cu*` payload and drops the backend image from ~17.8 GB to well under the 4 GB budget,
+# with byte-identical application behavior (no source or app-dependency change). The
+# `transformers>=4.41,<4.48` bound above still applies to keep the resolve deterministic.

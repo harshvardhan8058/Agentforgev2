@@ -883,6 +883,39 @@
         "title": "IngestResponse",
         "type": "object"
       },
+      "IntegrationStatusEntry": {
+        "description": "One integration's public status: its stable name and whether it is Enabled.\n\nContains only ``{name, enabled}`` \u2014 never a credential, token, or secret-derived\nfield (Req 9.2, 9.5).",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "enabled"
+        ],
+        "title": "IntegrationStatusEntry",
+        "type": "object"
+      },
+      "IntegrationStatusResponse": {
+        "description": "The org-scoped Integration_Status view: one ``{name, enabled}`` entry per integration.\n\nNo credential, token, or secret-derived field appears anywhere in the response (Req 9.2).",
+        "properties": {
+          "integrations": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrationStatusEntry"
+            },
+            "title": "Integrations",
+            "type": "array"
+          }
+        },
+        "title": "IntegrationStatusResponse",
+        "type": "object"
+      },
       "LivenessResponse": {
         "properties": {
           "status": {
@@ -2283,6 +2316,28 @@
         "summary": "Readiness",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/integrations/status": {
+      "get": {
+        "description": "Return each integration's ``{name, enabled}`` status for the caller (Req 9.1, 9.5).\n\nEnablement is derived at request time from ``Settings.integration_enabled`` \u2014 a pure\nfunction of the configured Credential presence and Enable_Setting \u2014 so the response\nreflects current configuration and contains only ``{name, enabled}`` pairs, never a\ncredential (Req 9.2). Authorization is enforced entirely by the declared\n``require_permission(Permission.READ)`` dependency (Req 9.3, 9.4).",
+        "operationId": "get_integration_status_integrations_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Integration Status",
+        "tags": [
+          "integrations"
         ]
       }
     },

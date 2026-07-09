@@ -45,10 +45,12 @@ services:
       dockerfile: Dockerfile
     container_name: agentforge-frontend
     environment:
-      # Runtime_Config: unset/empty -> config.js emits an empty object and the SPA falls
-      # back to its documented default. The browser reaches the API same-origin through
-      # the nginx proxy, so no explicit base URL is needed locally (Req 8.4).
-      API_BASE_URL: ${API_BASE_URL:-}
+      # Runtime_Config: the browser reaches the API same-origin through the nginx proxy
+      # published at http://localhost, so config.js is rendered with that base URL. The
+      # SPA's build-time default targets the dev API port (:8000), which is intentionally
+      # NOT published in this stack — so we set the proxy origin explicitly here. Override
+      # with a real scheme://host for production domains (Req 8.4).
+      API_BASE_URL: ${API_BASE_URL:-http://localhost}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s
@@ -74,6 +76,15 @@ services:
       DATABASE_URL: postgresql+asyncpg://agentforge:agentforge@postgres:5432/agentforge
       REDIS_URL: redis://redis:6379/0
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      # Persist the ten Domain_Stores to the already-running Postgres over the non-secret
+      # DSN above, so the default keyless local stack survives `docker compose restart`
+      # (B1, Req 1.2). This adds NO credential — it only flips store selection to the
+      # DB-backed Pg_* implementations via Settings.persist_domain_stores(). Override to
+      # "false" to keep the (ephemeral) in-memory stores.
+      USE_DATABASE: ${USE_DATABASE:-true}
+      # Per-principal rate limiting is Redis-backed; keep it OFF for the local single-user
+      # keyless stack (the documented keyless default). Override to "true" to exercise it.
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-false}
       # Optional provider keys stay blank locally (keyless-safe fallbacks).
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       HOSTED_EMBEDDING_API_KEY: ${HOSTED_EMBEDDING_API_KEY:-}

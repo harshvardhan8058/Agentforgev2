@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     profile: Literal["local", "production"] = "local"
     api_port: int = 8000
 
+    # Persist the ten Domain_Stores to the running Postgres over a DSN (no credential).
+    # Default False so the keyless unit lane stays in-memory and deterministic (Req 10.1).
+    # The composition root consults ``persist_domain_stores()`` (below), which is ON when
+    # this flag is set OR in the production profile — so production behavior is unchanged
+    # and the local stack opts in explicitly via ``USE_DATABASE=true`` in compose.
+    use_database: bool = False
+
     # --- chunking ---
     chunk_max_chars: int = 1000  # max chunk size
     chunk_overlap_chars: int = 150  # overlap between consecutive chunks
@@ -184,6 +191,18 @@ class Settings(BaseSettings):
     def active_vector_store(self) -> str:
         """Return the active vector store based on the selected profile."""
         return "pgvector" if self.profile == "production" else "chroma"
+
+    def persist_domain_stores(self) -> bool:
+        """Return whether the Domain_Stores are DB-backed (persistent) vs in-memory.
+
+        DB-backed when persistence is explicitly enabled via ``use_database`` OR the
+        production profile is selected. This splits *persistence* from *profile*: the
+        keyless local stack can persist to the already-running Postgres over a DSN (no
+        credential) while the deterministic keyless unit lane — which never sets
+        ``USE_DATABASE`` and defaults ``profile == "local"`` — stays in-memory (Req 1.1,
+        1.3, 10.1). Mirrors the existing ``active_*`` selector helpers.
+        """
+        return self.use_database or self.profile == "production"
 
     def integration_enabled(self, name: str) -> bool:
         """Return whether the named integration is Enabled (Req 3.4, 3.6, 3.7).
