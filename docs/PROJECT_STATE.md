@@ -4,27 +4,15 @@
 # without re-deriving context. YAML front-matter is the source of truth; the
 # markdown body below is a human-readable mirror.
 
-current_phase: "Phase 9 — Cloud Deployment & Production Infrastructure (IN PROGRESS — completes on PR #17). Phases 1-8 complete and consolidated onto the deployment base."
-current_branch: feat/agentforge-deployment
-current_pr:
-  number: 17
+current_phase: "v1.0 COMPLETE — Phases 1-9 + Production Hardening all merged to main. Production-ready in code; pending runtime validation on a real Docker host."
+current_branch: main
+open_prs: none
+last_merged_pr:
+  number: 22
   base: main
-  state: anticipated
-  title: "Phase 9 — Cloud Deployment & Production Infrastructure"
-prior_integrations_pr:
-  number: 16
-  base: main
-  state: open
-  title: "Phase 8 — Third-party Integrations (Slack, Gmail, Drive, GitHub)"
-# NOTE ON TOPOLOGY: Phase 7 (frontend) and Phase 8 (integrations) were each branched
-# directly off `main` (cfd8204) and are NOT merged together. Phase 7 lives on
-# `feat/agentforge-frontend` (PR #14); Phase 8 lives on `feat/agentforge-integrations`
-# (PR #16). This PROJECT_STATE.md file currently exists only on the frontend branch.
-prior_frontend_pr:
-  number: 14
-  base: main
-  state: open
-  title: "Phase 7 — React Web Frontend"
+  merge_commit: 1d7a15e
+  merged_at: "2026-07-09"
+  title: "Production Hardening (B1-B6): persistent keyless stores, SSE proxy, CPU image, contract drift check"
 
 completed_phases:
   - id: 1
@@ -43,95 +31,104 @@ completed_phases:
     name: React Web Frontend
   - id: 8
     name: Third-party Integrations (Slack, Gmail, Drive, GitHub)
-
-remaining_phases:
   - id: 9
     name: Cloud Deployment & Production Infrastructure
-    status: in_progress   # completes on PR #17
-    note: >-
-      Infrastructure only — no application behavior or API contract change. Adds
-      multi-stage non-root images (backend/frontend/proxy), the nginx single entry
-      point (routing, unbuffered SSE, TLS termination, security headers), the frontend
-      runtime config.js plumbing, the unified keyless docker-compose.yml + production
-      overlay, on-startup migrations (+ optional one-shot), a four-job CI/CD pipeline
-      publishing to GHCR under a three-tag strategy, and the deployment docs.
 
-# IMPORTANT STATE CORRECTION (recorded so future sessions do NOT assume the old
-# unmerged Phase 3-6 PR stack still exists):
-#   - The Phase 3-6 PR stack appears ALREADY MERGED to `main`.
-#   - At the time of writing, `main` was at cfd8204
-#     ("Merge pull request #12 from harshvardhan8058/feat/agentforge-enterprise").
-#   - `feat/agentforge-observability` was NOT present on the remote.
-#   - Therefore `feat/agentforge-frontend` is based directly off `main`
-#     (NOT off the old observability branch).
-branch_topology:
-  main_head_at_frontend_branch_point: cfd8204
-  main_head_commit_subject: "Merge pull request #12 from harshvardhan8058/feat/agentforge-enterprise"
-  phase_3_6_stack: merged_to_main
-  observability_branch_on_remote: false
-  frontend_branch_base: main
+remaining_phases: []   # v1.0 feature scope complete
+
+post_v1_hardening:
+  pr: 22
+  status: merged
+  items:
+    - "B1: split persistence from profile via Settings.use_database + persist_domain_stores(); local stack (USE_DATABASE=true) persists to Postgres, keyless. No new migrations."
+    - "B2: documented keyless<->production config boundary (docs/CONFIGURATION.md, .env.production.example)."
+    - "B3: nginx SSE — proxy_http_version 1.1 + X-Accel-Buffering no (with existing buffering/cache off + 3600s timeouts)."
+    - "B4: CPU-only torch installed before requirements (image target <=4 GB; CI size gate + CUDA-absence assert)."
+    - "B5: removed stray Dockerfile.verify."
+    - "B6: regenerated frontend/openapi.json (+schema.d.ts) to include GET /integrations/status; added keyless scripts/check_openapi.py drift check in CI."
+    - "Also merged (PRs #19-#21): asyncpg simple-protocol migration runner; .gitattributes LF + Dockerfile CRLF-strip for the entrypoint; healthcheck via 127.0.0.1; Redis_Rate_Limiter uses a SYNC redis client; RATE_LIMIT_ENABLED=false default locally."
+
+merged_pr_index:
+  "1-2": "Phases 1-2 Foundation + Core RAG"
+  "3,5": "Phase 3 Agentic Layer"
+  "6,9": "Phase 4 Multi-Agent"
+  "8,10": "Phase 5 Enterprise"
+  "11,12": "Phase 6 Observability"
+  "14,15": "Phase 7 Frontend"
+  "16": "Phase 8 Integrations"
+  "17": "Phase 9 Deployment (+ consolidation of Phases 1-8)"
+  "18": "docs (limitations/roadmap/architecture)"
+  "19,20,21": "production runtime fixes (migrations, CRLF entrypoint, IPv6 healthcheck)"
+  "22": "Production Hardening B1-B6"
 
 test_status:
   backend:
     keyless_lane: "pytest -m 'not integration' -q"
-    note: "UI-only phase — backend behavior unchanged; integration lane (Postgres/Redis/Docker) not run this session."
+    tests_passing: 484
+    result: pass
+    note: "Deterministic + credential-free. Integration lane (-m integration) requires a pgvector Postgres and is run on a Docker host."
   frontend:
     command: "cd frontend && npm run ci"
     ci_stages: [codegen:check, typecheck, test, build, scan:bundle]
     result: pass
-    tests_passing: 168
-    test_files: 37
-    properties: "15/15 (fast-check, >=100 iterations each)"
-    bundle_secret_scan: pass
+  contract:
+    command: "python scripts/check_openapi.py"
+    result: pass
 
-frontend_summary:
-  location: /frontend
-  stack: "React 18 + Vite + TypeScript"
-  scope: "UI-only over the shipped Phase 1-6 HTTP/SSE contracts (no backend capability or contract change)"
-  testing: "keyless + deterministic (MSW mocks, fast-check properties, Monaco/charts lazy + mocked)"
-  design: "premium design-system console (Tailwind + Radix + Framer Motion + cmdk + Monaco + react-markdown + Recharts/visx)"
-  tasks_total: 30
-  tasks_open: [30]
-  task_30: "Final Phase Completion checkpoint — manual, left for the user"
+not_yet_verified_on_docker_host:
+  - "docker compose build — esp. B4 PyTorch CPU index (download.pytorch.org/whl/cpu) reachability + image <=4 GB."
+  - "docker compose up — all 5 services healthy; live migrations incl. CREATE EXTENSION vector."
+  - "B1 persistence live — nine Pg_* stores' first real run; data survives docker compose restart."
+  - "B3 SSE incremental delivery through nginx; long-lived timeouts."
+  - "Auth / RAG / single-agent / multi-agent / integrations-status live; production overlay boot with secrets."
+  - "Unchecked sign-off tasks: production-hardening Task 12, deployment Task 13, frontend Task 30."
 
 architectural_constraints:
   backend:
-    - "Interfaces at exactly three seams (LLM_Provider, Embedding_Provider, Vector_Store); service layer depends only on abstract contracts."
-    - "Keyless by default: deterministic Fallback_Provider + local embeddings; no credential is ever required to boot or test."
-    - "Credentials always optional and typed as SecretStr; only non-secret settings (database_url, redis_url) are required at startup."
-    - "Atomic ingestion: relational + vector writes commit only after the full extract->chunk->embed->store pipeline succeeds."
-    - "Grounding-only prompt construction; citations verifiable (enforced as a correctness property)."
-    - "Iteration/round/revision bounds enforced structurally with exactly-one-termination-reason invariants."
-    - "SSE over WebSockets; exactly one terminal event (completion XOR error) per stream."
+    - "Single composition root (config/container.py) is the ONLY module naming concrete implementations; everything else depends on interface seams (Clean/Hexagonal)."
+    - "Keyless by default: deterministic Fallback_Provider + local SentenceTransformer embeddings + Chroma vectors + in-memory domain stores; no credential is ever required to boot or test."
+    - "Persistence is independent of profile: persist_domain_stores() = use_database OR profile==production. Local stack sets USE_DATABASE=true (keyless, DSN only) to use the nine Pg_* stores."
+    - "Pg_* domain stores are synchronous psycopg, invoked via run_in_threadpool; the async engine is reserved for migrations + health checks."
+    - "Credentials always optional and typed as SecretStr; only non-secret settings (database_url, redis_url) are required at startup; production also requires JWT_SECRET (guarded by load_settings)."
+    - "Atomic ingestion; grounding-only prompt construction; citations verifiable."
+    - "Iteration/round/revision bounds enforced structurally; SSE with exactly one terminal event per stream."
     - "RBAC is a pure function of a static role->permission map (viewer subset member subset admin subset owner); every role grants read."
-    - "Tenant isolation enforced at the data-access layer: org_id is a required store parameter; cross-tenant access is 404, never 403."
-    - "Immutable, monotonically-versioned prompts backed by a DB uniqueness constraint; render fails closed on missing variables."
-    - "Cost is Decimal end-to-end; Cost_Model is total over its input space with a default rate."
+    - "Tenant isolation at the data-access layer: org_id is a required store parameter; cross-tenant access is 404, never 403."
+    - "Additive migrations only (0001-0011); tracked by schema_migrations; runner uses asyncpg simple query protocol for multi-statement scripts."
+    - "Cost is Decimal end-to-end; Cost_Model total with a default rate."
   frontend:
-    - "UI-only: consume shipped contracts; omit any affordance lacking a contract (no backend change)."
-    - "Types generated from the backend OpenAPI schema (openapi-typescript -> schema.d.ts); codegen:check fails on drift."
-    - "RBAC gating is a pure function mirroring enterprise/rbac.py; unauthorized controls are OMITTED from the DOM, not disabled."
-    - "One total AppError -> ClientError normalizer; never throws, always a non-empty user-presentable message."
-    - "401 refresh-once-then-retry (at most one refresh, at most two attempts); cross-tenant 404 presented as 'not found'."
-    - "Fetch-based SSE (POST + ReadableStream) with pure reducers and an exactly-one-terminal invariant; approval_required is non-terminal."
-    - "Verbatim cost rendering: cost strings shown exactly as the backend returns them (no parse/round/reformat)."
-    - "No secret material in the bundle (enforced by the scan:bundle check)."
+    - "UI-only: consume shipped contracts; omit any affordance lacking a contract."
+    - "Types generated from the backend OpenAPI schema; codegen:check + scripts/check_openapi.py fail on drift."
+    - "RBAC gating omits unauthorized controls from the DOM (not merely disabled)."
+    - "One total AppError->ClientError normalizer; 401 refresh-once-then-retry; cross-tenant 404 presented as 'not found'."
+    - "Fetch-based SSE with pure reducers and an exactly-one-terminal invariant; approval_required is non-terminal."
+    - "Runtime config via /config.js (window.__AGENTFORGE_CONFIG__.apiBaseUrl); talks to the API same-origin through nginx. No secret material in the bundle (scan:bundle)."
+
+infrastructure_summary:
+  entry_point: "nginx — sole published service (host :80 -> container :8080); routes / -> frontend:8080 and API prefixes (+SSE) -> api:8000."
+  services: [nginx, frontend, api, postgres (pgvector), redis]
+  images: "agentforge-backend (root Dockerfile), agentforge-frontend (frontend/Dockerfile), agentforge-proxy (nginx/Dockerfile) — all multi-stage, non-root."
+  local: "docker compose up  (keyless, PROFILE=local, USE_DATABASE=true, RATE_LIMIT_ENABLED=false)."
+  production: "docker-compose.production.yml overlay (PROFILE=production, GHCR images, secrets from Secret_Source, TLS, one-shot migrate)."
 
 resume_checkpoint:
-  state: "Phase 9 (Cloud Deployment & Production Infrastructure) IN PROGRESS on feat/agentforge-deployment, completing on PR #17. Phases 1-8 are consolidated onto the deployment base. Tasks 1-11 done + checkpoint 12 passed; task 13 (final Phase Completion checkpoint) is left UNCHECKED for the user. Backend keyless lane green (pytest -m 'not integration' -q); frontend npm run ci green. Infrastructure only — no application behavior or API contract change."
-  next: "Task 13 — the final Phase Completion checkpoint — is left for the user to check off."
+  state: "v1.0 complete and merged to main (Phases 1-9 + Production Hardening PR #22). Code green: backend keyless lane 484, frontend npm run ci, scripts/check_openapi.py. NOT yet validated on a real Docker host."
+  next: "Run the Docker validation checklist on a host (see docs/SESSION_HANDOFF.md): docker compose build (watch B4 torch step) -> up -> health -> register+restart persistence -> RAG/agent/multi-agent/SSE -> pytest -m integration. Then optionally begin the (unstarted) Premium UI redesign after a visual-identity conversation."
   do_not_auto_start: true
+  see_also: docs/SESSION_HANDOFF.md
 ---
 
 # AgentForge — Project State
 
-**Current phase:** Phase 8 — Third-party Integrations (**COMPLETE, in review**).
-**Branch:** `feat/agentforge-integrations` · **PR:** #16 (base `main`).
-Phase 7 (frontend) is also complete and in review on a **parallel** branch
-`feat/agentforge-frontend` (PR #14). Both branches were cut from `main` (cfd8204) and are
-**not merged together**; this file currently lives only on the frontend branch.
+**Status:** **v1.0 COMPLETE.** Phases 1–9 and the Production Hardening pass (PR #22) are all
+merged to `main`. `main` is the production-ready source of truth. **No open PRs.** The code
+is green (backend keyless lane **484**, frontend `npm run ci`, `scripts/check_openapi.py`);
+the remaining gate is **runtime validation on a real Docker host**.
 
-## Completed phases
+> See `docs/SESSION_HANDOFF.md` for the full, self-contained handoff (merged-PR index,
+> Docker validation checklist, risks, and prioritized next steps).
+
+## Completed phases (all merged to `main`)
 
 1. Foundation
 2. Core RAG
@@ -141,77 +138,62 @@ Phase 7 (frontend) is also complete and in review on a **parallel** branch
 6. Production Observability (tracing export, cost analytics, prompt registry, guardrails, evaluation)
 7. React Web Frontend
 8. Third-party Integrations (Slack, Gmail, Drive, GitHub)
+9. Cloud Deployment & Production Infrastructure
 
-## Remaining phases
+## Post-v1.0 hardening (PR #22, merged)
 
-9. Cloud Deployment & Production Infrastructure — *in progress (completes on PR #17)*
-
-## Phase 9 — Cloud Deployment & Production Infrastructure
-
-**Infrastructure only** — no application behavior, HTTP/SSE API contract, database-schema
-semantics, or business logic changes. The single app-adjacent edit is the
-behavior-preserving `resolveConfig()` runtime-config plumbing in `frontend/src/config.ts`.
-
-Delivered artifacts:
-
-- Multi-stage, **non-root** images: `agentforge-backend` (root `Dockerfile`),
-  `agentforge-frontend` (`frontend/Dockerfile`), `agentforge-proxy` (`nginx/Dockerfile`),
-  each with a matching `.dockerignore`.
-- **nginx** reverse proxy as the sole entry point: path routing to frontend/backend,
-  unbuffered SSE, a production TLS server block (certs mounted at runtime), and hardened
-  security headers (HSTS on the TLS block only).
-- Frontend **Runtime_Config**: entrypoint renders `/config.js` from `API_BASE_URL` at
-  container start (build-once / run-anywhere); default preserved when unset.
-- Unified **keyless** `docker-compose.yml` (one-command local start) + a **production
-  overlay** (`docker-compose.production.yml`) with injected secrets, hardened creds,
-  restart policies, TLS, and GHCR images; plus `.env.production.example` (placeholders).
-- Migrations run **on backend startup** by default (additive, `schema_migrations`-tracked),
-  with an optional one-shot `migrate` service for scale-out.
-- Four-job **CI/CD** (`test → build → publish → deploy`) publishing to GHCR under a
-  three-tag strategy (`latest` + git SHA + semver); cross-image secret scan.
-- Docs: README Deployment section, `docs/DEPLOYMENT.md`, `docs/INFRASTRUCTURE.md`.
-
-**Verification:** the four correctness properties are present and tagged — Property 1
-(no baked secrets, keyless), Properties 2 & 3 (keyless all-healthy; migration idempotence,
-both integration-lane, runtime-gated), Property 4 (build-once/run-anywhere, keyless). The
-keyless backend lane (`pytest -m 'not integration' -q`) and frontend `npm run ci` remain
-green and unmodified; `npm run codegen:check` confirms the API contract is unchanged. Task
-13 (the final Phase Completion checkpoint) is intentionally **left for the user**.
-
-## State correction — the Phase 3–6 PR stack is merged
-
-A prior session may have assumed an unmerged Phase 3–6 PR stack (with a
-`feat/agentforge-observability` branch). That is **no longer the case**:
-
-- `main` was at **cfd8204** — *"Merge pull request #12 … feat/agentforge-enterprise"* —
-  when `feat/agentforge-frontend` was branched.
-- `feat/agentforge-observability` was **not present on the remote**.
-- Therefore **`feat/agentforge-frontend` is based directly off `main`**, and the
-  Phase 3–6 work is already on `main`. Future sessions should not look for or rebase
-  onto the old stack.
+- **B1 — persistence:** `Settings.use_database` + `persist_domain_stores()`; the local stack
+  (`USE_DATABASE=true`) now persists to Postgres via the nine `Pg_*` stores, **keyless** (DSN
+  only). No new migrations — tables `0001`–`0011` already exist. Default `use_database=False`
+  keeps the unit lane in-memory/deterministic.
+- **B2** — documented keyless↔production config boundary (`docs/CONFIGURATION.md`,
+  `.env.production.example`).
+- **B3** — nginx SSE: `proxy_http_version 1.1` + `X-Accel-Buffering no`.
+- **B4** — CPU-only torch before requirements (image target ≤4 GB; CI size gate).
+- **B5** — removed stray `Dockerfile.verify`.
+- **B6** — regenerated `frontend/openapi.json` (+`schema.d.ts`) for `GET /integrations/status`;
+  keyless `scripts/check_openapi.py` drift check in CI.
+- Earlier fixes (PRs #19–#21): asyncpg simple-protocol migration runner; `.gitattributes` LF +
+  Dockerfile CRLF-strip for the entrypoint; healthcheck via `127.0.0.1`; sync Redis rate-limiter
+  client; `RATE_LIMIT_ENABLED=false` default locally.
 
 ## Test status
 
-- **Backend (keyless lane):** `pytest -m 'not integration' -q`. Phase 7 is UI-only, so
-  backend behavior is unchanged; the integration lane (Postgres/Redis/Docker) was not
-  run this session.
+- **Backend (keyless lane):** `pytest -m 'not integration' -q` → **484 passed**, deterministic,
+  credential-free. The integration lane (`-m integration`) needs a pgvector Postgres and runs on
+  a Docker host.
 - **Frontend:** `cd frontend && npm run ci` → `codegen:check → typecheck → test → build →
-  scan:bundle`. **168 tests passing** across 37 files, **15/15 correctness properties**
-  (fast-check, ≥100 iterations each), bundle-secret scan clean.
+  scan:bundle`, all green.
+- **Contract:** `python scripts/check_openapi.py` → committed OpenAPI matches the mounted routes.
 
-## Frontend summary
+## Not yet verified on a real Docker host
 
-`/frontend` is a React 18 + Vite + TypeScript SPA, **UI-only** over the shipped Phase 1–6
-contracts, **keyless + deterministic** in test (MSW, Monaco/charts lazy + mocked), with a
-premium design-system console. 30 tasks total; **task 30 (the final manual checkpoint) is
-left for the user**.
+- `docker compose build` — esp. **B4**: PyTorch CPU index reachability + image ≤4 GB.
+- `docker compose up` — all 5 services healthy; live migrations incl. `CREATE EXTENSION vector`.
+- **B1** persistence live — the nine `Pg_*` stores' first real run; data survives
+  `docker compose restart`.
+- **B3** SSE incremental delivery through nginx.
+- Auth / RAG / single-agent / multi-agent / integrations-status live; production overlay boot.
+- Unchecked sign-off tasks: production-hardening **Task 12**, deployment **Task 13**, frontend
+  **Task 30**.
+
+## Architecture summary
+
+FastAPI backend (`agentforge.main:create_app`); `lifespan` loads `Settings`, opens the async DB
+engine + async Redis, runs migrations, then builds nine context graphs via the single
+composition root `config/container.py`. 14 routers. Keyless defaults (Fallback LLM,
+SentenceTransformer embeddings, Chroma vectors, in-memory stores) unless `USE_DATABASE=true`/
+production selects the `Pg_*` stores. `org_id` tenancy → 404; uniform `AppError` envelope;
+`SecretStr` secrets; additive migrations `0001`–`0011`. React 18 + Vite SPA served behind nginx,
+which is the sole published entry point (`:80→:8080`) routing `/`→frontend and API prefixes
+(+SSE)→api. Postgres+pgvector and Redis complete the stack; the production overlay adds TLS,
+GHCR images, secrets, and a one-shot migrate service.
 
 ## Resume checkpoint
 
-**Phase 9 (Cloud Deployment & Production Infrastructure)** is **in progress** on
-`feat/agentforge-deployment`, completing on **PR #17**. Phases 1–8 are consolidated onto the
-deployment base. Tasks 1–11 are done and checkpoint 12 has passed; **task 13 — the final
-Phase Completion checkpoint — is left UNCHECKED for the user**. The keyless backend lane
-(`pytest -m 'not integration' -q`) and the frontend `npm run ci` are green and unmodified,
-and `npm run codegen:check` confirms the API contract is unchanged. Phase 9 is
-**infrastructure only** — no application behavior or contract change.
+**v1.0 is complete and merged to `main`.** Code is green; the outstanding activity is **runtime
+validation on a real Docker host** (see the checklist in `docs/SESSION_HANDOFF.md`): build
+(watch the B4 torch step) → up → health → register + `docker compose restart` persistence →
+RAG / agent / multi-agent / SSE → `pytest -m integration`. After that's green, the next feature
+initiative is the (unstarted) **Premium UI redesign**, which needs a short visual-identity
+conversation before any implementation. Do not auto-start work.
