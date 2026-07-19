@@ -5,8 +5,7 @@ import { axe } from "vitest-axe";
 import { toHaveNoViolations } from "vitest-axe/dist/matchers.js";
 
 // vitest-axe ships its type augmentation for an older Vitest `Vi` namespace;
-// declare the matcher against Vitest 2's `Assertion` interface directly.
-/* eslint-disable @typescript-eslint/no-explicit-any */
+// declare the matcher against Vitest's `Assertion` interface directly.
 declare module "vitest" {
   // Must match Vitest's own `Assertion<T = any>` type-parameter signature.
   interface Assertion<T = any> {

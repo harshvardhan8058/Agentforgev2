@@ -105,6 +105,9 @@ export function RegisterView(): JSX.Element {
           <Input
             id="register-org"
             name="org_name"
+            // Focusing the first field on a dedicated single-purpose auth page
+            // is an expected pattern and not a WCAG failure.
+            // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
             value={orgName}
             onChange={(e) => setOrgName(e.target.value)}

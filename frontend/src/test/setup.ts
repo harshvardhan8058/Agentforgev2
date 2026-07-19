@@ -8,6 +8,25 @@ afterEach(() => {
 });
 
 /**
+ * Silence ONLY the two React Router v7 migration advisories in test logs.
+ *
+ * The production app (`main.tsx`) already opts into `v7_startTransition` and
+ * `v7_relativeSplatPath`, so these advisories are informational. Component
+ * tests construct their own `MemoryRouter`/`BrowserRouter` without the flags;
+ * enabling `v7_startTransition` there would change update batching and is not
+ * worth the risk purely for log hygiene. We therefore filter these two specific
+ * messages so genuine warnings remain fully visible.
+ */
+const originalWarn = console.warn;
+console.warn = (...args: unknown[]): void => {
+  const first = args[0];
+  if (typeof first === "string" && first.includes("React Router Future Flag Warning")) {
+    return;
+  }
+  originalWarn(...(args as Parameters<typeof console.warn>));
+};
+
+/**
  * Deterministic UI environment:
  *  - jsdom has no `matchMedia`; provide a stub so ThemeProvider and the motion
  *    layer can query preferences without throwing. It reports

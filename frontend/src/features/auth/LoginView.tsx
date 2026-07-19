@@ -103,6 +103,9 @@ export function LoginView(): JSX.Element {
             name="email"
             type="email"
             autoComplete="email"
+            // Focusing the first field on a dedicated single-purpose auth page
+            // is an expected pattern and not a WCAG failure.
+            // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
             value={email}
             onChange={(e) => setEmail(e.target.value)}

@@ -46,13 +46,21 @@ npm install
 | `npm run dev` | `vite` | Start the dev server with HMR. |
 | `npm run build` | `tsc --noEmit && vite build` | Type-check then produce the production bundle. |
 | `npm run preview` | `vite preview` | Preview the production build locally. |
-| `npm run test` | `vitest --run` | Run the full keyless test suite once (property + component/integration). |
+| `npm run test` | `vitest --run` | Run the full keyless unit suite once (property + component/integration). |
+| `npm run e2e` | `playwright test` | Run the keyless Playwright E2E suite in a real browser (auth, navigation, RAG, documents, responsive, a11y). |
+| `npm run lint` | `eslint .` | Lint with typescript-eslint + React Hooks + jsx-a11y rules. |
+| `npm run lint:fix` | `eslint . --fix` | Auto-fix lint issues where possible. |
 | `npm run typecheck` | `tsc --noEmit` | Contract-fidelity type-check over `schema.d.ts` + every API call site. |
 | `npm run codegen` | `openapi-typescript ./openapi.json --output ./src/api/schema.d.ts` | Regenerate the typed API surface from the backend OpenAPI schema. |
 | `npm run codegen:check` | `node scripts/check-codegen.mjs` | Fail if `schema.d.ts` has drifted from `openapi.json`. |
 | `npm run scan:bundle` | `node scripts/scan-bundle-secrets.mjs` | Scan the production build for credential material (must find none). |
 | `npm run contract` | codegen-check + typecheck | Contract-fidelity gate. |
-| `npm run ci` | codegen-check → typecheck → test → build → scan:bundle | The full local CI gate. |
+| `npm run ci` | codegen-check → lint → typecheck → test → build → scan:bundle | The full local CI gate. |
+
+> **First-time E2E setup:** install the browser once with
+> `npx playwright install --with-deps chromium`. The E2E suite builds the app,
+> serves the production bundle with `vite preview`, and mocks the Backend_API at
+> the network layer — no live backend or credential is required.
 
 ## OpenAPI codegen step (contract fidelity)
 
@@ -136,4 +144,27 @@ The suite runs with no live backend and no credentials:
   Framer Motion runs with instant transitions so assertions never race
   animations.
 
-Run everything with `npm run test`, or the full gate with `npm run ci`.
+Run the unit suite with `npm run test`, or the full gate with `npm run ci`.
+
+### End-to-end (Playwright, real browser, keyless)
+
+`e2e/` holds a Playwright suite that exercises the **real production build** in
+headless Chromium with the Backend_API mocked at the network layer
+(`page.route`), so it is fully deterministic and needs no live backend,
+database, or credential:
+
+- **auth** — the unauthenticated redirect gate, a successful login, a rejected
+  credential (envelope message), and empty-field validation;
+- **navigation** — reaching every primary destination through the sidebar and
+  the in-shell 404;
+- **RAG** — a grounded, cited answer; a guardrail block that withholds the
+  answer; and RBAC (a viewer cannot submit);
+- **documents** — metadata rows and the zero-document empty state;
+- **responsive** — the mobile drawer vs. the persistent desktop sidebar;
+- **accessibility** — full-page `@axe-core/playwright` scans (WCAG 2.1 AA) on
+  the login, dashboard, documents, and query surfaces, plus skip-link keyboard
+  behavior.
+
+Auth is seeded by writing a well-formed (unsigned) JWT into the same
+`localStorage` key the app reads — the client derives its Session by **decoding**
+claims, so no real credential or backend is involved. Run with `npm run e2e`.

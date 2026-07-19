@@ -37,13 +37,16 @@ export function CardHeader({
 
 export function CardTitle({
   className,
+  children,
   ...rest
 }: HTMLAttributes<HTMLHeadingElement>): JSX.Element {
   return (
     <h3
       className={cn("text-lg font-semibold leading-none text-text", className)}
       {...rest}
-    />
+    >
+      {children}
+    </h3>
   );
 }
 

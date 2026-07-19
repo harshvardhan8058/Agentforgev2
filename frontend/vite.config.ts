@@ -21,7 +21,14 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
-          if (/[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id)) {
+          // Keep the React runtime and its router together with their low-level
+          // transitive deps so no other vendor chunk forms a circular import
+          // edge back into this one (Rollup rejects circular manual chunks).
+          if (
+            /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler|@remix-run[\\/]router|loose-envify|js-tokens|object-assign|use-sync-external-store)[\\/]/.test(
+              id,
+            )
+          ) {
             return "vendor-react";
           }
           if (id.includes("@radix-ui") || id.includes("cmdk")) return "vendor-radix";

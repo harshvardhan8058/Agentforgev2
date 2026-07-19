@@ -181,9 +181,9 @@ export function PromptRegistryView(): JSX.Element {
                 <EmptyState title="No prompts yet" message="Create a version to get started." />
               )}
               {names.data && names.data.length > 0 && (
-                <ul className="flex flex-col gap-1" data-testid="template-list" role="list">
+                <ul className="flex flex-col gap-1" data-testid="template-list">
                   {names.data.map((name) => (
-                    <li key={name} role="listitem">
+                    <li key={name}>
                       <button
                         type="button"
                         data-testid={`template-${name}`}

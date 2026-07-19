@@ -26,7 +26,8 @@
   --color-border-strong: #3b3b50;
   --color-text: #f5f5fb;
   --color-text-muted: #9a9ab4;
-  --color-text-subtle: #6c6c86;
+  /* Meets WCAG AA (>=4.5:1) on the dark bg/surface family for small labels. */
+  --color-text-subtle: #8a8aa0;
   --color-text-inverted: #08080c;
   --color-primary: #6366f1;
   --color-primary-hover: #7c7ff5;
@@ -84,7 +85,8 @@
   --color-border-strong: #c7c8d6;
   --color-text: #12131c;
   --color-text-muted: #52546a;
-  --color-text-subtle: #83849a;
+  /* Meets WCAG AA (>=4.5:1) on the light bg/surface family for small labels. */
+  --color-text-subtle: #64667d;
   --color-text-inverted: #ffffff;
   --color-primary: #4f46e5;
   --color-primary-hover: #4338ca;

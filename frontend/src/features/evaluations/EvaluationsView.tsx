@@ -182,11 +182,10 @@ export function EvaluationsView(): JSX.Element {
                 </div>
               )}
               {datasetList.length > 0 && (
-                <ul className="flex flex-col gap-2" data-testid="dataset-list" role="list">
+                <ul className="flex flex-col gap-2" data-testid="dataset-list">
                   {datasetList.map((d) => (
                     <li
                       key={d.dataset_id}
-                      role="listitem"
                       data-testid={`dataset-${d.dataset_id}`}
                       className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2"
                     >

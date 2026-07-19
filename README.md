@@ -1,221 +1,241 @@
 # AgentForge
-AgentForge: Enterprise Multi-Agent AI Platform
 
-## Foundation (Phase 1)
+**AgentForge is an enterprise, multi-tenant, multi-agent AI platform** — a
+grounded RAG engine, single- and multi-agent orchestration with live streaming,
+third-party tool integrations, a prompt registry, guardrails, evaluations, and
+usage analytics, all behind enterprise authentication and strict per-organization
+isolation, with a premium React operator console.
 
-This repository currently implements the **Foundation** phase: a FastAPI skeleton,
-environment-based configuration, a PostgreSQL + pgvector database with schema
-migrations, health checks, and a Docker-based local development environment. The
-platform runs **keyless** by default (no paid API key required).
+It runs **keyless by default**: the entire platform — and its full test suite —
+boots and passes with **zero credentials and zero external API calls** (a
+deterministic fallback LLM, local embeddings, an in-process vector store, and
+disabled integrations). Supply real credentials only when you want to enable a
+hosted model or a specific integration.
 
-### Requirements
+- New here? Jump to **[Quick start](#quick-start-one-command-keyless)**.
+- Building on it? See **[Local development](#local-development)** and the
+  **[Architecture overview](docs/ARCHITECTURE_OVERVIEW.md)**.
+- Shipping it? See **[Deployment](docs/DEPLOYMENT.md)** and
+  **[Infrastructure](docs/INFRASTRUCTURE.md)**.
 
-- Python 3.11+
-- Docker + Docker Compose (for the full local stack)
+---
 
-### Local install (without Docker)
+## Highlights
 
-```bash
-# From the repository root
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+| Capability | What it does |
+|---|---|
+| **Grounded RAG** | Document ingestion → chunking → embeddings → pgvector retrieval → cited, grounded answers. Never fabricates a source. |
+| **Single-agent runs** | A bounded reason → act → observe loop over a pluggable tool registry, streamed live over SSE with a full trace. |
+| **Multi-agent orchestration** | A Planner → Researcher → Writer → Critic collaboration with per-role streaming and human-approval checkpoints. |
+| **Integrations** | Slack, Gmail, Google Drive, and GitHub as pluggable tools — **disabled unless a credential is supplied**, so keyless stays keyless. |
+| **Prompt registry** | An immutable, versioned prompt store with diffing and safe variable rendering. |
+| **Guardrails** | A safety pipeline applied to every answer, with transparent flags. |
+| **Evaluations** | Curated datasets and evaluators to measure answer quality over time. |
+| **Analytics** | Per-organization token usage and cost, verbatim and provider-attributed. |
+| **Enterprise auth & tenancy** | JWT + API keys, an RBAC map (owner ⊇ admin ⊇ member ⊇ viewer), and **strict per-`org_id` isolation** enforced at the data-access layer. |
+| **Operator console** | A React + TypeScript SPA (Linear/Vercel-class UX) — command palette, dark/light themes, WCAG 2.1 AA, and route-level code splitting. |
+
+A per-feature breakdown lives in **[docs/FEATURE_INVENTORY.md](docs/FEATURE_INVENTORY.md)**.
+
+## Architecture
+
+AgentForge follows **Clean / Hexagonal Architecture**: business logic depends
+only on abstract ports (LLM provider, vector store, embedding provider, document
+store, identity/API-key stores, tool interface), and concrete adapters are
+selected by a single composition root. The keyless `local` profile and the
+`production` profile wire the same seams to different adapters, so the app is
+fully runnable and testable without external services.
+
+```
+┌──────────────┐   HTTP + SSE    ┌─────────────────────────────────────────┐
+│  React SPA   │ ───────────────▶│  FastAPI backend                        │
+│ (operator    │                 │  auth · RAG · agents · multi-agent ·     │
+│  console)    │◀─────────────── │  integrations · prompts · guardrails ·  │
+└──────────────┘   typed client  │  evaluations · analytics                │
+                                  └───────────────┬─────────────────────────┘
+                                     ┌────────────┴───────────┐
+                                     ▼                        ▼
+                              PostgreSQL + pgvector        Redis
+                              (documents, chunks,          (rate limiting,
+                               embeddings, tenancy)         ephemeral state)
 ```
 
-### Configure the environment
+The React client is **UI-only**: its typed API surface is generated from the
+backend's OpenAPI schema, so it can never drift from the shipped contracts.
+Full detail: **[docs/ARCHITECTURE_OVERVIEW.md](docs/ARCHITECTURE_OVERVIEW.md)**.
 
-All settings are loaded from environment variables (no secrets are committed).
-Copy the example file and adjust as needed:
+## Requirements
 
-```bash
-cp .env.example .env
-```
+- **Docker + Docker Compose** — for the one-command full-platform start.
+- **Python 3.11+** — for backend development without Docker.
+- **Node.js 22+** — for frontend development.
 
-Required non-secret settings are `DATABASE_URL` and `REDIS_URL`. Every credential
-(`GROQ_API_KEY`, `HOSTED_EMBEDDING_API_KEY`) is **optional** — leave them blank to
-run keyless. If a required setting is missing, startup aborts and names the missing
-setting.
+## Quick start (one command, keyless)
 
-### Run the full stack with Docker
-
-```bash
-docker compose up
-```
-
-This starts three services — `api`, `postgres` (pgvector), and `redis`. The API
-becomes reachable on the documented local port **http://localhost:8000** (override
-with `API_PORT`). Schema migrations run automatically on first startup. If a
-service fails to start, Docker Compose reports it by name (e.g. `agentforge-api`,
-`agentforge-postgres`, `agentforge-redis`).
-
-Verify readiness once the stack is up:
-
-```bash
-curl http://localhost:8000/health/ready
-# -> {"status":"ready","dependencies":{"database":"up","redis":"up"}}
-```
-
-Liveness is available at `http://localhost:8000/health/live`.
-
-### Run the tests
-
-The unit and property suites run standalone without any external infrastructure or
-credentials:
-
-```bash
-pytest
-```
-
-Infrastructure-dependent integration tests (Postgres/Redis/Docker) are marked with
-the `integration` marker and are excluded by default. To run them with the stack up:
-
-```bash
-pytest -m integration
-```
-
-
-## Web Frontend (Phase 7)
-
-A React + Vite + TypeScript operator console lives in [`/frontend`](./frontend). It is a
-**UI-only** client over the already-shipped Backend_API (Phases 1–6): it consumes the
-stable HTTP/SSE contracts and introduces **no new backend capability and no backend
-contract change**. Its typed API surface is generated from the backend's OpenAPI schema,
-so the client can never drift from the shipped contracts.
-
-The console runs **keyless** in test — the full suite is mocked (MSW) and deterministic,
-requiring no live backend and no credentials. See
-[`frontend/README.md`](./frontend/README.md) for the full details on configuration
-(`VITE_API_BASE_URL`, no secrets), the design system, and the pure-logic / feature-view
-layering.
-
-### Frontend scripts
-
-```bash
-cd frontend
-npm install         # install dependencies
-npm run dev         # start the Vite dev server with HMR
-npm run build       # type-check then produce the production bundle
-npm run test        # run the full keyless test suite once (property + component/integration)
-npm run typecheck   # tsc --noEmit contract-fidelity type-check
-npm run ci          # full local gate: codegen:check -> typecheck -> test -> build -> scan:bundle
-```
-
-## Third-Party Integrations (Phase 8)
-
-Phase 8 adds **Slack, Gmail, Google Drive, and GitHub** to AgentForge as pluggable
-tools that the agentic (Phase 3) and multi-agent (Phase 4) layers discover through the
-existing tool registry. Each integration is an ordinary tool behind the unchanged
-`Tool_Interface` — no orchestrator change is required to add them.
-
-| Integration    | Tool name       | Actions                                                        |
-|----------------|-----------------|----------------------------------------------------------------|
-| Slack          | `slack`         | `read_channel`, `post_message`                                 |
-| Gmail          | `gmail`         | `search_messages`, `read_message`, `send_message`              |
-| Google Drive   | `google_drive`  | `list_files`, `search_files`, `read_file` (read-only)          |
-| GitHub         | `github`        | `search_code`, `search_issues`, `read_repo`, `create_issue`    |
-
-### Keyless-disabled by default
-
-Every integration is **Disabled** unless its credential is supplied, and the platform
-runs and passes its entire test suite with **zero integration credentials** — no
-outbound network call is ever made for a Disabled integration. This preserves the
-keyless promise upheld by every prior phase: existing `RAG_Tool` / `Web_Search_Tool`
-and agent / multi-agent behavior are unchanged when no integration is configured.
-
-### Env-only `SecretStr` credentials + enable-toggles
-
-Each integration is enabled by providing its token through an environment-only
-`SecretStr` setting (redacted from logs, `repr`, and serialized output, never
-persisted). A separate non-secret enable-toggle (default `true`) lets an operator hold
-an integration Disabled even when its token is present. An integration is **Enabled**
-only when its credential is present **and** its enable-toggle is not `false`:
-
-```bash
-# In .env — leave blank (the default) to keep an integration Disabled.
-SLACK_BOT_TOKEN=          # enables the Slack tool
-GMAIL_TOKEN=              # enables the Gmail tool
-GOOGLE_DRIVE_TOKEN=       # enables the read-only Google Drive tool
-GITHUB_TOKEN=             # enables the GitHub tool
-
-# Per-integration enable toggles (default true; set false to force Disabled).
-SLACK_ENABLED=true
-GMAIL_ENABLED=true
-GOOGLE_DRIVE_ENABLED=true
-GITHUB_ENABLED=true
-
-# Bounded, keyless-safe execution limits shared by every integration tool.
-INTEGRATION_TIMEOUT_SECONDS=10
-INTEGRATION_MAX_RESULTS=20
-```
-
-See `.env.example` for the full list with keyless-safe defaults.
-
-### Introspecting which integrations are enabled
-
-An org-scoped, RBAC-gated endpoint reports each integration's enablement without ever
-exposing a credential value:
-
-```bash
-# Requires an authenticated principal with the `read` permission.
-curl http://localhost:8000/integrations/status
-# -> {"integrations":[{"name":"slack","enabled":false}, ... ]}
-```
-
-A request with no valid principal is rejected with `401`, and a principal lacking the
-`read` permission with `403`, both rendered through the uniform error envelope.
-
-
-## Deployment & Infrastructure (Phase 9)
-
-Phase 9 packages the whole platform — the FastAPI backend, the Vite/React frontend,
-PostgreSQL (pgvector), and Redis — into a production-grade, container-based deployment
-behind a single nginx reverse proxy. It is **infrastructure only**: it adds no
-application capability and changes no HTTP/SSE API contract, database-schema semantics,
-or business logic.
-
-### One-command local start (keyless)
-
-Bring up the **entire** platform — frontend, backend, PostgreSQL, and Redis behind the
-nginx entry point — with a single command and **zero credentials**:
+Bring up the **entire platform** — frontend, backend, PostgreSQL (pgvector), and
+Redis behind an nginx entry point — with a single command and **no credentials**:
 
 ```bash
 docker compose up --build
 ```
 
-Everything is reachable same-origin through the proxy at **http://localhost** — the SPA
-at `/` and the API/SSE under their route prefixes (`/health`, `/auth`, `/agent`,
-`/query`, …). No credential is required or committed: the stack runs under the keyless
-`local` profile (deterministic Fallback LLM, local embeddings, disabled web search, NoOp
-tracing). Schema migrations run automatically on backend startup, and the proxy only
-begins serving after every service reports healthy.
+Everything is reachable same-origin through the proxy at **http://localhost**:
+the SPA at `/`, and the API/SSE under their route prefixes (`/health`, `/auth`,
+`/query`, `/agent`, …). Schema migrations run automatically on backend startup,
+and the proxy only begins serving once every service reports healthy.
 
-Verify readiness through the proxy once it is up:
+Verify readiness through the proxy:
 
 ```bash
 curl http://localhost/health/ready
 # -> {"status":"ready","dependencies":{"database":"up","redis":"up"}}
 ```
 
-> The legacy `docker compose up` backend-only workflow (`http://localhost:8000`,
-> described under *Foundation* above) still works for backend-only development; the
-> command above is the full-platform one-command start.
+Then open **http://localhost**, create an organization on the register screen,
+and you are in the console — no API key required.
 
-### Production, HTTPS, images, and rollback
+> Liveness is at `http://localhost/health/live`. In this stack the API is reached
+> **through the proxy** (`http://localhost/...`); it is not published directly on
+> the host. For direct API access during development, run the backend outside
+> Docker (see [Local development](#local-development)).
+
+## Local development
+
+### Backend (without Docker)
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+
+cp .env.example .env          # keyless defaults; no secrets required
+uvicorn agentforge.main:app --reload --port 8000
+```
+
+Required non-secret settings are `DATABASE_URL` and `REDIS_URL`; every credential
+(`GROQ_API_KEY`, `HOSTED_EMBEDDING_API_KEY`, integration tokens) is **optional** —
+leave it blank to run keyless. If a required setting is missing, startup aborts
+and names the missing setting. Full matrix: **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)**.
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev                   # Vite dev server with HMR, defaults to the API at :8000
+```
+
+The only client configuration is the non-secret Backend_API base URL
+(`VITE_API_BASE_URL`, default `http://localhost:8000`). No credential is ever
+read by or embedded in the client. See **[frontend/README.md](frontend/README.md)**
+for the design system, layering, and full script list.
+
+## Testing & quality gates
+
+Both lanes are **keyless and deterministic** — no external service or credential.
+
+### Backend
+
+```bash
+pytest -m 'not integration' -q      # unit + property suites (the default gate)
+python scripts/check_openapi.py     # OpenAPI contract-drift check
+python scripts/scan_secrets.py      # repo-wide secret scan
+pytest -m integration               # Postgres/Redis/Docker-backed tests (stack up)
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm run ci      # codegen-check → lint → typecheck → unit tests → build → bundle-secret scan
+npm run e2e     # Playwright E2E in a real browser (see note below)
+```
+
+- **Unit / component / property** — Vitest + React Testing Library + MSW +
+  fast-check.
+- **Lint** — ESLint 9 (typescript-eslint + React Hooks + jsx-a11y).
+- **E2E** — Playwright drives the real production build in headless Chromium with
+  the API mocked at the network layer (auth, navigation, RAG, documents,
+  responsive, and WCAG 2.1 AA axe scans). First run:
+  `npx playwright install --with-deps chromium`.
+
+### Continuous integration
+
+`.github/workflows/ci-cd.yml` runs a strictly-chained pipeline —
+**test → e2e → build → publish → deploy** — where the keyless `test` and `e2e`
+gates must be green before any image is built, published, or deployed. See
+**[docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md)** for the pipeline detail.
+
+## Integrations (optional, disabled by default)
+
+Slack, Gmail, Google Drive, and GitHub are pluggable tools that the agent and
+multi-agent layers discover through the tool registry. Each is **Disabled** until
+its credential is supplied — no outbound call is ever made for a disabled
+integration — so the keyless promise holds. Enable one by setting its env-only
+token (e.g. `SLACK_BOT_TOKEN`) in `.env`; introspect enablement (RBAC-gated,
+never exposing a value) via `GET /integrations/status`.
+
+## Deployment
 
 Production runs the same images under a Compose overlay
-(`docker-compose.production.yml`) that selects the `production` profile, injects secrets
-from a Secret_Source at runtime, hardens credentials and restart policies, and terminates
-TLS at nginx. Images are published to GHCR under a three-tag strategy (`latest` + git SHA
-+ semver) so a deploy pins an immutable tag and a rollback is a single tag change plus
-`pull` + `up -d`.
+(`docker-compose.production.yml`) that selects the `production` profile, injects
+secrets at runtime, hardens restart policies, and terminates TLS at nginx. Images
+publish to GHCR under a three-tag strategy (`latest` + immutable git SHA +
+semver), so a deploy pins an immutable tag and a rollback is a single tag change
+plus `pull` + `up -d`.
 
-Full operator guides:
+- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — production deploy, HTTPS, the
+  frontend runtime-config mechanism, image tags, verification, and rollback.
+- **[docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md)** — topology, services/ports,
+  the env-var matrix, healthcheck/startup ordering, and the CI/CD pipeline.
 
-- **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)** — local start, production deploy under
-  the `production` profile, enabling HTTPS (mounting certificates), the frontend
-  Runtime_Config mechanism, the image-tag strategy, deployment verification, and the
-  rollback procedure.
-- **[docs/INFRASTRUCTURE.md](./docs/INFRASTRUCTURE.md)** — deployment topology, the
-  service list and ports, the env-var matrix (local vs. production), the
-  healthcheck/startup-ordering chain, the three images and their GHCR tags, and the
-  four-job CI/CD pipeline.
+## Repository layout
+
+```
+.
+├── src/agentforge/        # Backend: FastAPI app, RAG, agents, multi-agent,
+│                          #   integrations, enterprise auth/tenancy, adapters
+├── migrations/            # Additive SQL schema migrations (run on startup)
+├── scripts/               # OpenAPI drift check, secret scan, e2e verification
+├── frontend/              # React + Vite + TypeScript operator console
+│   ├── src/               #   pure-logic layer, typed API client, feature views
+│   └── e2e/               #   Playwright end-to-end suite
+├── nginx/                 # Reverse proxy image (same-origin SPA + API)
+├── docs/                  # Architecture, configuration, deployment, roadmap
+├── docker-compose.yml     # One-command full-platform (keyless) stack
+├── docker-compose.production.yml  # Production overlay (secrets, TLS, hardening)
+└── .github/workflows/     # CI/CD (test → e2e → build → publish → deploy)
+```
+
+## Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| `docker compose up` exits naming a service (e.g. `agentforge-postgres`) | That container failed its healthcheck. `docker compose logs <service>` shows why; the proxy waits for all services to be healthy before serving. |
+| `/health/ready` returns `503` / a dependency `down` | PostgreSQL or Redis is not reachable yet. Wait for startup, or check `DATABASE_URL` / `REDIS_URL`. |
+| Backend aborts on startup naming a missing setting | A required non-secret setting (`DATABASE_URL` / `REDIS_URL`) is unset. Copy `.env.example` to `.env`. |
+| Frontend shows a network error on every call | `VITE_API_BASE_URL` points at no running backend. Start the backend, or set the base URL to your API origin. |
+| `npm run e2e` fails to launch a browser | Run `npx playwright install --with-deps chromium` once to fetch the browser and OS libraries. |
+| An integration seems inactive | It is Disabled until its token is set **and** its enable-toggle is not `false`. Check `GET /integrations/status`. |
+
+## Security posture
+
+- **Keyless by default** — no credential is required to run or test; no secret is
+  committed. Every credential is an env-only `SecretStr`, redacted from logs and
+  serialized output.
+- **Automated secret scanning** — `scripts/scan_secrets.py` (sources, `.env`
+  examples, rendered config, and built image layers) and the frontend
+  `scan:bundle` (production bundle) both run in CI and must find nothing.
+- **Strict tenant isolation** — every tenant-owned store filters by `org_id`;
+  cross-tenant reads uniformly return `404`, never another org's data.
+
+## Documentation index
+
+- [Architecture overview](docs/ARCHITECTURE_OVERVIEW.md)
+- [Configuration reference](docs/CONFIGURATION.md)
+- [Feature inventory](docs/FEATURE_INVENTORY.md)
+- [Deployment guide](docs/DEPLOYMENT.md)
+- [Infrastructure & CI/CD](docs/INFRASTRUCTURE.md)
+- [Known limitations](docs/KNOWN_LIMITATIONS.md)
+- [Future roadmap](docs/FUTURE_ROADMAP.md)
+- [Frontend guide](frontend/README.md)
