@@ -28,11 +28,28 @@ export type ConfigEnv = { readonly VITE_API_BASE_URL?: string };
 
 const DEFAULT_BASE_URL = "http://localhost:8000";
 
-/** Trim a trailing slash so path joins are unambiguous. */
+/**
+ * Resolve the effective Backend_API base:
+ *
+ *  - `"/"` (or any value that is only slashes) → **same-origin**: an empty base
+ *    so the API_Client issues **relative** requests against the exact origin
+ *    that served the SPA. This is the correct mode behind a same-origin reverse
+ *    proxy (the bundled nginx) and works from ANY host — `localhost`,
+ *    `127.0.0.1`, a LAN IP, or a domain, over http or https — with no CORS. It
+ *    is the compose default, and is what prevents the "Unable to reach the
+ *    server" failure that a hardcoded `http://localhost` causes when the app is
+ *    opened from a different origin.
+ *  - a non-empty absolute URL → used verbatim (trailing slash trimmed), for
+ *    deployments where the API lives on a separate origin (CORS then applies).
+ *  - unset/empty → the documented dev default (`http://localhost:8000`), so
+ *    `npm run dev` targets a local backend with no configuration.
+ */
 function normalizeBaseUrl(raw: string | undefined): string {
   const value = (raw ?? "").trim();
-  const resolved = value.length > 0 ? value : DEFAULT_BASE_URL;
-  return resolved.endsWith("/") ? resolved.slice(0, -1) : resolved;
+  if (value.length === 0) return DEFAULT_BASE_URL;
+  // Same-origin: a bare "/" (or "///") means "relative to the serving origin".
+  if (/^\/+$/.test(value)) return "";
+  return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
 /** Shape of the runtime config global injected by the container entrypoint. */
