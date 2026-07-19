@@ -22,6 +22,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from agentforge.agent.orchestrator import extract_citations
+from agentforge.enterprise.tenancy import set_current_org
 from agentforge.streaming.base import (
     AgentRunInput,
     StreamEvent,
@@ -99,8 +100,22 @@ class SSE_Streaming_Service:
             )
 
     def iter_sse_frames(self, run_input: AgentRunInput) -> Iterator[str]:
-        """Render :meth:`run_stream` events as SSE frames for a StreamingResponse."""
-        for event in self.run_stream(run_input):
+        """Render :meth:`run_stream` events as SSE frames for a StreamingResponse.
+
+        Starlette advances synchronous response iterators in an AnyIO worker context.
+        Context-variable writes made while producing one frame do not flow back through
+        the event loop into the worker context used for the next frame. Re-publish the
+        explicit tenant before every nested-generator advance so streamed tool and trace
+        work remains scoped after each yield boundary.
+        """
+        events = self.run_stream(run_input)
+        while True:
+            if run_input.org_id is not None:
+                set_current_org(run_input.org_id)
+            try:
+                event = next(events)
+            except StopIteration:
+                return
             yield format_sse_frame(event)
 
     def _persist_final_answer(self, final_state, answer: str, org_id) -> None:
