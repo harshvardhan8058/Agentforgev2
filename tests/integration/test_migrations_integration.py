@@ -53,19 +53,21 @@ async def test_vector_column_matches_configured_dimension(engine):
     await run_migrations(engine, EMBEDDING_DIMENSION)
 
     async with engine.connect() as conn:
-        # pgvector stores the typmod as (dimension + 4); atttypmod - 4 == dimension.
         result = await conn.execute(
             text(
                 """
-                SELECT a.atttypmod
+                SELECT pg_catalog.format_type(a.atttypid, a.atttypmod)
                 FROM pg_attribute a
                 JOIN pg_class c ON c.oid = a.attrelid
-                WHERE c.relname = 'chunk_embeddings' AND a.attname = 'embedding'
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public'
+                  AND c.relname = 'chunk_embeddings'
+                  AND a.attname = 'embedding'
                 """
             )
         )
-        atttypmod = result.scalar_one()
-        assert atttypmod - 4 == EMBEDDING_DIMENSION
+        column_type = result.scalar_one()
+        assert column_type == f"vector({EMBEDDING_DIMENSION})"
 
 
 async def test_failed_migration_reports_identifier(engine, tmp_path):

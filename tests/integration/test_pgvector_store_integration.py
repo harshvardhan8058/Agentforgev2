@@ -36,16 +36,23 @@ def _unit_vector(index: int) -> list[float]:
     return vec
 
 
-async def _seed_document_and_chunks(engine, document_id: str, chunk_ids: list[str]):
+async def _seed_document_and_chunks(
+    engine, org_id: str, document_id: str, chunk_ids: list[str]
+):
     async with engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO organizations (id, name) VALUES (:id, :name)"),
+            {"id": org_id, "name": f"pgvector-test-{org_id}"},
+        )
         await conn.execute(
             text(
                 """
-                INSERT INTO documents (id, filename, content_type, size_bytes, status)
-                VALUES (:id, 'doc.txt', 'text/plain', 10, 'ingested')
+                INSERT INTO documents
+                    (id, org_id, filename, content_type, size_bytes, status)
+                VALUES (:id, :org_id, 'doc.txt', 'text/plain', 10, 'ingested')
                 """
             ),
-            {"id": document_id},
+            {"id": document_id, "org_id": org_id},
         )
         for idx, chunk_id in enumerate(chunk_ids):
             await conn.execute(
@@ -68,41 +75,86 @@ async def engine():
 
 
 async def test_pgvector_ordering_and_bounds(engine):
+    org_id = str(uuid.uuid4())
     document_id = str(uuid.uuid4())
     chunk_ids = [str(uuid.uuid4()) for _ in range(3)]
-    await _seed_document_and_chunks(engine, document_id, chunk_ids)
+    await _seed_document_and_chunks(engine, org_id, document_id, chunk_ids)
 
     store = Pgvector_Store(dim=EMBEDDING_DIMENSION, dsn=_dsn())
 
-    # chunk 0 == query direction (most similar); chunk 1 partially aligned; chunk 2
-    # orthogonal (least similar).
-    store.upsert(chunk_ids[0], document_id, _unit_vector(0))
-    partial = [0.0] * EMBEDDING_DIMENSION
-    partial[0] = 1.0
-    partial[1] = 1.0
-    store.upsert(chunk_ids[1], document_id, partial)
-    store.upsert(chunk_ids[2], document_id, _unit_vector(1))
+    try:
+        # chunk 0 == query direction (most similar); chunk 1 partially aligned;
+        # chunk 2 orthogonal (least similar).
+        store.upsert(chunk_ids[0], document_id, _unit_vector(0))
+        partial = [0.0] * EMBEDDING_DIMENSION
+        partial[0] = 1.0
+        partial[1] = 1.0
+        store.upsert(chunk_ids[1], document_id, partial)
+        store.upsert(chunk_ids[2], document_id, _unit_vector(1))
 
-    query = _unit_vector(0)
+        async with engine.connect() as conn:
+            result = await conn.execute(text("SELECT count(*) FROM chunk_embeddings"))
+            stored_count = result.scalar_one()
 
-    # Bound: request more than stored -> exactly stored_count returned (Req 10.6).
-    all_matches = store.query(query, 10)
-    assert len(all_matches) == 3
+        query = _unit_vector(0)
 
-    # Ordering: descending similarity (Req 10.5). chunk 0 is the most similar.
-    scores = [m.score for m in all_matches]
-    assert all(scores[i] >= scores[i + 1] for i in range(len(scores) - 1))
-    assert all_matches[0].chunk_id == chunk_ids[0]
-    assert all_matches[0].document_id == document_id
-
-    # Bound: request fewer than stored -> exactly k returned (Req 10.5).
-    top2 = store.query(query, 2)
-    assert len(top2) == 2
-    assert top2[0].chunk_id == chunk_ids[0]
-
-    # Cleanup so re-runs stay deterministic.
-    store.delete_document(document_id)
-    async with engine.begin() as conn:
-        await conn.execute(
-            text("DELETE FROM documents WHERE id = :id"), {"id": document_id}
+        # Bound: requesting more than stored returns exactly the stored count.
+        all_matches = store.query(query, stored_count + 10)
+        assert len(all_matches) == stored_count
+        assert all(
+            all_matches[i].score >= all_matches[i + 1].score
+            for i in range(len(all_matches) - 1)
         )
+
+        # Verify this fixture's rows independently of any pre-existing shared rows.
+        seeded_matches = [m for m in all_matches if m.chunk_id in chunk_ids]
+        assert len(seeded_matches) == 3
+        assert seeded_matches[0].chunk_id == chunk_ids[0]
+        assert seeded_matches[0].document_id == document_id
+        seeded_scores = [m.score for m in seeded_matches]
+        assert all(
+            seeded_scores[i] >= seeded_scores[i + 1]
+            for i in range(len(seeded_scores) - 1)
+        )
+
+        # Bound: requesting fewer than stored returns exactly k globally ordered rows.
+        top2 = store.query(query, 2)
+        assert len(top2) == 2
+        assert top2[0].score >= top2[1].score
+    finally:
+        # The organization cascade removes the document, chunks, and embeddings.
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM organizations WHERE id = :id"), {"id": org_id}
+            )
+
+
+
+async def test_pgvector_tenant_scope_filters_before_top_k(engine):
+    org_a = str(uuid.uuid4())
+    org_b = str(uuid.uuid4())
+    document_a = str(uuid.uuid4())
+    document_b = str(uuid.uuid4())
+    chunk_a = str(uuid.uuid4())
+    chunk_b = str(uuid.uuid4())
+
+    try:
+        await _seed_document_and_chunks(engine, org_a, document_a, [chunk_a])
+        await _seed_document_and_chunks(engine, org_b, document_b, [chunk_b])
+
+        store = Pgvector_Store(dim=EMBEDDING_DIMENSION, dsn=_dsn())
+        store.upsert(chunk_a, document_a, _unit_vector(0))
+        store.upsert(chunk_b, document_b, _unit_vector(1))
+
+        # Filtering must happen before LIMIT so org B receives its own result even
+        # though org A's vector is more similar to the query.
+        matches = store.query_for_org(_unit_vector(0), 1, uuid.UUID(org_b))
+        assert [(m.chunk_id, m.document_id) for m in matches] == [
+            (chunk_b, document_b)
+        ]
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM organizations WHERE id = ANY(:ids)"),
+                {"ids": [org_a, org_b]},
+            )

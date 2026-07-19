@@ -14,6 +14,8 @@ async engine used elsewhere in the app is reserved for health checks and migrati
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from agentforge.vectorstore.base import StoredMatch, Vector_Store
 
 
@@ -80,6 +82,40 @@ class Pgvector_Store(Vector_Store):
                 LIMIT %s
                 """,
                 (vector, vector, n),
+            ).fetchall()
+
+        return [
+            StoredMatch(chunk_id=str(r[0]), document_id=str(r[1]), score=float(r[2]))
+            for r in rows
+        ]
+
+    def query_for_org(
+        self, embedding: list[float], k: int, org_id: UUID
+    ) -> list[StoredMatch]:
+        """Return tenant-owned matches, applying the organization filter before LIMIT."""
+        if k <= 0:
+            return []
+
+        import numpy as np
+
+        vector = np.array(embedding, dtype=np.float32)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                WITH tenant_embeddings AS MATERIALIZED (
+                    SELECT ce.chunk_id, ce.document_id, ce.embedding
+                    FROM chunk_embeddings ce
+                    JOIN documents d ON d.id = ce.document_id
+                    WHERE d.org_id = %s
+                )
+                SELECT chunk_id,
+                       document_id,
+                       1 - (embedding <=> %s) AS score
+                FROM tenant_embeddings
+                ORDER BY embedding <=> %s ASC
+                LIMIT %s
+                """,
+                (str(org_id), vector, vector, k),
             ).fetchall()
 
         return [

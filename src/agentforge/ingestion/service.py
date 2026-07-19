@@ -142,8 +142,13 @@ class Ingestion_Service:
         # 8. Commit: write vectors then persist records. Roll back vectors on failure so
         #    the "persist no Chunks" guarantee holds even on a late write error.
         try:
+            tenant_upsert = getattr(self._vector_store, "upsert_for_org", None)
             for chunk, vector in zip(chunks, vectors):
-                self._vector_store.upsert(chunk.id, document_id, vector)
+                if callable(tenant_upsert):
+                    tenant_upsert(chunk.id, document_id, vector, org_id)
+                else:
+                    # Compatibility for older duck-typed Vector_Store adapters.
+                    self._vector_store.upsert(chunk.id, document_id, vector)
             self._sink.persist(org_id, document, chunks)
         except Exception:
             self._vector_store.delete_document(document_id)
