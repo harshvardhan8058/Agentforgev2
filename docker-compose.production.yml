@@ -38,8 +38,11 @@ services:
     image: ghcr.io/harshvardhan8058/agentforge-frontend:${AGENTFORGE_IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
-      # In production the SPA base URL is supplied at container start (Runtime_Config).
-      API_BASE_URL: ${API_BASE_URL:-}
+      # Runtime_Config (supplied at container start). Default "/" = SAME-ORIGIN relative,
+      # correct when the SPA and API are served behind this same TLS proxy — it works for
+      # any domain with no CORS and no rebuild. Set a full scheme://host only when the API
+      # is on a SEPARATE origin from the SPA (Req 8.4).
+      API_BASE_URL: ${API_BASE_URL:-/}
 
   # Optional one-shot migration runner (the documented scale-out option, Req 13.5).
   # Runs the EXISTING additive runner once and exits 0; the api gates on its success.
