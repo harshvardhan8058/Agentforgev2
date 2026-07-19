@@ -33,12 +33,17 @@
     <!--
       Runtime_Config (deployment Req 8.1-8.4). In a deployed Frontend_Image the
       container entrypoint renders /config.js from API_BASE_URL, setting
-      window.__AGENTFORGE_CONFIG__ before the app module runs (classic scripts
-      execute before deferred module scripts). In Vite dev this file is absent and
-      is simply skipped, so resolveConfig() falls back to the build-time value /
-      documented default and dev is unaffected.
+      window.__AGENTFORGE_CONFIG__ before the app module runs. The tag is written
+      by this inline bootstrap (rather than a static <script src>) so the bundler
+      does not attempt to resolve the runtime-only file at build time; a
+      document.write'd classic script is parser-blocking and therefore still
+      executes before the deferred module below. In Vite dev the file is absent
+      and the load simply no-ops, so resolveConfig() falls back to the build-time
+      value / documented default and dev is unaffected.
     -->
-    <script src="/config.js"></script>
+    <script>
+      document.write('<script src="/config.js"><\/script>');
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

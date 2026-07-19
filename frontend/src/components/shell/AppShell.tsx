@@ -88,6 +88,15 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
 
   return (
     <div className="flex min-h-screen bg-bg text-text" data-testid="app-shell">
+      {/* Skip link (WCAG 2.4.1 Bypass Blocks): first focusable element, visible
+          only when focused, jumps keyboard/AT users past the nav to content. */}
+      <a
+        href="#main-content"
+        data-testid="skip-to-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-fg focus:shadow-elevation-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+      >
+        Skip to main content
+      </a>
       {/* Persistent sidebar (md+) */}
       {isDesktop && (
         <aside
@@ -172,10 +181,13 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
           </div>
         </header>
 
-        {/* Routed content — reading max-width honored, dashboards may opt wider. */}
+        {/* Routed content — reading max-width honored, dashboards may opt wider.
+            `id`/`tabIndex` make it the skip-link + route-change focus target. */}
         <main
+          id="main-content"
+          tabIndex={-1}
           data-testid="shell-content"
-          className="mx-auto w-full max-w-screen-xl flex-1 p-4 md:p-6 2xl:max-w-screen-2xl"
+          className="mx-auto w-full max-w-screen-xl flex-1 p-4 focus:outline-none md:p-6 2xl:max-w-screen-2xl"
         >
           {children}
         </main>

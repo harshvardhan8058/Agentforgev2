@@ -9,6 +9,12 @@ dist-ssr/
 .vite/
 coverage/
 
+# Playwright E2E artifacts
+playwright-report/
+test-results/
+.playwright/
+blob-report/
+
 # Local env files (only .env.example is committed)
 .env
 .env.*

@@ -90,9 +90,52 @@ jobs:
         working-directory: ./frontend
         run: npm ci
 
-      - name: Frontend keyless CI lane (codegen check, typecheck, tests, build, bundle-secret scan)
+      - name: Frontend keyless CI lane (codegen check, lint, typecheck, tests, build, bundle-secret scan)
         working-directory: ./frontend
         run: npm run ci
+
+  # ---------------------------------------------------------------------------
+  # 1b) e2e — keyless, credential-free browser end-to-end gate.
+  #     Runs the REAL production build in headless Chromium with the Backend_API
+  #     mocked at the network layer (page.route) — no live backend, database, or
+  #     credential. Covers the auth gate, navigation/routing, RAG, documents, the
+  #     responsive shell, and full-page axe accessibility scans (WCAG 2.1 AA).
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: e2e (keyless, Playwright)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Install Playwright browser (chromium) + OS deps
+        working-directory: ./frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E (builds + previews the app, mocks the API)
+        working-directory: ./frontend
+        run: npm run e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
 
   # ---------------------------------------------------------------------------
   # 2) build — build all three images to verify they build (no push).
@@ -101,7 +144,7 @@ jobs:
   build:
     name: build (${{ matrix.image }})
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, e2e]
     permissions:
       contents: read
     strategy:

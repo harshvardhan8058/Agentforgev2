@@ -13,7 +13,6 @@ import { useReducedMotion } from "framer-motion";
  * force all motion primitives to render instantly, independent of matchMedia.
  */
 declare global {
-  // eslint-disable-next-line no-var
   var __AF_INSTANT_MOTION__: boolean | undefined;
 }
 
