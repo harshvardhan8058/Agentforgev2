@@ -16,17 +16,21 @@
 :root,
 :root[data-theme="dark"] {
   /* Color — semantic roles (dark, default) */
-  --color-bg: #0a0a0f;
-  --color-bg-subtle: #101018;
-  --color-surface: #16161f;
-  --color-surface-raised: #1e1e2b;
-  --color-surface-overlay: rgba(24, 24, 34, 0.72);
-  --color-border: #2a2a38;
+  --color-bg: #08080c;
+  --color-bg-subtle: #0e0e16;
+  --color-surface: #14141d;
+  --color-surface-raised: #1c1c28;
+  --color-surface-hover: #232333;
+  --color-surface-overlay: rgba(20, 20, 29, 0.72);
+  --color-border: #26263440;
   --color-border-strong: #3b3b50;
-  --color-text: #f4f4fa;
-  --color-text-muted: #a2a2ba;
-  --color-text-inverted: #0a0a0f;
+  --color-text: #f5f5fb;
+  --color-text-muted: #9a9ab4;
+  --color-text-subtle: #6c6c86;
+  --color-text-inverted: #08080c;
   --color-primary: #6366f1;
+  --color-primary-hover: #7c7ff5;
+  --color-primary-subtle: rgba(99, 102, 241, 0.14);
   --color-primary-fg: #ffffff;
   --color-accent: #22d3ee;
   --color-success: #22c55e;
@@ -44,22 +48,47 @@
 
   /* Glass fallback (solid, WCAG-AA safe) used where backdrop-filter is
      unsupported — see @supports rule in globals.css */
-  --color-surface-overlay-solid: #1e1e2b;
+  --color-surface-overlay-solid: #1c1c28;
+
+  /* Brand gradients — decorative, used sparingly on hero/brand surfaces */
+  --gradient-brand: linear-gradient(135deg, #6366f1 0%, #22d3ee 100%);
+  --gradient-brand-soft: linear-gradient(
+    135deg,
+    rgba(99, 102, 241, 0.16) 0%,
+    rgba(34, 211, 238, 0.1) 100%
+  );
+  --gradient-surface: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(255, 255, 255, 0) 100%
+  );
+
+  /* Elevation — dark mode leans on layered surfaces + deep, soft shadows */
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --elevation-2: 0 2px 4px rgba(0, 0, 0, 0.4), 0 6px 16px rgba(0, 0, 0, 0.36);
+  --elevation-3: 0 8px 20px rgba(0, 0, 0, 0.44), 0 16px 40px rgba(0, 0, 0, 0.4);
+  --elevation-4: 0 16px 40px rgba(0, 0, 0, 0.5), 0 32px 72px rgba(0, 0, 0, 0.46);
+  --shadow-focus: 0 0 0 3px rgba(129, 140, 248, 0.35);
 }
 
 :root[data-theme="light"] {
   /* Color — semantic roles (light) */
-  --color-bg: #f7f7fb;
-  --color-bg-subtle: #eeeef4;
+  --color-bg: #f6f7fb;
+  --color-bg-subtle: #eceef4;
   --color-surface: #ffffff;
   --color-surface-raised: #ffffff;
-  --color-surface-overlay: rgba(255, 255, 255, 0.72);
-  --color-border: #e2e2ec;
-  --color-border-strong: #c7c7d6;
-  --color-text: #14141c;
-  --color-text-muted: #55556a;
+  --color-surface-hover: #f1f2f8;
+  --color-surface-overlay: rgba(255, 255, 255, 0.74);
+  --color-border: #e4e5ee;
+  --color-border-strong: #c7c8d6;
+  --color-text: #12131c;
+  --color-text-muted: #52546a;
+  --color-text-subtle: #83849a;
   --color-text-inverted: #ffffff;
   --color-primary: #4f46e5;
+  --color-primary-hover: #4338ca;
+  --color-primary-subtle: rgba(79, 70, 229, 0.1);
   --color-primary-fg: #ffffff;
   --color-accent: #0891b2;
   --color-success: #16a34a;
@@ -74,27 +103,41 @@
   --color-role-critic: #e11d48;
 
   --color-surface-overlay-solid: #ffffff;
+
+  --gradient-brand: linear-gradient(135deg, #4f46e5 0%, #0891b2 100%);
+  --gradient-brand-soft: linear-gradient(
+    135deg,
+    rgba(79, 70, 229, 0.1) 0%,
+    rgba(8, 145, 178, 0.08) 100%
+  );
+  --gradient-surface: linear-gradient(
+    180deg,
+    rgba(18, 19, 28, 0.015) 0%,
+    rgba(18, 19, 28, 0) 100%
+  );
+
+  /* Elevation — light mode uses softer, cooler shadows */
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(18, 19, 28, 0.06), 0 1px 3px rgba(18, 19, 28, 0.08);
+  --elevation-2: 0 2px 4px rgba(18, 19, 28, 0.06), 0 8px 20px rgba(18, 19, 28, 0.1);
+  --elevation-3: 0 8px 20px rgba(18, 19, 28, 0.1), 0 20px 44px rgba(18, 19, 28, 0.12);
+  --elevation-4: 0 16px 40px rgba(18, 19, 28, 0.14), 0 36px 80px rgba(18, 19, 28, 0.16);
+  --shadow-focus: 0 0 0 3px rgba(79, 70, 229, 0.28);
 }
 
 :root {
-  /* Elevation — dark mode leans on layered surfaces + subtle borders */
-  --elevation-0: none;
-  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --elevation-2: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --elevation-3: 0 12px 32px rgba(0, 0, 0, 0.45);
-  --elevation-4: 0 24px 64px rgba(0, 0, 0, 0.5);
-
   /* Radius */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 13px;
   --radius-xl: 20px;
+  --radius-2xl: 28px;
   --radius-full: 9999px;
 
   /* Blur — for glass overlay surfaces */
   --blur-sm: 4px;
-  --blur-md: 10px;
-  --blur-lg: 20px;
+  --blur-md: 12px;
+  --blur-lg: 24px;
 
   /* Spacing scale — 4px base */
   --space-0_5: 0.125rem; /* 2px */
@@ -133,6 +176,11 @@
   --leading-3xl: 2.25rem;
   --text-4xl: 2.25rem;
   --leading-4xl: 2.5rem;
+
+  /* Letter spacing — tighter for large display type */
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
 
   /* Motion — durations + easings */
   --motion-fast: 120ms;

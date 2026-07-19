@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardList } from "lucide-react";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
@@ -108,12 +109,12 @@ export function EvaluationsView(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-6" data-testid="evaluations-view">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-text">Evaluations</h1>
-        <p className="text-sm text-text-muted">
-          Create datasets, run evaluators, and inspect scores.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Platform"
+        icon={ClipboardList}
+        title="Evaluations"
+        description="Create datasets, run evaluators, and inspect scores."
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Datasets: create + list. */}

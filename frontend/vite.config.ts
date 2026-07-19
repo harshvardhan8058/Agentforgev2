@@ -10,6 +10,58 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  build: {
+    // Split large third-party libraries into separate, long-term-cacheable
+    // vendor chunks so the app entry stays lean and a dependency bump only
+    // invalidates its own chunk. Route code is additionally split via
+    // React.lazy in the router; the editor (Monaco) and charts (Recharts) are
+    // dynamically imported at their use sites.
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (/[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id)) {
+            return "vendor-react";
+          }
+          if (id.includes("@radix-ui") || id.includes("cmdk")) return "vendor-radix";
+          if (id.includes("@tanstack")) return "vendor-query";
+          if (id.includes("framer-motion")) return "vendor-motion";
+          if (id.includes("recharts") || id.includes("d3-") || id.includes("victory")) {
+            return "vendor-charts";
+          }
+          if (
+            id.includes("react-markdown") ||
+            id.includes("rehype") ||
+            id.includes("remark") ||
+            id.includes("hast") ||
+            id.includes("mdast") ||
+            id.includes("micromark") ||
+            id.includes("highlight.js") ||
+            id.includes("lowlight") ||
+            id.includes("unified") ||
+            id.includes("unist") ||
+            id.includes("vfile") ||
+            id.includes("property-information") ||
+            id.includes("character-entities") ||
+            id.includes("decode-named-character-reference") ||
+            id.includes("comma-separated-tokens") ||
+            id.includes("space-separated-tokens") ||
+            id.includes("web-namespaces") ||
+            id.includes("html-void-elements") ||
+            id.includes("longest-streak") ||
+            id.includes("zwitch") ||
+            id.includes("trim-lines") ||
+            id.includes("devlop")
+          ) {
+            return "vendor-markdown";
+          }
+          if (id.includes("lucide-react")) return "vendor-icons";
+          return "vendor";
+        },
+      },
+    },
+  },
   test: {
     globals: true,
     environment: "jsdom",

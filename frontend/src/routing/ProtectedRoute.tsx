@@ -6,10 +6,13 @@
  * unauthenticated views (Req 2.5, 3.2). Otherwise it renders the nested route
  * via `<Outlet />`.
  */
+import { Suspense } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 
 import { useSession } from "../auth/useSession";
 import { AppShell } from "../components/shell/AppShell";
+import { RouteTransition } from "./RouteTransition";
+import { PageFallback } from "./PageFallback";
 
 export function ProtectedRoute(): JSX.Element {
   const { isAuthenticated } = useSession();
@@ -18,7 +21,11 @@ export function ProtectedRoute(): JSX.Element {
   }
   return (
     <AppShell>
-      <Outlet />
+      <RouteTransition>
+        <Suspense fallback={<PageFallback />}>
+          <Outlet />
+        </Suspense>
+      </RouteTransition>
     </AppShell>
   );
 }

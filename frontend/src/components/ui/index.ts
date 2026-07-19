@@ -12,6 +12,10 @@ export { Card, CardHeader, CardTitle, CardContent } from "./Card";
 export { Badge } from "./Badge";
 export type { BadgeTone } from "./Badge";
 export { Skeleton } from "./Skeleton";
+export { PageHeader } from "./PageHeader";
+export { StatCard } from "./StatCard";
+export type { StatTone } from "./StatCard";
+export { Kbd } from "./Kbd";
 export {
   Dialog,
   DialogTrigger,

@@ -17,6 +17,7 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GitCompare, SlidersHorizontal } from "lucide-react";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
@@ -159,12 +160,12 @@ export function PromptRegistryView(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-6" data-testid="prompts-view">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-text">Prompts</h1>
-        <p className="text-sm text-text-muted">
-          Browse the immutable versioned registry, diff versions, and render prompts.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Platform"
+        icon={SlidersHorizontal}
+        title="Prompts"
+        description="Browse the immutable versioned registry, diff versions, and render prompts."
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,16rem)_1fr]">
         {/* Left: template list + create form. */}

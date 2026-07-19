@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
@@ -72,12 +73,12 @@ export function GuardrailsView(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-6" data-testid="guardrails-view">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-text">Guardrails</h1>
-        <p className="text-sm text-text-muted">
-          Inspect the active safety pipeline and evaluate content against it.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Platform"
+        icon={ShieldCheck}
+        title="Guardrails"
+        description="Inspect the active safety pipeline and evaluate content against it."
+      />
 
       <Card data-testid="guardrails-config-card">
         <CardHeader>

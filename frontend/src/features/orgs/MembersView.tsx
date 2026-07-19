@@ -22,6 +22,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Plus, UserPlus, Users } from "lucide-react";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
@@ -137,15 +138,12 @@ export function MembersView(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-6" data-testid="members-view">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-text">
-          Members &amp; Teams
-        </h1>
-        <p className="text-sm text-text-muted">
-          Add members to your organization, create teams, and assign members to
-          teams.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Administration"
+        icon={Users}
+        title="Members & Teams"
+        description="Add members to your organization, create teams, and assign members to teams."
+      />
 
       <Can permission={MANAGE_MEMBERS}>
         <div className="grid gap-4 lg:grid-cols-2">

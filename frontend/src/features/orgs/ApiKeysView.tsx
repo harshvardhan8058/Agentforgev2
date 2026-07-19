@@ -19,6 +19,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, KeyRound, Plus, Trash2 } from "lucide-react";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
@@ -169,13 +170,12 @@ export function ApiKeysView(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-6" data-testid="api-keys-view">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-text">API Keys</h1>
-        <p className="text-sm text-text-muted">
-          Issue and revoke org-scoped API keys. A key's secret is shown once at
-          creation and never stored.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Administration"
+        icon={KeyRound}
+        title="API Keys"
+        description="Issue and revoke org-scoped API keys. A key's secret is shown once at creation and never stored."
+      />
 
       <Can permission={MANAGE_API_KEYS}>
         <Card>

@@ -19,13 +19,17 @@ export type SemanticRole =
   | "bg-subtle"
   | "surface"
   | "surface-raised"
+  | "surface-hover"
   | "surface-overlay"
   | "border"
   | "border-strong"
   | "text"
   | "text-muted"
+  | "text-subtle"
   | "text-inverted"
   | "primary"
+  | "primary-hover"
+  | "primary-subtle"
   | "primary-fg"
   | "accent"
   | "success"
@@ -52,17 +56,21 @@ export const FALLBACK_TOKEN = "#71717a" as const;
  */
 export const TOKENS: Record<ThemeName, Record<SemanticRole, string>> = {
   dark: {
-    bg: "#0a0a0f",
-    "bg-subtle": "#101018",
-    surface: "#16161f",
-    "surface-raised": "#1e1e2b",
-    "surface-overlay": "rgba(24, 24, 34, 0.72)",
-    border: "#2a2a38",
+    bg: "#08080c",
+    "bg-subtle": "#0e0e16",
+    surface: "#14141d",
+    "surface-raised": "#1c1c28",
+    "surface-hover": "#232333",
+    "surface-overlay": "rgba(20, 20, 29, 0.72)",
+    border: "#26263440",
     "border-strong": "#3b3b50",
-    text: "#f4f4fa",
-    "text-muted": "#a2a2ba",
-    "text-inverted": "#0a0a0f",
+    text: "#f5f5fb",
+    "text-muted": "#9a9ab4",
+    "text-subtle": "#6c6c86",
+    "text-inverted": "#08080c",
     primary: "#6366f1",
+    "primary-hover": "#7c7ff5",
+    "primary-subtle": "rgba(99, 102, 241, 0.14)",
     "primary-fg": "#ffffff",
     accent: "#22d3ee",
     success: "#22c55e",
@@ -76,17 +84,21 @@ export const TOKENS: Record<ThemeName, Record<SemanticRole, string>> = {
     "role-critic": "#f43f5e",
   },
   light: {
-    bg: "#f7f7fb",
-    "bg-subtle": "#eeeef4",
+    bg: "#f6f7fb",
+    "bg-subtle": "#eceef4",
     surface: "#ffffff",
     "surface-raised": "#ffffff",
-    "surface-overlay": "rgba(255, 255, 255, 0.72)",
-    border: "#e2e2ec",
-    "border-strong": "#c7c7d6",
-    text: "#14141c",
-    "text-muted": "#55556a",
+    "surface-hover": "#f1f2f8",
+    "surface-overlay": "rgba(255, 255, 255, 0.74)",
+    border: "#e4e5ee",
+    "border-strong": "#c7c8d6",
+    text: "#12131c",
+    "text-muted": "#52546a",
+    "text-subtle": "#83849a",
     "text-inverted": "#ffffff",
     primary: "#4f46e5",
+    "primary-hover": "#4338ca",
+    "primary-subtle": "rgba(79, 70, 229, 0.1)",
     "primary-fg": "#ffffff",
     accent: "#0891b2",
     success: "#16a34a",
