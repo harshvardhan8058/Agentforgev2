@@ -19,6 +19,7 @@ import {
   type KnownOrg,
 } from "../../auth/orgTokenStore";
 import { OPEN_ORG_SWITCHER_EVENT } from "../../hooks/useCommandPalette";
+import { orgMonogram, orgMonogramStyle } from "../../lib/orgIdentity";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,27 +63,50 @@ export function OrgSwitcher(): JSX.Element | null {
       <DropdownMenuTrigger
         data-testid="org-switcher-trigger"
         aria-label="Switch organization"
-        className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        title={orgId}
+        className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-text transition-colors hover:border-border-strong hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
-        <Building2 className="h-4 w-4 text-text-muted" aria-hidden="true" />
-        <span className="max-w-[10rem] truncate" data-testid="org-switcher-current">
+        <span
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[0.65rem] font-semibold"
+          style={orgMonogramStyle(orgId)}
+          aria-hidden="true"
+        >
+          {orgMonogram(orgId)}
+        </span>
+        <span
+          className="hidden max-w-[10rem] truncate sm:inline"
+          data-testid="org-switcher-current"
+        >
           {orgId}
         </span>
-        <ChevronsUpDown className="h-3.5 w-3.5 text-text-muted" aria-hidden="true" />
+        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden="true" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" data-testid="org-switcher-menu">
+      <DropdownMenuContent align="start" data-testid="org-switcher-menu" className="min-w-[15rem]">
+        <div className="flex items-center gap-2 px-2 pb-1.5 pt-1 text-xs font-medium uppercase tracking-wide text-text-subtle">
+          <Building2 className="h-3.5 w-3.5" aria-hidden="true" />
+          Organizations
+        </div>
         {orgs.map((org) => (
           <DropdownMenuItem
             key={org.orgId}
             data-testid={`org-option-${org.orgId}`}
             onSelect={() => selectOrg(org.orgId)}
           >
+            <span
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[0.65rem] font-semibold"
+              style={orgMonogramStyle(org.orgId)}
+              aria-hidden="true"
+            >
+              {orgMonogram(org.orgId)}
+            </span>
+            <span className="min-w-0 flex-1 truncate" title={org.orgId}>
+              {org.orgId}
+            </span>
+            <span className="shrink-0 text-xs capitalize text-text-muted">{org.role}</span>
             <Check
-              className={org.orgId === orgId ? "h-4 w-4 text-primary" : "h-4 w-4 opacity-0"}
+              className={org.orgId === orgId ? "h-4 w-4 shrink-0 text-primary" : "h-4 w-4 shrink-0 opacity-0"}
               aria-hidden="true"
             />
-            <span className="truncate">{org.orgId}</span>
-            <span className="ml-auto text-xs capitalize text-text-muted">{org.role}</span>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

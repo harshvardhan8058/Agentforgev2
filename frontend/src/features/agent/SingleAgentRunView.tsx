@@ -17,6 +17,7 @@
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Bot, PlayCircle, Radio, StopCircle } from "lucide-react";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
@@ -145,15 +146,12 @@ export function SingleAgentRunView(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-6" data-testid="agent-view">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-text">
-          Agent Runs
-        </h1>
-        <p className="text-sm text-text-muted">
-          Run a single agent and watch its reasoning stream live, or run it to
-          completion.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Agents"
+        icon={Bot}
+        title="Agent Runs"
+        description="Run a single agent and watch its reasoning stream live, or run it to completion."
+      />
 
       <Can permission="run_agents">
         <Card data-testid="agent-form-card">

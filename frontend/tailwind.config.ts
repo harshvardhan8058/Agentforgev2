@@ -31,6 +31,7 @@ const config: Config = {
         surface: {
           DEFAULT: "var(--color-surface)",
           raised: "var(--color-surface-raised)",
+          hover: "var(--color-surface-hover)",
           overlay: "var(--color-surface-overlay)",
         },
         border: {
@@ -40,10 +41,13 @@ const config: Config = {
         text: {
           DEFAULT: "var(--color-text)",
           muted: "var(--color-text-muted)",
+          subtle: "var(--color-text-subtle)",
           inverted: "var(--color-text-inverted)",
         },
         primary: {
           DEFAULT: "var(--color-primary)",
+          hover: "var(--color-primary-hover)",
+          subtle: "var(--color-primary-subtle)",
           fg: "var(--color-primary-fg)",
         },
         accent: "var(--color-accent)",
@@ -62,7 +66,18 @@ const config: Config = {
         md: "var(--radius-md)",
         lg: "var(--radius-lg)",
         xl: "var(--radius-xl)",
+        "2xl": "var(--radius-2xl)",
         full: "var(--radius-full)",
+      },
+      backgroundImage: {
+        "gradient-brand": "var(--gradient-brand)",
+        "gradient-brand-soft": "var(--gradient-brand-soft)",
+        "gradient-surface": "var(--gradient-surface)",
+      },
+      letterSpacing: {
+        tight: "var(--tracking-tight)",
+        normal: "var(--tracking-normal)",
+        wide: "var(--tracking-wide)",
       },
       boxShadow: {
         "elevation-0": "var(--elevation-0)",
@@ -70,6 +85,7 @@ const config: Config = {
         "elevation-2": "var(--elevation-2)",
         "elevation-3": "var(--elevation-3)",
         "elevation-4": "var(--elevation-4)",
+        focus: "var(--shadow-focus)",
       },
       blur: {
         sm: "var(--blur-sm)",

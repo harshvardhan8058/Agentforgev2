@@ -9,13 +9,18 @@ import { cn } from "../../lib/cn";
 export function Card({
   className,
   raised = false,
+  interactive = false,
   ...rest
-}: HTMLAttributes<HTMLDivElement> & { raised?: boolean }): JSX.Element {
+}: HTMLAttributes<HTMLDivElement> & {
+  raised?: boolean;
+  interactive?: boolean;
+}): JSX.Element {
   return (
     <div
       className={cn(
         "rounded-lg border border-border bg-surface",
         raised ? "bg-surface-raised shadow-elevation-2" : "shadow-elevation-1",
+        interactive && "af-interactive cursor-pointer",
         className,
       )}
       {...rest}

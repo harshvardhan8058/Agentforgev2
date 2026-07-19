@@ -18,6 +18,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Search, Sparkles } from "lucide-react";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
@@ -76,15 +77,12 @@ export function RagQueryView(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-6" data-testid="query-view">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-text">
-          Query
-        </h1>
-        <p className="text-sm text-text-muted">
-          Ask a grounded question against your organization&apos;s corpus and get
-          a cited answer.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Retrieval"
+        icon={Search}
+        title="Query"
+        description="Ask a grounded question against your organization's corpus and get a cited answer."
+      />
 
       <Can permission="run_agents">
         <Card data-testid="query-form-card">

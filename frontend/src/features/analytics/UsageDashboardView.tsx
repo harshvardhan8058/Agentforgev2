@@ -18,6 +18,7 @@
 import { Suspense, lazy, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart3 } from "lucide-react";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
@@ -90,12 +91,12 @@ export function UsageDashboardView(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-6" data-testid="analytics-view">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-text">Analytics</h1>
-        <p className="text-sm text-text-muted">
-          Token usage and cost for your organization.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Platform"
+        icon={BarChart3}
+        title="Analytics"
+        description="Token usage and cost for your organization."
+      />
 
       {!permitted && (
         <EmptyState

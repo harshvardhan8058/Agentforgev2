@@ -25,6 +25,7 @@
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ListTree, PlayCircle, Radio, Sparkles, StopCircle } from "lucide-react";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
@@ -130,16 +131,12 @@ export function MultiAgentRunView(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-6" data-testid="multi-agent-view">
-      <header className="flex flex-col gap-1">
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-text">
-          <Sparkles className="h-6 w-6 text-primary" aria-hidden="true" />
-          Multi-Agent Runs
-        </h1>
-        <p className="text-sm text-text-muted">
-          Launch a Planner → Researcher → Writer → Critic collaboration, watch
-          each role stream, and act on approval checkpoints.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Agents"
+        icon={Sparkles}
+        title="Multi-Agent Runs"
+        description="Launch a Planner → Researcher → Writer → Critic collaboration, watch each role stream, and act on approval checkpoints."
+      />
 
       <Can permission="run_agents">
         <Card data-testid="multi-form-card">

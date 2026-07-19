@@ -20,6 +20,7 @@ import { useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { MessagesSquare, Plus } from "lucide-react";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
@@ -67,15 +68,12 @@ function StartConversation(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-6" data-testid="conversation-view">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-text">
-          Conversations
-        </h1>
-        <p className="text-sm text-text-muted">
-          Start a conversation to preserve multi-turn context across agent and
-          multi-agent runs.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Workspace"
+        icon={MessagesSquare}
+        title="Conversations"
+        description="Start a conversation to preserve multi-turn context across agent and multi-agent runs."
+      />
 
       <Card data-testid="conversation-start-card">
         <CardHeader>
@@ -177,16 +175,16 @@ function ConversationHistoryPane({ id }: { id: string }): JSX.Element {
 
   return (
     <div className="flex flex-col gap-6" data-testid="conversation-view">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-text">
-          Conversation
-        </h1>
-        <p className="text-sm text-text-muted">
+      <PageHeader
+        eyebrow="Workspace"
+        icon={MessagesSquare}
+        title="Conversation"
+        description={
           <span className="font-mono" data-testid="conversation-id">
             {history.data?.conversation_id}
           </span>
-        </p>
-      </header>
+        }
+      />
 
       {ordered.length === 0 ? (
         <EmptyState
