@@ -1,8 +1,9 @@
 """Retriever.
 
-Embeds the user query via the ``Embedding_Provider``, calls ``Vector_Store.query``
-with ``k`` clamped to ``[1, 10]`` (Req 12.1), and loads the matched chunk text from a
-``Chunk_Text_Source`` (the DB in production, an in-memory store in tests). It never
+Embeds the user query via the ``Embedding_Provider``, clamps ``k`` to ``[1, 10]``
+(Req 12.1), and loads matched chunk text from a ``Chunk_Text_Source`` (the DB in
+production, an in-memory store in tests). Tenant-capable vector adapters filter before
+applying ``k``; other adapters are filtered through the scoped text source. It never
 returns more than ``k`` matches (Req 10.5).
 
 The Retriever depends only on the abstract seams (``Embedding_Provider``,
@@ -77,11 +78,17 @@ class Retriever:
         effective_k = clamp_k(k, self._k_min, self._k_max)
 
         query_vector = self._embeddings.embed_text(query)
-        matches = self._vector_store.query(query_vector, effective_k)
+        query_for_org = getattr(self._vector_store, "query_for_org", None)
+        if callable(query_for_org):
+            matches = query_for_org(query_vector, effective_k, org_id)
+        else:
+            # Compatibility for older duck-typed adapters that predate the additive
+            # tenant-aware method. Foreign matches are still dropped below.
+            matches = self._vector_store.query(query_vector, effective_k)
 
-        # Defensive: never return more than the effective K regardless of the backend.
-        matches = matches[:effective_k]
-
+        # The text source independently enforces parent-document tenancy. Dropping any
+        # unresolved match protects callers of legacy adapters that inherit the default
+        # query_for_org implementation.
         texts = self._chunk_text_source.get_chunk_texts(
             org_id, [m.chunk_id for m in matches]
         )
@@ -89,8 +96,9 @@ class Retriever:
             RetrievedChunk(
                 chunk_id=m.chunk_id,
                 document_id=m.document_id,
-                content=texts.get(m.chunk_id, ""),
+                content=texts[m.chunk_id],
                 score=m.score,
             )
             for m in matches
-        ]
+            if m.chunk_id in texts
+        ][:effective_k]

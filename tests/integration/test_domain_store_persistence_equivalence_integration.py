@@ -244,7 +244,7 @@ async def test_pg_trace_equivalence_and_restart(engine):
     org_a = await _make_org(engine, f"a-{uuid.uuid4().hex}")
     org_b = await _make_org(engine, f"b-{uuid.uuid4().hex}")
     recorder = Pg_Trace_Recorder(dsn)
-    run_id = f"run-{uuid.uuid4().hex}"
+    run_id = str(uuid.uuid4())
     recorder.record(org_a, run_id, "reason", detail={"note": "x"})
 
     restarted = Pg_Trace_Recorder(dsn)

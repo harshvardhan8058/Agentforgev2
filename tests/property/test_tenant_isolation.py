@@ -2,11 +2,12 @@
 
 Runs fully keyless against the in-memory tenant-owned stores — no database. For any two
 distinct organizations ``A`` and ``B`` and any tenant-owned resource created in ``A``
-(Document, Conversation, Agent_Run trace, or Multi_Agent_Run), every read/list/mutate/
-delete attempt scoped to ``B`` returns nothing (the router surfaces ``404``) and leaves
-the resource unchanged; descendant resources (chunks, messages, trace entries,
-approval_decisions, run_checkpoints) accessed through their parent's identifier obey the
-same guard because the stores filter through the parent's ``org_id``.
+(Document, Conversation, Agent_Run trace, Multi_Agent_Run, or retrieval result), every
+read/list/mutate/delete attempt scoped to ``B`` returns nothing (the router surfaces
+``404``) and leaves the resource unchanged; descendant resources (chunks, messages,
+trace entries, approval_decisions, run_checkpoints) accessed through their parent's
+identifier obey the same guard because the stores filter through the parent's
+``org_id``.
 """
 
 from __future__ import annotations
@@ -26,10 +27,18 @@ from agentforge.multiagent.models import (
     Termination_Reason,
 )
 from agentforge.multiagent.store import InMemory_Multi_Agent_Run_Store
+from agentforge.retrieval.retriever import Retriever
 from agentforge.storage.memory_store import InMemoryDocumentStore
 from agentforge.tracing.recorder import InMemory_Trace_Recorder
+from agentforge.vectorstore.chroma_store import Chroma_Store
 
-_RESOURCE_KINDS = ["document", "conversation", "agent_run", "multi_agent_run"]
+_RESOURCE_KINDS = [
+    "document",
+    "conversation",
+    "agent_run",
+    "multi_agent_run",
+    "retrieval",
+]
 
 # Two distinct organizations, drawn as UUIDs.
 _org_pairs = st.lists(st.uuids(), min_size=2, max_size=2, unique=True)
@@ -109,11 +118,58 @@ def _multi_agent_run_case(org_a, org_b) -> None:
     assert owner_run.final_output is None
 
 
+def _retrieval_case(org_a, org_b) -> None:
+    """A foreign nearest neighbor cannot leak IDs or crowd out the tenant's result."""
+    document_store = InMemoryDocumentStore()
+    vector_store = Chroma_Store(dim=2)
+    now = datetime.now(timezone.utc)
+
+    for org_id, suffix, content, vector in (
+        (org_a, "a", "tenant-a-secret", [1.0, 0.0]),
+        (org_b, "b", "tenant-b-content", [0.0, 1.0]),
+    ):
+        document_id = f"doc-{suffix}"
+        chunk_id = f"chunk-{suffix}"
+        document_store.persist(
+            org_id,
+            Document(
+                id=document_id,
+                filename=f"{suffix}.txt",
+                content_type="text/plain",
+                size_bytes=len(content),
+                status="ingested",
+                created_at=now,
+            ),
+            [
+                Chunk(
+                    id=chunk_id,
+                    document_id=document_id,
+                    index=0,
+                    content=content,
+                )
+            ],
+        )
+        vector_store.upsert_for_org(chunk_id, document_id, vector, org_id)
+
+    class _QueryEmbedding:
+        def embed_text(self, _text: str) -> list[float]:
+            return [1.0, 0.0]
+
+    result = Retriever(
+        _QueryEmbedding(), vector_store, document_store
+    ).retrieve("query", 1, org_id=org_b)
+
+    assert [(item.chunk_id, item.document_id, item.content) for item in result] == [
+        ("chunk-b", "doc-b", "tenant-b-content")
+    ]
+
+
 _DISPATCH = {
     "document": _document_case,
     "conversation": _conversation_case,
     "agent_run": _agent_run_case,
     "multi_agent_run": _multi_agent_run_case,
+    "retrieval": _retrieval_case,
 }
 
 

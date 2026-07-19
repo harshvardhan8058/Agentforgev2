@@ -10,6 +10,7 @@ descending similarity, and all stored matches when fewer than ``k`` exist
 from __future__ import annotations
 
 import uuid
+from uuid import UUID
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -40,6 +41,20 @@ class Chroma_Store(Vector_Store):
             metadatas=[{"document_id": document_id}],
         )
 
+    def upsert_for_org(
+        self,
+        chunk_id: str,
+        document_id: str,
+        embedding: list[float],
+        org_id: UUID,
+    ) -> None:
+        """Persist an embedding with tenant metadata for scoped retrieval."""
+        self._collection.upsert(
+            ids=[chunk_id],
+            embeddings=[list(embedding)],
+            metadatas=[{"document_id": document_id, "org_id": str(org_id)}],
+        )
+
     def query(self, embedding: list[float], k: int) -> list[StoredMatch]:
         """Return at most ``min(k, count)`` matches, descending similarity."""
         stored = self.count()
@@ -66,6 +81,34 @@ class Chroma_Store(Vector_Store):
         # Chroma returns ascending distance == descending similarity already; make the
         # ordering explicit and robust regardless of backend behavior.
         matches.sort(key=lambda m: m.score, reverse=True)
+        return matches
+
+    def query_for_org(
+        self, embedding: list[float], k: int, org_id: UUID
+    ) -> list[StoredMatch]:
+        """Return only tenant-owned matches, filtering in Chroma before top-k."""
+        n = min(k, self.count())
+        if n <= 0:
+            return []
+        result = self._collection.query(
+            query_embeddings=[list(embedding)],
+            n_results=n,
+            where={"org_id": str(org_id)},
+            include=["metadatas", "distances"],
+        )
+        ids = result.get("ids", [[]])[0]
+        metadatas = result.get("metadatas", [[]])[0]
+        distances = result.get("distances", [[]])[0]
+
+        matches = [
+            StoredMatch(
+                chunk_id=str(chunk_id),
+                document_id=str((meta or {}).get("document_id", "")),
+                score=1.0 - float(distance),
+            )
+            for chunk_id, meta, distance in zip(ids, metadatas, distances)
+        ]
+        matches.sort(key=lambda match: match.score, reverse=True)
         return matches
 
     def delete_document(self, document_id: str) -> None:
