@@ -214,7 +214,8 @@ plus `pull` + `up -d`.
 | `docker compose up` exits naming a service (e.g. `agentforge-postgres`) | That container failed its healthcheck. `docker compose logs <service>` shows why; the proxy waits for all services to be healthy before serving. |
 | `/health/ready` returns `503` / a dependency `down` | PostgreSQL or Redis is not reachable yet. Wait for startup, or check `DATABASE_URL` / `REDIS_URL`. |
 | Backend aborts on startup naming a missing setting | A required non-secret setting (`DATABASE_URL` / `REDIS_URL`) is unset. Copy `.env.example` to `.env`. |
-| Frontend shows a network error on every call | `VITE_API_BASE_URL` points at no running backend. Start the backend, or set the base URL to your API origin. |
+| Login/registration shows **"Unable to reach the server"** | The browser cannot reach the API. In the Docker stack the SPA calls the API **same-origin** through the proxy, so open the app at the proxy's own origin (`http://localhost`), not a different one. If you build the frontend image yourself, set `API_BASE_URL=/` (same-origin) — a hardcoded `http://localhost` breaks when the app is opened via `127.0.0.1`, a LAN IP, or a domain (cross-origin → CORS). Also confirm the `api` container is healthy (`docker compose ps`). |
+| Frontend (dev) shows a network error on every call | `npm run dev` targets `http://localhost:8000` by default; start the backend there, or set `VITE_API_BASE_URL` to your API origin. |
 | `npm run e2e` fails to launch a browser | Run `npx playwright install --with-deps chromium` once to fetch the browser and OS libraries. |
 | An integration seems inactive | It is Disabled until its token is set **and** its enable-toggle is not `false`. Check `GET /integrations/status`. |
 

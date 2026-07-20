@@ -45,12 +45,14 @@ services:
       dockerfile: Dockerfile
     container_name: agentforge-frontend
     environment:
-      # Runtime_Config: the browser reaches the API same-origin through the nginx proxy
-      # published at http://localhost, so config.js is rendered with that base URL. The
-      # SPA's build-time default targets the dev API port (:8000), which is intentionally
-      # NOT published in this stack — so we set the proxy origin explicitly here. Override
-      # with a real scheme://host for production domains (Req 8.4).
-      API_BASE_URL: ${API_BASE_URL:-http://localhost}
+      # Runtime_Config: the browser reaches the API SAME-ORIGIN through the nginx proxy,
+      # so config.js is rendered with a RELATIVE base ("/"). Relative requests always
+      # target the exact origin that served the SPA, so the app works whether it is opened
+      # via http://localhost, http://127.0.0.1, a LAN IP, or a domain — with no CORS and
+      # no dependence on the API port (:8000 is intentionally NOT published here). A bare
+      # "/" is resolved by the client to an empty base (relative fetch). Override with a
+      # full scheme://host only when the API lives on a SEPARATE origin (Req 8.4).
+      API_BASE_URL: ${API_BASE_URL:-/}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s
