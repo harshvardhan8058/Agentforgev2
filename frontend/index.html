@@ -5,45 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AgentForge</title>
     <!--
-      No-flash-of-wrong-theme (FOWT) pre-paint script.
-      Resolves and applies the theme on <html> before first paint / React
-      hydration, reading the same non-secret 'agentforge.theme' localStorage key
-      and prefers-color-scheme media query that ThemeProvider/useTheme use, so
-      React adopts the already-applied theme with no light->dark repaint.
+      No-flash-of-wrong-theme (FOWT) bootstrap. It is an external same-origin
+      script so the gateway's strict `script-src 'self'` CSP permits it.
     -->
-    <script>
-      (function () {
-        try {
-          var stored = localStorage.getItem('agentforge.theme');
-          var theme =
-            stored === 'light' || stored === 'dark'
-              ? stored
-              : window.matchMedia('(prefers-color-scheme: light)').matches
-                ? 'light'
-                : 'dark';
-          document.documentElement.setAttribute('data-theme', theme);
-        } catch (e) {
-          document.documentElement.setAttribute('data-theme', 'dark');
-        }
-      })();
-    </script>
+    <script src="/theme-bootstrap.js"></script>
   </head>
   <body>
     <div id="root"></div>
     <!--
-      Runtime_Config (deployment Req 8.1-8.4). In a deployed Frontend_Image the
-      container entrypoint renders /config.js from API_BASE_URL, setting
-      window.__AGENTFORGE_CONFIG__ before the app module runs. The tag is written
-      by this inline bootstrap (rather than a static <script src>) so the bundler
-      does not attempt to resolve the runtime-only file at build time; a
-      document.write'd classic script is parser-blocking and therefore still
-      executes before the deferred module below. In Vite dev the file is absent
-      and the load simply no-ops, so resolveConfig() falls back to the build-time
-      value / documented default and dev is unaffected.
+      Runtime_Config (deployment Req 8.1-8.4). The image entrypoint overwrites
+      the public placeholder at /config.js from API_BASE_URL. Loading it as an
+      external classic script is parser-blocking (so it runs before the module)
+      and is permitted by the gateway's strict `script-src 'self'` CSP.
     -->
-    <script>
-      document.write('<script src="/config.js"><\/script>');
-    </script>
+    <script src="/config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

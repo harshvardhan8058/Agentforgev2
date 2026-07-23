@@ -26,15 +26,15 @@ afterEach(() => {
 });
 
 describe("resolveConfig — API base URL resolution", () => {
-  it('resolves "/" to an empty (same-origin, relative) base', () => {
+  it('resolves "/" to the absolute browser origin', () => {
     withRuntime("/", () => {
-      expect(resolveConfig({}).baseUrl).toBe("");
+      expect(resolveConfig({}).baseUrl).toBe(window.location.origin);
     });
   });
 
   it("treats a slashes-only value as same-origin", () => {
     withRuntime("///", () => {
-      expect(resolveConfig({}).baseUrl).toBe("");
+      expect(resolveConfig({}).baseUrl).toBe(window.location.origin);
     });
   });
 
@@ -48,7 +48,7 @@ describe("resolveConfig — API base URL resolution", () => {
     withRuntime("/", () => {
       expect(
         resolveConfig({ VITE_API_BASE_URL: "http://build-time:9999" }).baseUrl,
-      ).toBe("");
+      ).toBe(window.location.origin);
     });
   });
 
