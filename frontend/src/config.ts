@@ -31,14 +31,13 @@ const DEFAULT_BASE_URL = "http://localhost:8000";
 /**
  * Resolve the effective Backend_API base:
  *
- *  - `"/"` (or any value that is only slashes) → **same-origin**: an empty base
- *    so the API_Client issues **relative** requests against the exact origin
- *    that served the SPA. This is the correct mode behind a same-origin reverse
- *    proxy (the bundled nginx) and works from ANY host — `localhost`,
+ *  - `"/"` (or any value that is only slashes) → **same-origin**: the browser's
+ *    absolute `window.location.origin`. `openapi-fetch` constructs a `Request`
+ *    object before calling `fetch`, and the Request constructor requires an
+ *    absolute URL; using the current origin preserves same-origin behavior while
+ *    satisfying that contract. This works from ANY host — `localhost`,
  *    `127.0.0.1`, a LAN IP, or a domain, over http or https — with no CORS. It
- *    is the compose default, and is what prevents the "Unable to reach the
- *    server" failure that a hardcoded `http://localhost` causes when the app is
- *    opened from a different origin.
+ *    is the compose default and avoids hardcoding a deployment hostname.
  *  - a non-empty absolute URL → used verbatim (trailing slash trimmed), for
  *    deployments where the API lives on a separate origin (CORS then applies).
  *  - unset/empty → the documented dev default (`http://localhost:8000`), so
@@ -47,8 +46,15 @@ const DEFAULT_BASE_URL = "http://localhost:8000";
 function normalizeBaseUrl(raw: string | undefined): string {
   const value = (raw ?? "").trim();
   if (value.length === 0) return DEFAULT_BASE_URL;
-  // Same-origin: a bare "/" (or "///") means "relative to the serving origin".
-  if (/^\/+$/.test(value)) return "";
+  // Same-origin: openapi-fetch passes this value to `new Request(...)`, which
+  // requires an absolute URL. Resolve the serving origin instead of returning
+  // an empty/relative base (which throws before fetch can issue the request).
+  if (/^\/+$/.test(value)) {
+    if (typeof window !== "undefined" && window.location.origin !== "null") {
+      return window.location.origin;
+    }
+    return DEFAULT_BASE_URL;
+  }
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 

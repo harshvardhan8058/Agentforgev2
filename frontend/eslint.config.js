@@ -54,6 +54,15 @@ export default tseslint.config(
     },
   },
 
+  // Static browser bootstraps in public/ are deliberately external so the
+  // deployment's strict `script-src 'self'` CSP can execute them.
+  {
+    files: ["public/**/*.js"],
+    languageOptions: {
+      globals: { ...globals.browser },
+    },
+  },
+
   // Tests + test helpers: add node + vitest globals, relax deliberate patterns.
   {
     files: [
