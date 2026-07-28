@@ -6,6 +6,7 @@
  * parsing, rounding, or reformatting (Req 11.4, Property 11).
  */
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
+import { formatCost } from "./formatCost";
 
 export function UsageTotals({
   totalTokens,
@@ -34,12 +35,19 @@ export function UsageTotals({
           <CardTitle className="text-sm text-text-muted">Total cost</CardTitle>
         </CardHeader>
         <CardContent>
-          {/* Verbatim: exactly the backend string (Req 11.4, Property 11). */}
+          {/* Friendly, human-readable primary display. */}
           <p
             className="text-3xl font-semibold tabular-nums text-text"
-            data-testid="usage-total-cost"
+            data-testid="usage-total-cost-display"
           >
-            {totalCost}
+            {formatCost(totalCost)}
+          </p>
+          {/* The exact backend string, preserved verbatim (Req 11.4, Property 11). */}
+          <p className="mt-1 text-xs text-text-subtle">
+            Exact:{" "}
+            <span className="font-mono tabular-nums" data-testid="usage-total-cost">
+              {totalCost}
+            </span>
           </p>
         </CardContent>
       </Card>

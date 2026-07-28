@@ -22,8 +22,10 @@
   --color-surface-raised: #1c1c28;
   --color-surface-hover: #232333;
   --color-surface-overlay: rgba(20, 20, 29, 0.72);
-  --color-border: #26263440;
-  --color-border-strong: #3b3b50;
+  /* A more present hairline so cards read as distinct surfaces on the dark bg
+     (was a low-alpha #26263440 that melted into the background). */
+  --color-border: #2e2e44;
+  --color-border-strong: #45455f;
   --color-text: #f5f5fb;
   --color-text-muted: #9a9ab4;
   /* Meets WCAG AA (>=4.5:1) on the dark bg/surface family for small labels. */

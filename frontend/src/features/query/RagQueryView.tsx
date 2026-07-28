@@ -29,12 +29,21 @@ import { useSession } from "../../auth/useSession";
 import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorSurface } from "../../components/ErrorSurface";
+import { FallbackNotice } from "../../components/FallbackNotice";
 import { Markdown } from "../../components/markdown/Markdown";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Badge } from "../../components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
+import { ExampleChips } from "../../components/ui/ExampleChips";
 import { Skeleton } from "../../components/ui/Skeleton";
+
+/** One-click starter questions for an empty corpus/first-time Operator. */
+const QUERY_EXAMPLES: readonly string[] = [
+  "Summarize the key points of this document",
+  "What are the important dates mentioned?",
+  "What does the document say about compensation?",
+];
 
 /** The shape `POST /query` resolves to (mirrors the generated `QueryResponse`). */
 interface QueryResult {
@@ -109,6 +118,11 @@ export function RagQueryView(): JSX.Element {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="What does our onboarding policy say about…"
+                />
+                <ExampleChips
+                  testId="query-examples"
+                  examples={QUERY_EXAMPLES}
+                  onPick={setQuery}
                 />
               </div>
               <div className="flex flex-wrap items-end gap-3">
@@ -205,6 +219,7 @@ export function RagQueryView(): JSX.Element {
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
+            {result.provider === "fallback" && <FallbackNotice />}
             <div
               aria-live="polite"
               data-testid="answer-body"

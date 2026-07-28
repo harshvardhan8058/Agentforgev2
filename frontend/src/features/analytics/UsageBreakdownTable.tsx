@@ -9,6 +9,7 @@
  * enclosing per-breakdown error boundary isolates (Req 11.6).
  */
 import type { UsageBreakdownEntry } from "./types";
+import { formatCost } from "./formatCost";
 
 export function UsageBreakdownTable({
   group,
@@ -46,12 +47,13 @@ export function UsageBreakdownTable({
               >
                 {entry.total_tokens}
               </td>
-              {/* Verbatim cost string (Req 11.4, Property 11). */}
-              <td
-                className="py-1.5 text-right font-mono tabular-nums"
-                data-testid={`breakdown-${group}-cost-${i}`}
-              >
-                {entry.total_cost}
+              {/* Friendly display; the exact backend string is preserved
+                  verbatim in the adjacent element (Req 11.4, Property 11). */}
+              <td className="py-1.5 text-right font-mono tabular-nums">
+                <span className="text-text">{formatCost(entry.total_cost)}</span>
+                <span className="sr-only" data-testid={`breakdown-${group}-cost-${i}`}>
+                  {entry.total_cost}
+                </span>
               </td>
             </tr>
           ))}

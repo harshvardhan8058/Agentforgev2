@@ -9,15 +9,16 @@
  * a persisted run (`GET /evaluations/runs/{id}`) showing `aggregate_score` +
  * per-item scores. A `404` presents the run as not found.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, Plus } from "lucide-react";
 import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
 import type { ClientError } from "../../api/errors";
 import { orgScopedKey } from "../../api/queryKeys";
+import { can } from "../../auth/rbac";
 import { useSession } from "../../auth/useSession";
 import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
@@ -46,8 +47,10 @@ interface EvaluationRunResponse {
 }
 
 export function EvaluationsView(): JSX.Element {
-  const { orgId } = useSession();
+  const { orgId, role } = useSession();
   const queryClient = useQueryClient();
+  const canRun = role !== null && can(role, "run_agents");
+  const datasetNameRef = useRef<HTMLInputElement>(null);
 
   const [datasetName, setDatasetName] = useState("");
   const [runDatasetId, setRunDatasetId] = useState("");
@@ -141,6 +144,7 @@ export function EvaluationsView(): JSX.Element {
                     <Input
                       id="dataset-name"
                       data-testid="dataset-name"
+                      ref={datasetNameRef}
                       value={datasetName}
                       onChange={(e) => setDatasetName(e.target.value)}
                     />
@@ -176,8 +180,20 @@ export function EvaluationsView(): JSX.Element {
                 <div data-testid="datasets-empty">
                   <EmptyState
                     title="No datasets yet"
-                    message="Create a dataset to start evaluating."
+                    message="Create a dataset to start measuring answer quality against curated examples."
                     icon={<ClipboardList className="h-8 w-8" />}
+                    action={
+                      canRun ? (
+                        <Button
+                          type="button"
+                          data-testid="datasets-empty-cta"
+                          onClick={() => datasetNameRef.current?.focus()}
+                        >
+                          <Plus className="h-4 w-4" aria-hidden="true" />
+                          New dataset
+                        </Button>
+                      ) : undefined
+                    }
                   />
                 </div>
               )}

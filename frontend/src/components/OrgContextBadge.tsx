@@ -8,6 +8,7 @@
  * the authenticated layout).
  */
 import { useSession } from "../auth/useSession";
+import { orgLabel } from "../auth/orgNameStore";
 import { orgMonogram, orgMonogramStyle } from "../lib/orgIdentity";
 
 export function OrgContextBadge(): JSX.Element | null {
@@ -33,7 +34,7 @@ export function OrgContextBadge(): JSX.Element | null {
         data-testid="org-context-org"
         title={orgId}
       >
-        {orgId}
+        {orgLabel(orgId)}
       </span>
       <span
         className="org-context-badge__role shrink-0 rounded-full bg-primary-subtle px-2 py-0.5 font-medium capitalize text-primary"

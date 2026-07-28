@@ -22,6 +22,8 @@ import { runRequest } from "../../api/request";
 import type { ClientError } from "../../api/errors";
 import { useSession } from "../../auth/useSession";
 import { rememberOrgToken } from "../../auth/orgTokenStore";
+import { rememberOrgName } from "../../auth/orgNameStore";
+import { decodeClaims } from "../../auth/token";
 import { useToast } from "../../hooks/useToast";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
@@ -68,6 +70,9 @@ export function RegisterView(): JSX.Element {
         }),
       );
       rememberOrgToken(data.access_token);
+      // Remember the chosen org name so the workspace shows it (not a raw id).
+      const claims = decodeClaims(data.access_token);
+      if (claims) rememberOrgName(claims.org_id, orgName.trim());
       login(data.access_token);
       toast({ title: "Account created", tone: "success" });
       navigate("/", { replace: true });

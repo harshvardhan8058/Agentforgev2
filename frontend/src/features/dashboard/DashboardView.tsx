@@ -28,6 +28,7 @@ import {
 
 import { can, type Permission } from "../../auth/rbac";
 import { useSession } from "../../auth/useSession";
+import { orgLabel } from "../../auth/orgNameStore";
 import { useCommandPalette } from "../../hooks/useCommandPalette";
 import { orgMonogram, orgMonogramStyle } from "../../lib/orgIdentity";
 import { cn } from "../../lib/cn";
@@ -205,10 +206,20 @@ export function DashboardView(): JSX.Element {
             </span>
             <span
               className="truncate text-lg font-semibold tracking-tight text-text"
+              data-testid="workspace-org-label"
               title={orgId ?? undefined}
             >
-              {orgId ?? "—"}
+              {orgId ? orgLabel(orgId) : "—"}
             </span>
+            {orgId && orgLabel(orgId) !== orgId && (
+              <span
+                className="truncate font-mono text-xs text-text-subtle"
+                data-testid="workspace-org-id"
+                title={orgId}
+              >
+                {orgId}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
