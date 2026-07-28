@@ -19,6 +19,7 @@ import {
   type KnownOrg,
 } from "../../auth/orgTokenStore";
 import { OPEN_ORG_SWITCHER_EVENT } from "../../hooks/useCommandPalette";
+import { orgLabel } from "../../auth/orgNameStore";
 import { orgMonogram, orgMonogramStyle } from "../../lib/orgIdentity";
 import {
   DropdownMenu,
@@ -60,11 +61,14 @@ export function OrgSwitcher(): JSX.Element | null {
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
+      {/* Compact icon-only control: the active org identity + role already live
+          in the OrgContextBadge, so the switcher is just a monogram + chevron to
+          avoid a duplicated identifier chip in the top bar. */}
       <DropdownMenuTrigger
         data-testid="org-switcher-trigger"
         aria-label="Switch organization"
-        title={orgId}
-        className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-text transition-colors hover:border-border-strong hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        title={`Switch organization (current: ${orgLabel(orgId)})`}
+        className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-1.5 text-sm text-text transition-colors hover:border-border-strong hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <span
           className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[0.65rem] font-semibold"
@@ -73,11 +77,8 @@ export function OrgSwitcher(): JSX.Element | null {
         >
           {orgMonogram(orgId)}
         </span>
-        <span
-          className="hidden max-w-[10rem] truncate sm:inline"
-          data-testid="org-switcher-current"
-        >
-          {orgId}
+        <span className="sr-only" data-testid="org-switcher-current">
+          {orgLabel(orgId)}
         </span>
         <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden="true" />
       </DropdownMenuTrigger>
@@ -100,7 +101,7 @@ export function OrgSwitcher(): JSX.Element | null {
               {orgMonogram(org.orgId)}
             </span>
             <span className="min-w-0 flex-1 truncate" title={org.orgId}>
-              {org.orgId}
+              {orgLabel(org.orgId)}
             </span>
             <span className="shrink-0 text-xs capitalize text-text-muted">{org.role}</span>
             <Check

@@ -14,15 +14,16 @@
  * the initial bundle) and **mocked in tests** so Monaco never loads under
  * Vitest.
  */
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GitCompare, SlidersHorizontal } from "lucide-react";
+import { GitCompare, Plus, SlidersHorizontal } from "lucide-react";
 import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
 import type { ClientError } from "../../api/errors";
 import { orgScopedKey } from "../../api/queryKeys";
+import { can } from "../../auth/rbac";
 import { useSession } from "../../auth/useSession";
 import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
@@ -59,8 +60,10 @@ function LazyStudio(props: PromptStudioProps): JSX.Element {
 }
 
 export function PromptRegistryView(): JSX.Element {
-  const { orgId } = useSession();
+  const { orgId, role } = useSession();
   const queryClient = useQueryClient();
+  const canCreate = role !== null && can(role, "ingest_documents");
+  const promptNameRef = useRef<HTMLInputElement>(null);
 
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
@@ -178,7 +181,22 @@ export function PromptRegistryView(): JSX.Element {
               {names.isLoading && <Skeleton className="h-24 w-full" data-testid="templates-skeleton" />}
               {names.isError && <ErrorBanner error={names.error} onRetry={() => void names.refetch()} />}
               {names.data && names.data.length === 0 && (
-                <EmptyState title="No prompts yet" message="Create a version to get started." />
+                <EmptyState
+                  title="No prompts yet"
+                  message="Create your first versioned prompt template to get started."
+                  action={
+                    canCreate ? (
+                      <Button
+                        type="button"
+                        data-testid="prompts-empty-cta"
+                        onClick={() => promptNameRef.current?.focus()}
+                      >
+                        <Plus className="h-4 w-4" aria-hidden="true" />
+                        New version
+                      </Button>
+                    ) : undefined
+                  }
+                />
               )}
               {names.data && names.data.length > 0 && (
                 <ul className="flex flex-col gap-1" data-testid="template-list">
@@ -227,6 +245,7 @@ export function PromptRegistryView(): JSX.Element {
                     <Input
                       id="prompt-name"
                       data-testid="prompt-name"
+                      ref={promptNameRef}
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
                     />

@@ -41,8 +41,16 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Input } from "../../components/ui/Input";
+import { ExampleChips } from "../../components/ui/ExampleChips";
 import { useSseRun } from "./useSseRun";
 import { TraceView } from "./TraceView";
+
+/** One-click starter tasks for a first single-agent run. */
+const AGENT_EXAMPLES: readonly string[] = [
+  "Summarize the latest incident report",
+  "Draft a short status update",
+  "Extract the action items from the notes",
+];
 
 interface AgentRunResponse {
   answer: string;
@@ -169,6 +177,11 @@ export function SingleAgentRunView(): JSX.Element {
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="Summarize the latest incident report…"
+              />
+              <ExampleChips
+                testId="agent-examples"
+                examples={AGENT_EXAMPLES}
+                onPick={setMessage}
               />
             </div>
             <div className="flex flex-wrap gap-2">
