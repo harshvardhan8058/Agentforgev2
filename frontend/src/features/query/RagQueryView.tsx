@@ -17,7 +17,7 @@
  */
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Search, Sparkles } from "lucide-react";
+import { ChevronDown, FilePlus2, Search, Sparkles } from "lucide-react";
 import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
@@ -37,6 +37,8 @@ import { Badge } from "../../components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { ExampleChips } from "../../components/ui/ExampleChips";
 import { Skeleton } from "../../components/ui/Skeleton";
+import { UploadControl } from "../documents/UploadControl";
+import { cn } from "../../lib/cn";
 
 /** One-click starter questions for an empty corpus/first-time Operator. */
 const QUERY_EXAMPLES: readonly string[] = [
@@ -62,6 +64,7 @@ export function RagQueryView(): JSX.Element {
 
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState<number>(DEFAULT_TOP_K);
+  const [showUpload, setShowUpload] = useState(false);
 
   const submit = useMutation<QueryResult, ClientError, void>({
     mutationFn: async () => {
@@ -115,6 +118,10 @@ export function RagQueryView(): JSX.Element {
                 <Input
                   id="query-input"
                   data-testid="query-input"
+                  // Focusing the primary input on this single-purpose task page
+                  // is an expected, modern affordance (matches the auth pages).
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                  autoFocus
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="What does our onboarding policy say about…"
@@ -154,6 +161,41 @@ export function RagQueryView(): JSX.Element {
                 </Button>
               </div>
             </form>
+
+            {/* Inline corpus ingestion: add a document without leaving the
+                query flow. Collapsed by default and gated behind the same
+                `ingest_documents` permission as the Documents page. */}
+            <Can permission="ingest_documents">
+              <div className="mt-4 border-t border-border pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowUpload((v) => !v)}
+                  aria-expanded={showUpload}
+                  aria-controls="query-upload-panel"
+                  data-testid="query-upload-toggle"
+                  className="inline-flex items-center gap-2 rounded-md text-sm font-medium text-text-muted transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                >
+                  <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+                  Add a document to your corpus
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 transition-transform duration-base",
+                      showUpload && "rotate-180",
+                    )}
+                    aria-hidden="true"
+                  />
+                </button>
+                {showUpload && (
+                  <div id="query-upload-panel" className="mt-3" data-testid="query-upload-panel">
+                    <UploadControl />
+                    <p className="mt-2 text-xs text-text-subtle">
+                      Newly ingested documents are searchable immediately — ask your
+                      question above once ingestion completes.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </Can>
           </CardContent>
         </Card>
       </Can>

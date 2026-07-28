@@ -13,6 +13,7 @@
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { LogOut, Menu, Moon, PanelLeft, Search, Sun } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 import { useSession } from "../../auth/useSession";
 import { useTheme } from "../../hooks/useTheme";
@@ -25,8 +26,26 @@ import { SidebarNav } from "./SidebarNav";
 import { OrgSwitcher } from "./OrgSwitcher";
 import { BrandLogo } from "./BrandLogo";
 
-function BrandMark({ compact = false }: { compact?: boolean }): JSX.Element {
-  return <BrandLogo compact={compact} />;
+function BrandMark({
+  compact = false,
+  onNavigate,
+}: {
+  compact?: boolean;
+  onNavigate?: () => void;
+}): JSX.Element {
+  // The brand mark doubles as a "home" affordance — clicking it returns to the
+  // Dashboard (like every modern app shell).
+  return (
+    <Link
+      to="/"
+      onClick={onNavigate}
+      data-testid="brand-home-link"
+      aria-label="AgentForge — go to dashboard"
+      className="inline-flex items-center rounded-md transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+    >
+      <BrandLogo compact={compact} />
+    </Link>
+  );
 }
 
 function ThemeToggle(): JSX.Element {
@@ -206,7 +225,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
               <RadixDialog.Description className="sr-only">
                 Primary navigation
               </RadixDialog.Description>
-              <BrandMark />
+              <BrandMark onNavigate={() => setDrawerOpen(false)} />
               <div className="-mx-1 flex-1 overflow-y-auto">
                 <SidebarNav onNavigate={() => setDrawerOpen(false)} />
               </div>
