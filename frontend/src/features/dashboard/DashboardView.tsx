@@ -6,8 +6,12 @@
  * quick actions into the primary workflows, and surfaces the platform
  * capabilities they can reach — every destination gated by the same
  * `can(role, permission)` decision used by the sidebar and command palette, so
- * nothing unreachable is ever shown. Presentational only; it makes no network
- * calls and fabricates no metrics.
+ * nothing unreachable is ever shown.
+ *
+ * The layout itself is presentational; the two data-backed sections it composes
+ * (`WorkspaceStats` and `GettingStarted`) fetch their own signals through the
+ * shared definitions in `workspaceQueries`, so they never fabricate a metric and
+ * never issue duplicate requests for the same endpoint.
  */
 import type { JSX } from "react";
 import { Link } from "react-router";
@@ -37,6 +41,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Badge } from "../../components/ui/Badge";
 import { Kbd } from "../../components/ui/Kbd";
 import { WorkspaceStats } from "./WorkspaceStats";
+import { GettingStarted } from "./GettingStarted";
 
 interface Destination {
   label: string;
@@ -234,6 +239,9 @@ export function DashboardView(): JSX.Element {
 
       {/* Live workspace metrics. */}
       <WorkspaceStats />
+
+      {/* Guided activation path, derived from real workspace data. */}
+      <GettingStarted />
 
       {/* Quick actions. */}
       {quickActions.length > 0 && (

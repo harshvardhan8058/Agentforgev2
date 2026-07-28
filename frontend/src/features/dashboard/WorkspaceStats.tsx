@@ -12,24 +12,12 @@ import type { JSX } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Coins, FileText, Hash, type LucideIcon } from "lucide-react";
 
-import { apiClient } from "../../api/client";
-import { runRequest } from "../../api/request";
-import type { ClientError } from "../../api/errors";
-import { orgScopedKey } from "../../api/queryKeys";
 import { can } from "../../auth/rbac";
 import { useSession } from "../../auth/useSession";
 import { StatCard, type StatTone } from "../../components/ui/StatCard";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { formatCost } from "../analytics/formatCost";
-
-interface DocumentSummary {
-  document_id: string;
-}
-
-interface UsageSummary {
-  total_tokens: number;
-  total_cost: string;
-}
+import { documentsQuery, usageSummaryQuery } from "./workspaceQueries";
 
 /** Render a stat value with resilient loading / error fallbacks. */
 function StatValue({
@@ -50,26 +38,10 @@ export function WorkspaceStats(): JSX.Element | null {
   const { orgId, role } = useSession();
   const canRead = role !== null && can(role, "read");
 
-  const documents = useQuery<DocumentSummary[], ClientError>({
-    enabled: canRead,
-    queryKey: orgScopedKey(orgId, "documents"),
-    queryFn: () => runRequest(() => apiClient.GET("/documents")),
-    retry: false,
-    staleTime: 30_000,
-  });
-
-  const usage = useQuery<UsageSummary, ClientError>({
-    enabled: canRead,
-    queryKey: orgScopedKey(orgId, "usage-summary"),
-    queryFn: async () => {
-      const data = await runRequest(() =>
-        apiClient.GET("/analytics/usage", { params: { query: {} } }),
-      );
-      return { total_tokens: data.total_tokens, total_cost: data.total_cost };
-    },
-    retry: false,
-    staleTime: 30_000,
-  });
+  // Canonical shared definitions (see `workspaceQueries`) — the same key and
+  // shape the Getting-started checklist uses, so they share one request.
+  const documents = useQuery(documentsQuery(orgId, canRead));
+  const usage = useQuery(usageSummaryQuery(orgId, canRead));
 
   if (!canRead) return null;
 
