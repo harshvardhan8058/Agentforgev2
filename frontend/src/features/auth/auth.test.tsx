@@ -21,11 +21,16 @@ import { __resetOrgTokenStoreForTests } from "../../auth/orgTokenStore";
 import type { Role } from "../../auth/token";
 
 const BASE = "http://localhost:8000";
-// The authenticated Dashboard (home-view) renders live WorkspaceStats, which
-// fetch GET /documents and GET /analytics/usage. Default no-op handlers keep
-// these auth-flow tests green under the strict onUnhandledRequest guard.
+// The authenticated Dashboard (home-view) renders live WorkspaceStats and the
+// GettingStarted checklist, which read GET /documents, /analytics/usage,
+// /prompts, /evaluations/datasets and /orgs/:orgId/api-keys. Default empty
+// handlers keep these auth-flow tests green under the strict
+// onUnhandledRequest guard without asserting anything about the dashboard.
 const server = setupServer(
   http.get(`${BASE}/documents`, () => HttpResponse.json([])),
+  http.get(`${BASE}/prompts`, () => HttpResponse.json([])),
+  http.get(`${BASE}/evaluations/datasets`, () => HttpResponse.json([])),
+  http.get(`${BASE}/orgs/:orgId/api-keys`, () => HttpResponse.json([])),
   http.get(`${BASE}/analytics/usage`, () =>
     HttpResponse.json({
       org_id: "org-1",
