@@ -84,7 +84,10 @@ export function RagQueryView(): JSX.Element {
 
   const filenameById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const doc of documents.data ?? []) map.set(doc.document_id, doc.filename);
+    // Defensive: the endpoint (or a mock) may return a non-array; never iterate
+    // a non-iterable, which would throw during render.
+    const docs = Array.isArray(documents.data) ? documents.data : [];
+    for (const doc of docs) map.set(doc.document_id, doc.filename);
     return map;
   }, [documents.data]);
 

@@ -72,9 +72,12 @@ export function WorkspaceStats(): JSX.Element | null {
 
   if (!canRead) return null;
 
-  const docCount = documents.data?.length ?? 0;
-  const tokens = usage.data?.total_tokens ?? 0;
-  const cost = usage.data?.total_cost ?? "0";
+  // Defensive against a non-array documents payload (e.g. an error/mocked body).
+  const docCount = Array.isArray(documents.data) ? documents.data.length : 0;
+  const tokens =
+    typeof usage.data?.total_tokens === "number" ? usage.data.total_tokens : 0;
+  const cost =
+    typeof usage.data?.total_cost === "string" ? usage.data.total_cost : "0";
 
   const tiles: {
     label: string;

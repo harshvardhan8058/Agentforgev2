@@ -149,6 +149,34 @@ describe("RagQueryView (MSW)", () => {
     expect(screen.getByTestId("citation-doc-1")).toHaveAttribute("title", "doc-a");
   });
 
+  it("renders without crashing when GET /documents returns a non-array body", async () => {
+    // A catch-all mock (or an unexpected payload) may return `{}` instead of a
+    // list; the view must never try to iterate a non-array (regression guard).
+    server.use(
+      http.get(`${BASE}/documents`, () => HttpResponse.json({})),
+      http.post(`${BASE}/query`, () =>
+        HttpResponse.json({
+          answer: "Answer [1].",
+          grounded: true,
+          provider: "openai",
+          citations: [{ document_id: "doc-x", chunk_id: "chunk-1" }],
+          flags: [],
+        }),
+      ),
+    );
+
+    renderView("member");
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("query-input"), "hello");
+    await user.click(screen.getByTestId("query-submit"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("query-answer-card")).toBeInTheDocument(),
+    );
+    // Falls back to the raw document id when no filename map is available.
+    expect(screen.getByTestId("citation-doc-1")).toHaveTextContent("doc-x");
+  });
+
   it("indicates ungrounded when grounded=false with empty citations (7.3)", async () => {
     server.use(
       http.post(`${BASE}/query`, () =>
