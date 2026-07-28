@@ -15,23 +15,22 @@
  * `aria-live="polite"` region. An explicit empty state is shown before the
  * first query. Responsive from mobile → ultrawide.
  */
-import type { JSX } from "react";
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { ChevronDown, FilePlus2, Search, Sparkles } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { ChevronDown, FilePlus2, FileText, Search, Sparkles } from "lucide-react";
 import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
 import type { ClientError } from "../../api/errors";
 import type { Citation } from "../../api/domain";
+import { orgScopedKey } from "../../api/queryKeys";
 import { can } from "../../auth/rbac";
 import { useSession } from "../../auth/useSession";
 import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorSurface } from "../../components/ErrorSurface";
 import { FallbackNotice } from "../../components/FallbackNotice";
-import { Markdown } from "../../components/markdown/Markdown";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Badge } from "../../components/ui/Badge";
@@ -39,6 +38,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Ca
 import { ExampleChips } from "../../components/ui/ExampleChips";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { UploadControl } from "../documents/UploadControl";
+import { StreamingAnswer } from "./StreamingAnswer";
 import { cn } from "../../lib/cn";
 
 /** One-click starter questions for an empty corpus/first-time Operator. */
@@ -57,15 +57,39 @@ interface QueryResult {
   flags: string[];
 }
 
+/** Minimal document shape used to resolve citation filenames. */
+interface DocumentSummary {
+  document_id: string;
+  filename: string;
+}
+
 const DEFAULT_TOP_K = 5;
 
 export function RagQueryView(): JSX.Element {
-  const { role } = useSession();
+  const { role, orgId } = useSession();
   const permitted = role !== null && can(role, "run_agents");
 
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState<number>(DEFAULT_TOP_K);
   const [showUpload, setShowUpload] = useState(false);
+
+  // Resolve citation document ids to human-readable filenames (best-effort).
+  const documents = useQuery<DocumentSummary[], ClientError>({
+    enabled: permitted,
+    queryKey: orgScopedKey(orgId, "documents"),
+    queryFn: () => runRequest(() => apiClient.GET("/documents")),
+    retry: false,
+    staleTime: 30_000,
+  });
+
+  const filenameById = useMemo(() => {
+    const map = new Map<string, string>();
+    // Defensive: the endpoint (or a mock) may return a non-array; never iterate
+    // a non-iterable, which would throw during render.
+    const docs = Array.isArray(documents.data) ? documents.data : [];
+    for (const doc of docs) map.set(doc.document_id, doc.filename);
+    return map;
+  }, [documents.data]);
 
   const submit = useMutation<QueryResult, ClientError, void>({
     mutationFn: async () => {
@@ -268,7 +292,7 @@ export function RagQueryView(): JSX.Element {
               data-testid="answer-body"
               className="min-w-0"
             >
-              <Markdown content={result.answer} citations={result.citations} />
+              <StreamingAnswer text={result.answer} citations={result.citations} />
             </div>
 
             {result.flags.length > 0 && (
@@ -292,23 +316,42 @@ export function RagQueryView(): JSX.Element {
                   Citations
                 </span>
                 <ul className="flex flex-col gap-1">
-                  {result.citations.map((c, i) => (
-                    <li
-                      key={`${c.document_id}-${c.chunk_id}-${i}`}
-                      id={`citation-${i + 1}`}
-                      data-testid={`citation-source-${i + 1}`}
-                      className="flex flex-wrap items-center gap-2 text-sm text-text-muted"
-                    >
-                      <Badge tone="primary">[{i + 1}]</Badge>
-                      <span className="font-mono text-xs" data-testid={`citation-doc-${i + 1}`}>
-                        {c.document_id}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span className="font-mono text-xs" data-testid={`citation-chunk-${i + 1}`}>
-                        {c.chunk_id}
-                      </span>
-                    </li>
-                  ))}
+                  {result.citations.map((c, i) => {
+                    const filename = filenameById.get(c.document_id);
+                    return (
+                      <li
+                        key={`${c.document_id}-${c.chunk_id}-${i}`}
+                        id={`citation-${i + 1}`}
+                        data-testid={`citation-source-${i + 1}`}
+                        className="flex flex-wrap items-center gap-2 text-sm text-text-muted"
+                      >
+                        <Badge tone="primary">[{i + 1}]</Badge>
+                        <FileText
+                          className="h-3.5 w-3.5 shrink-0 text-text-subtle"
+                          aria-hidden="true"
+                        />
+                        {/* Prefer the human-readable filename; the raw document
+                            id is preserved in the title for reference. */}
+                        <span
+                          className={cn(
+                            "text-xs",
+                            filename ? "font-medium text-text" : "font-mono",
+                          )}
+                          data-testid={`citation-doc-${i + 1}`}
+                          title={c.document_id}
+                        >
+                          {filename ?? c.document_id}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span
+                          className="font-mono text-xs"
+                          data-testid={`citation-chunk-${i + 1}`}
+                        >
+                          {c.chunk_id}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}

@@ -21,7 +21,24 @@ import { __resetOrgTokenStoreForTests } from "../../auth/orgTokenStore";
 import type { Role } from "../../auth/token";
 
 const BASE = "http://localhost:8000";
-const server = setupServer();
+// The authenticated Dashboard (home-view) renders live WorkspaceStats, which
+// fetch GET /documents and GET /analytics/usage. Default no-op handlers keep
+// these auth-flow tests green under the strict onUnhandledRequest guard.
+const server = setupServer(
+  http.get(`${BASE}/documents`, () => HttpResponse.json([])),
+  http.get(`${BASE}/analytics/usage`, () =>
+    HttpResponse.json({
+      org_id: "org-1",
+      start: null,
+      end: null,
+      total_tokens: 0,
+      total_cost: "0",
+      by_provider: [],
+      by_model: [],
+      by_user: [],
+    }),
+  ),
+);
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {

@@ -1,7 +1,8 @@
 import type { JSX } from "react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { SessionProvider } from "./SessionProvider";
 import { useSession } from "./useSession";
@@ -41,15 +42,23 @@ function SessionProbe(): JSX.Element {
 }
 
 function renderApp(initialPath: string) {
+  // The authenticated Dashboard renders live WorkspaceStats via React Query, so
+  // the app tree needs a QueryClientProvider (as it does in production). Retries
+  // are disabled so any stat fetch settles immediately in the test environment.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
     <ThemeProvider>
       <ToastProvider>
         <CommandPaletteProvider>
-          <SessionProvider>
-            <MemoryRouter initialEntries={[initialPath]}>
-              <AppRouter />
-            </MemoryRouter>
-          </SessionProvider>
+          <QueryClientProvider client={queryClient}>
+            <SessionProvider>
+              <MemoryRouter initialEntries={[initialPath]}>
+                <AppRouter />
+              </MemoryRouter>
+            </SessionProvider>
+          </QueryClientProvider>
         </CommandPaletteProvider>
       </ToastProvider>
     </ThemeProvider>,

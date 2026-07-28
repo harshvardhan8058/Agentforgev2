@@ -36,6 +36,7 @@ import { cn } from "../../lib/cn";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Badge } from "../../components/ui/Badge";
 import { Kbd } from "../../components/ui/Kbd";
+import { WorkspaceStats } from "./WorkspaceStats";
 
 interface Destination {
   label: string;
@@ -230,6 +231,9 @@ export function DashboardView(): JSX.Element {
           </Badge>
         </div>
       </section>
+
+      {/* Live workspace metrics. */}
+      <WorkspaceStats />
 
       {/* Quick actions. */}
       {quickActions.length > 0 && (

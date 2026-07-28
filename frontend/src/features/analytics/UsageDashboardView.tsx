@@ -173,8 +173,8 @@ export function UsageDashboardView(): JSX.Element {
           {report && !usage.isLoading && isEmptyReport(report) && (
             <div data-testid="analytics-empty">
               <EmptyState
-                title="No usage recorded"
-                message="There are no usage records for the selected range."
+                title="No usage recorded yet"
+                message="Usage and cost accrue here as you run grounded queries and agent runs. Try a query, then widen the time range to see the breakdown by provider, model, and user."
                 icon={<BarChart3 className="h-8 w-8" />}
               />
             </div>
