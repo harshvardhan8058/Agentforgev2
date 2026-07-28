@@ -14,6 +14,8 @@ import {
   Building2,
   Keyboard,
   Search,
+  Sparkles,
+  UploadCloud,
   type LucideIcon,
 } from "lucide-react";
 
@@ -76,6 +78,24 @@ export function buildCommands(handlers: CommandHandlers): Command[] {
       permission: "run_agents",
       icon: PlayCircle,
       perform: () => handlers.navigate("/agents"),
+    },
+    {
+      id: "cmd-multi-agent-run",
+      label: "Start multi-agent run",
+      group: "Actions",
+      keywords: ["multi", "planner", "researcher", "writer", "critic", "workflow"],
+      permission: "run_agents",
+      icon: Sparkles,
+      perform: () => handlers.navigate("/multi-agent"),
+    },
+    {
+      id: "cmd-upload-document",
+      label: "Upload a document",
+      group: "Actions",
+      keywords: ["upload", "document", "ingest", "corpus", "file"],
+      permission: "ingest_documents",
+      icon: UploadCloud,
+      perform: () => handlers.navigate("/documents"),
     },
     {
       id: "cmd-new-conversation",

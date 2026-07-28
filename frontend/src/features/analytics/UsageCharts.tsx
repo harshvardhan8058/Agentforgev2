@@ -28,6 +28,20 @@ interface ChartSection {
   entries: UsageBreakdownEntry[];
 }
 
+/** Compact axis number formatting: 1234 -> "1.2k", 1_500_000 -> "1.5M". */
+function compactNumber(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (abs >= 1_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+  return String(value);
+}
+
+/** Full, thousands-separated tokens for the tooltip. */
+function formatTokens(value: number): string {
+  return `${value.toLocaleString("en-US")} tokens`;
+}
+
 /**
  * Token-count bar charts for the breakdowns (tokens are numeric and safe to
  * plot; costs remain verbatim strings in the tables).
@@ -53,12 +67,49 @@ export default function UsageCharts({
           <span className="text-sm font-semibold text-text">{section.label}</span>
           <div className="h-48 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={section.entries.map((e) => ({ key: e.key, tokens: e.total_tokens }))}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--af-border)" />
-                <XAxis dataKey="key" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="tokens" fill="var(--af-primary)" radius={[4, 4, 0, 0]} />
+              <BarChart
+                data={section.entries.map((e) => ({ key: e.key, tokens: e.total_tokens }))}
+                margin={{ top: 8, right: 8, bottom: 4, left: 4 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="var(--color-border)"
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="key"
+                  tick={{ fontSize: 11, fill: "var(--color-text-muted)" }}
+                  tickLine={false}
+                  axisLine={{ stroke: "var(--color-border)" }}
+                  interval={0}
+                  tickMargin={6}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: "var(--color-text-muted)" }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={44}
+                  tickFormatter={compactNumber}
+                  allowDecimals={false}
+                />
+                <Tooltip
+                  cursor={{ fill: "var(--color-surface-hover)" }}
+                  formatter={(value) => [formatTokens(Number(value)), "Tokens"]}
+                  contentStyle={{
+                    background: "var(--color-surface-raised)",
+                    border: "1px solid var(--color-border-strong)",
+                    borderRadius: "0.5rem",
+                    fontSize: "0.75rem",
+                    color: "var(--color-text)",
+                  }}
+                  labelStyle={{ color: "var(--color-text-muted)" }}
+                />
+                <Bar
+                  dataKey="tokens"
+                  fill="var(--color-primary)"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={64}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>

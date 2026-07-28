@@ -34,7 +34,12 @@ import type { Role } from "../auth/token";
 import type { ReactNode } from "react";
 
 const BASE = "http://localhost:8000";
-const server = setupServer();
+// RagQueryView resolves citation filenames from GET /documents; a default
+// empty-corpus handler keeps these error-path tests green (the specific
+// DocumentListView test overrides it as needed).
+const server = setupServer(
+  http.get(`${BASE}/documents`, () => HttpResponse.json([])),
+);
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
