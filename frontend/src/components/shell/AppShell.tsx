@@ -10,10 +10,11 @@
  *  - `md–xl`: a persistent collapsible sidebar + content area;
  *  - `≥ 2xl`: reading surfaces honor a max-width while the shell uses the width.
  */
+import type { JSX } from "react";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { LogOut, Menu, Moon, PanelLeft, Search, Sun } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 import { useSession } from "../../auth/useSession";
 import { useTheme } from "../../hooks/useTheme";

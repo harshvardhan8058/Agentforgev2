@@ -9,6 +9,7 @@
  * `ErrorBanner`. The whole control is gated behind `ingest_documents` by its
  * caller (`<Can>`), so it is absent from the DOM when the Role lacks it.
  */
+import type { JSX } from "react";
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, UploadCloud } from "lucide-react";

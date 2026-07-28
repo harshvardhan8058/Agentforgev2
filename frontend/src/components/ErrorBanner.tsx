@@ -7,6 +7,7 @@
  * alongside the message. It never renders a stack trace (the normalizer already
  * strips internal text for `500`), and offers an optional retry affordance.
  */
+import type { JSX } from "react";
 import { AlertTriangle } from "lucide-react";
 
 import type { ClientError } from "../api/errors";

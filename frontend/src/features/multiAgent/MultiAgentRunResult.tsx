@@ -7,6 +7,7 @@
  * the run as not found (Req 10.7). Used both as an on-demand lookup and as the
  * refresh target after a `409` on approval (Req 10.8).
  */
+import type { JSX } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { apiClient } from "../../api/client";

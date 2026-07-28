@@ -9,6 +9,7 @@
  *
  * Presentational only. It never fetches, gates, or mutates — callers own that.
  */
+import type { JSX } from "react";
 import { type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 

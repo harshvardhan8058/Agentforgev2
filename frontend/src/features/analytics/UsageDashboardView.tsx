@@ -15,6 +15,7 @@
  * is isolated while totals and the others still render (Req 11.6). Gated behind
  * `read`.
  */
+import type { JSX } from "react";
 import { Suspense, lazy, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart3 } from "lucide-react";

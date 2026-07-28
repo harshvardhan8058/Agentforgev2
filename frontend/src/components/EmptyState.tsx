@@ -6,6 +6,7 @@
  * supporting copy, and an optional primary action. Semantic and accessible —
  * the icon is decorative and the title reads as a heading.
  */
+import type { JSX } from "react";
 import { type ReactNode } from "react";
 import { Inbox } from "lucide-react";
 

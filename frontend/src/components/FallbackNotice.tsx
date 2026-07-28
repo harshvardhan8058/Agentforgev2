@@ -7,6 +7,7 @@
  * an understood, expected state. Rendered only when a response's provider is
  * the fallback provider.
  */
+import type { JSX } from "react";
 import { Info } from "lucide-react";
 
 export function FallbackNotice(): JSX.Element {

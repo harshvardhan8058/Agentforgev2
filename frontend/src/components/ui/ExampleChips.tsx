@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 /**
  * `ExampleChips`: a compact row of one-click example prompts.
  *

@@ -6,6 +6,7 @@
  * guarantees elsewhere are never altered by the presentation layer. The icon
  * badge uses the tinted brand token by default and accepts a semantic tone.
  */
+import type { JSX } from "react";
 import { type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 

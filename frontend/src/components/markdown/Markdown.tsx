@@ -8,6 +8,7 @@
  * `{ document_id, chunk_id }` using the pure `extractCitations` mapping
  * (Property 15); out-of-range / non-reference markers stay inert.
  */
+import type { JSX } from "react";
 import { Children, isValidElement, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";

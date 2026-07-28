@@ -8,6 +8,7 @@
  * an empty list and this component marks the trace detail **unavailable** while
  * still rendering the surrounding run data (graceful degradation, Req 6.3).
  */
+import type { JSX } from "react";
 import { Wrench } from "lucide-react";
 
 import { Badge } from "../../components/ui/Badge";

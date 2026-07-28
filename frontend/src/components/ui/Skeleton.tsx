@@ -2,6 +2,7 @@
  * `Skeleton`: a shimmer placeholder that matches the final layout while data
  * loads. Marked `aria-hidden` and exposed with a stable test id.
  */
+import type { JSX } from "react";
 import { type HTMLAttributes } from "react";
 
 import { cn } from "../../lib/cn";

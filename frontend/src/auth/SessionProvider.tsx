@@ -9,6 +9,7 @@
  * stores a token; `logout` clears the token and all derived state (Req 3.1,
  * 3.2, 3.4).
  */
+import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { decodeClaims, isExpired } from "./token";

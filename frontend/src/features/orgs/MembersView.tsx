@@ -19,6 +19,7 @@
  *
  * Premium UX: cards, toasts, confirm feedback, responsive layout, WCAG AA.
  */
+import type { JSX } from "react";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Plus, UserPlus, Users } from "lucide-react";

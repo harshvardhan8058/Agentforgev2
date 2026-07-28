@@ -8,6 +8,7 @@
  * error — so a single failing endpoint never blocks the dashboard. Gated behind
  * `read`; renders nothing for a role without it.
  */
+import type { JSX } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Coins, FileText, Hash, type LucideIcon } from "lucide-react";
 
