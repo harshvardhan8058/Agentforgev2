@@ -8,7 +8,8 @@
  * active entry carries a left accent bar and raised surface. Used by both the
  * persistent desktop sidebar and the mobile drawer.
  */
-import { NavLink } from "react-router-dom";
+import type { JSX } from "react";
+import { NavLink } from "react-router";
 
 import { Can } from "../Can";
 import { useSession } from "../../auth/useSession";

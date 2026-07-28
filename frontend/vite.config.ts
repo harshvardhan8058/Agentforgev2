@@ -25,7 +25,7 @@ export default defineConfig({
           // transitive deps so no other vendor chunk forms a circular import
           // edge back into this one (Rollup rejects circular manual chunks).
           if (
-            /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler|@remix-run[\\/]router|loose-envify|js-tokens|object-assign|use-sync-external-store)[\\/]/.test(
+            /[\\/]node_modules[\\/](react|react-dom|react-router|scheduler|loose-envify|js-tokens|object-assign|use-sync-external-store)[\\/]/.test(
               id,
             )
           ) {

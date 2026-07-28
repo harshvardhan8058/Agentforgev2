@@ -7,6 +7,7 @@
  * `Mod+Shift+L`) via the pure `useKeyboardShortcuts` builder and passes the
  * unambiguous bindings to the overlay.
  */
+import type { JSX } from "react";
 import { useMemo } from "react";
 
 import { useCommandPalette } from "../../hooks/useCommandPalette";

@@ -2,6 +2,7 @@
  * `Badge`: a small token-styled status/label pill. Semantic tones map to the
  * design's decision/status color roles.
  */
+import type { JSX } from "react";
 import { type HTMLAttributes } from "react";
 
 import { cn } from "../../lib/cn";

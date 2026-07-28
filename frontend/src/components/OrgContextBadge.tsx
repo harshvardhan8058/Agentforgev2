@@ -7,6 +7,7 @@
  * role. When unauthenticated it renders nothing (the badge only appears within
  * the authenticated layout).
  */
+import type { JSX } from "react";
 import { useSession } from "../auth/useSession";
 import { orgLabel } from "../auth/orgNameStore";
 import { orgMonogram, orgMonogramStyle } from "../lib/orgIdentity";

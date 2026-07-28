@@ -7,9 +7,10 @@
  * keyboard-operable and screen-reader labeled via cmdk/Radix semantics; focus
  * is trapped while open and restored on close.
  */
+import type { JSX } from "react";
 import { Command as CommandPrimitive } from "cmdk";
 import { useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 
 import { can } from "../../auth/rbac";
 import { useSession } from "../../auth/useSession";

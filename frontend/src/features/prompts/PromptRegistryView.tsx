@@ -14,6 +14,7 @@
  * the initial bundle) and **mocked in tests** so Monaco never loads under
  * Vitest.
  */
+import type { JSX } from "react";
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GitCompare, Plus, SlidersHorizontal } from "lucide-react";

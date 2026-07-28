@@ -7,24 +7,10 @@ afterEach(() => {
   cleanup();
 });
 
-/**
- * Silence ONLY the two React Router v7 migration advisories in test logs.
- *
- * The production app (`main.tsx`) already opts into `v7_startTransition` and
- * `v7_relativeSplatPath`, so these advisories are informational. Component
- * tests construct their own `MemoryRouter`/`BrowserRouter` without the flags;
- * enabling `v7_startTransition` there would change update batching and is not
- * worth the risk purely for log hygiene. We therefore filter these two specific
- * messages so genuine warnings remain fully visible.
- */
-const originalWarn = console.warn;
-console.warn = (...args: unknown[]): void => {
-  const first = args[0];
-  if (typeof first === "string" && first.includes("React Router Future Flag Warning")) {
-    return;
-  }
-  originalWarn(...(args as Parameters<typeof console.warn>));
-};
+// NOTE: a console filter used to live here to silence the two React Router v7
+// future-flag advisories. Under React Router 8 that behaviour is the default and
+// the advisories are no longer emitted, so the filter was removed rather than
+// left in place — console warnings are now surfaced unfiltered.
 
 /**
  * Deterministic UI environment:

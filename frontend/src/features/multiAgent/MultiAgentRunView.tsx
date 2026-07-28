@@ -22,6 +22,7 @@
  * ordered event log, and rich empty/streaming/success/error states. Motion is
  * reduced-motion aware and instant under test.
  */
+import type { JSX } from "react";
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ListTree, PlayCircle, Radio, Sparkles, StopCircle } from "lucide-react";

@@ -5,6 +5,7 @@
  * emitted **verbatim** — the exact string returned by the Backend_API, with no
  * parsing, rounding, or reformatting (Req 11.4, Property 11).
  */
+import type { JSX } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { formatCost } from "./formatCost";
 

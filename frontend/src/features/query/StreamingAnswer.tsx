@@ -9,6 +9,7 @@
  * (`useInstantMotion`) it renders the full markdown immediately, so nothing is
  * ever hidden and tests never race an animation.
  */
+import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import { Markdown } from "../../components/markdown/Markdown";

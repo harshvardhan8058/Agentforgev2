@@ -7,8 +7,18 @@
   "engines": {
     "node": ">=22"
   },
+  "comment:overrides": [
+    "dompurify: monaco-editor pins a vulnerable 3.2.x; forced to a patched 3.4.x (API-compatible).",
+    "js-yaml: @redocly/openapi-core pins 4.2.0 (GHSA-52cp-r559-cp3m); 4.3.0 is the in-range patch.",
+    "NOT overridden - brace-expansion: every 1.x/2.x release is in the vulnerable range and the",
+    "only patched line (5.0.8) exports a named { expand } from its CJS build, which breaks",
+    "minimatch 3.x's callable `require('brace-expansion')(...)` inside ESLint. It is dev-only",
+    "(lint-time glob expansion over our own committed patterns, never attacker-controlled input),",
+    "so it is knowingly accepted rather than forced. See docs/SECURITY_MAINTENANCE.md."
+  ],
   "overrides": {
-    "dompurify": "^3.4.12"
+    "dompurify": "^3.4.12",
+    "js-yaml": "^4.3.0"
   },
   "scripts": {
     "dev": "vite",
@@ -39,10 +49,10 @@
     "framer-motion": "^11.18.2",
     "lucide-react": "^0.469.0",
     "openapi-fetch": "^0.13.4",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-markdown": "^9.1.0",
-    "react-router-dom": "^6.28.0",
+    "react-router": "^8.3.0",
     "recharts": "^3.9.2",
     "rehype-highlight": "^7.0.2",
     "rehype-sanitize": "^6.0.0",
@@ -58,8 +68,8 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
-    "@types/react": "^18.3.17",
-    "@types/react-dom": "^18.3.5",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.5.4",
     "axe-core": "^4.12.1",

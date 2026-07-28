@@ -11,6 +11,7 @@
  *
  * Default-exported for `React.lazy`.
  */
+import type { JSX } from "react";
 import Editor, { DiffEditor } from "@monaco-editor/react";
 
 export interface PromptStudioProps {

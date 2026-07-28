@@ -8,6 +8,7 @@
  * visually distinct states — `flag` shows flags + reason; `block` shows the
  * reason. An empty config renders an explicit no-active-guardrails state.
  */
+import type { JSX } from "react";
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";

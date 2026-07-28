@@ -8,6 +8,7 @@
  * coercion of its rows: a malformed entry surfaces as a render error that the
  * enclosing per-breakdown error boundary isolates (Req 11.6).
  */
+import type { JSX } from "react";
 import type { UsageBreakdownEntry } from "./types";
 import { formatCost } from "./formatCost";
 

@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // Self-hosted fonts (subset latin woff2, font-display: swap via @fontsource).
@@ -49,12 +49,12 @@ if (rootElement) {
         <ToastProvider>
           <CommandPaletteProvider>
             <QueryClientProvider client={queryClient}>
-              <BrowserRouter
-                future={{
-                  v7_startTransition: true,
-                  v7_relativeSplatPath: true,
-                }}
-              >
+              {/*
+                React Router v8: the former v7_startTransition and
+                v7_relativeSplatPath future flags are now the default
+                behaviour, so the explicit opt-in is no longer required.
+              */}
+              <BrowserRouter>
                 <App />
               </BrowserRouter>
             </QueryClientProvider>

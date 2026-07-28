@@ -7,6 +7,7 @@
  * tracing), the empty entry list renders as "trace detail unavailable" rather
  * than an error (Req 6.3).
  */
+import type { JSX } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { apiClient } from "../../api/client";

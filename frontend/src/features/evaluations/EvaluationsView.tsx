@@ -9,6 +9,7 @@
  * a persisted run (`GET /evaluations/runs/{id}`) showing `aggregate_score` +
  * per-item scores. A `404` presents the run as not found.
  */
+import type { JSX } from "react";
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardList, Plus } from "lucide-react";

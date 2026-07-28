@@ -6,6 +6,7 @@
  * overlay surface (`af-glass`) with the solid WCAG-AA fallback declared in
  * globals.css.
  */
+import type { JSX } from "react";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { type ReactNode } from "react";

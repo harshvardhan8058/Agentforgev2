@@ -8,6 +8,7 @@
  * queries) under the new context. Listens for the ⌘K "switch organization"
  * command to open programmatically.
  */
+import type { JSX } from "react";
 import { useEffect, useState } from "react";
 import { Building2, Check, ChevronsUpDown } from "lucide-react";
 

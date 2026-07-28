@@ -16,6 +16,7 @@
  * Premium UX: cards with skeleton loaders, an explicit empty state, toasts,
  * responsive layout, WCAG AA.
  */
+import type { JSX } from "react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, KeyRound, Plus, Trash2 } from "lucide-react";

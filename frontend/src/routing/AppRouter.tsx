@@ -19,8 +19,9 @@
  * hook (fired by the auth middleware on a terminal 401 / refresh failure) to a
  * router navigation to `/login` (Req 3.3, 3.6).
  */
+import type { JSX } from "react";
 import { lazy, useEffect } from "react";
-import { Route, Routes, useNavigate } from "react-router-dom";
+import { Route, Routes, useNavigate } from "react-router";
 
 import { setUnauthenticatedHandler } from "../auth/tokenStore";
 import { ProtectedRoute } from "./ProtectedRoute";

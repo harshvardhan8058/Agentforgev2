@@ -2,6 +2,7 @@
  * `Card`: a token-styled surface container with optional raised elevation.
  * Composed of `Card`, `CardHeader`, `CardTitle`, and `CardContent`.
  */
+import type { JSX } from "react";
 import { type HTMLAttributes } from "react";
 
 import { cn } from "../../lib/cn";

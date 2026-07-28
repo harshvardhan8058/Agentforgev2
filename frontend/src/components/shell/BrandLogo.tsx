@@ -6,6 +6,7 @@
  * The mark is decorative; the accessible product name is exposed via the
  * wordmark text (or the `aria-label` when compact).
  */
+import type { JSX } from "react";
 import { cn } from "../../lib/cn";
 
 function ForgeMark({ className }: { className?: string }): JSX.Element {

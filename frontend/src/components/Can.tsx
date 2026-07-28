@@ -7,6 +7,7 @@
  * client can never expose an action the backend would not authorize (Req
  * 4.2–4.5).
  */
+import type { JSX } from "react";
 import { type ReactNode } from "react";
 
 import { can, type Permission } from "../auth/rbac";

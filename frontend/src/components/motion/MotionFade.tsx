@@ -5,6 +5,7 @@
  * motion / test it renders its children instantly in the final state with no
  * animation, so content is always present for assertions and never hidden.
  */
+import type { JSX } from "react";
 import { motion } from "framer-motion";
 import { type ReactNode } from "react";
 

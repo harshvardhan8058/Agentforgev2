@@ -11,6 +11,7 @@
  * state is shown for zero documents; metadata reflows into stacked cards on
  * mobile and a token-spaced table on larger breakpoints.
  */
+import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Trash2 } from "lucide-react";
 import { PageHeader } from "../../components/ui/PageHeader";
