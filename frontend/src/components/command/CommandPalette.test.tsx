@@ -1,6 +1,7 @@
+import type { JSX } from "react";
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router";
 
 import { SessionContext } from "../../auth/useSession";
 import { makeSession } from "../../test/renderWithSession";

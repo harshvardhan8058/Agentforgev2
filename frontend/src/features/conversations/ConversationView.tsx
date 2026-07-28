@@ -16,8 +16,9 @@
  * a conversation with no messages yet, and a uniform `ErrorBanner` for
  * non-404 failures.
  */
+import type { JSX } from "react";
 import { useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { MessagesSquare, Plus } from "lucide-react";
 import { PageHeader } from "../../components/ui/PageHeader";

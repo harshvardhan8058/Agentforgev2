@@ -7,6 +7,8 @@
  * under test while still visualizing the scores. The authoritative numeric
  * scores are always shown as text alongside each bar.
  */
+
+import type { JSX } from "react";
 interface ItemScore {
   item_id: string;
   evaluator: string;

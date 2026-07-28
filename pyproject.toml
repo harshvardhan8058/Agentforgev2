@@ -10,35 +10,48 @@ readme = "README.md"
 requires-python = ">=3.11"
 
 # Pinned runtime dependencies (dependency manifest, Req 1.3).
+#
+# Every pin below is held at a version with NO known CVE in the advisory databases
+# (verified with `pip-audit`; see docs/SECURITY_MAINTENANCE.md). Several of these
+# libraries sit directly on untrusted-input paths and must not be allowed to drift:
+#
+#   pyjwt             token verification (algorithm-confusion / `crit` bypass fixes)
+#   python-multipart  multipart upload parsing (path traversal + parser DoS fixes)
+#   starlette         request URL reconstruction from Host/path (via fastapi)
+#   pypdf             parses attacker-supplied PDFs during document ingest
+#   markdown          parses attacker-supplied markdown during chunking
 dependencies = [
-    "fastapi==0.115.6",
-    "uvicorn[standard]==0.34.0",
-    "pydantic==2.10.4",
-    "pydantic-settings==2.7.1",
-    "sqlalchemy==2.0.36",
-    "asyncpg==0.30.0",
-    "psycopg[binary]==3.2.3",
-    "pgvector==0.3.6",
-    "chromadb==0.5.23",
-    "sentence-transformers==3.3.1",
-    "redis==5.2.1",
-    "pypdf==5.1.0",
-    "markdown==3.7",
-    "python-multipart==0.0.20",
-    "groq==0.13.1",
-    "langgraph==1.2.7",
-    "langchain-core==1.4.8",
-    "pyjwt==2.10.1",
-    "argon2-cffi==23.1.0",
+    "fastapi==0.140.9",
+    "uvicorn[standard]==0.51.0",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+    "sqlalchemy==2.0.51",
+    "asyncpg==0.31.0",
+    "psycopg[binary]==3.3.4",
+    "pgvector==0.5.0",
+    "chromadb==1.5.9",
+    "sentence-transformers==5.6.1",
+    "redis==8.0.1",
+    "pypdf==6.14.2",
+    "markdown==3.10.2",
+    "python-multipart==0.0.32",
+    "groq==1.6.0",
+    "langgraph==1.2.9",
+    "langchain-core==1.5.1",
+    "pyjwt==2.13.0",
+    "argon2-cffi==25.1.0",
 ]
 
 [project.optional-dependencies]
 # Pinned test/development dependencies.
 dev = [
-    "pytest==8.3.4",
-    "pytest-asyncio==0.25.0",
-    "hypothesis==6.123.2",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "hypothesis==6.163.0",
     "httpx==0.28.1",
+    # Dependency CVE gate. Run `pip-audit` (see docs/SECURITY_MAINTENANCE.md) to
+    # re-verify that every pin above is still advisory-clean.
+    "pip-audit==2.9.0",
 ]
 
 [tool.setuptools.packages.find]

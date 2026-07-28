@@ -136,12 +136,12 @@ def test_load_settings_allows_production_with_jwt_secret(monkeypatch):
     from agentforge.config.settings import load_settings
 
     _apply_prod_env(monkeypatch)
-    monkeypatch.setenv("JWT_SECRET", "a-strong-production-secret")
+    monkeypatch.setenv("JWT_SECRET", "a-strong-production-secret-over-32-bytes")
 
     settings = load_settings()
     assert settings.profile == "production"
     assert settings.jwt_secret is not None
-    assert settings.jwt_secret.get_secret_value() == "a-strong-production-secret"
+    assert settings.jwt_secret.get_secret_value() == "a-strong-production-secret-over-32-bytes"
 
 
 def test_load_settings_skips_guard_when_auth_disabled(monkeypatch):
@@ -154,3 +154,56 @@ def test_load_settings_skips_guard_when_auth_disabled(monkeypatch):
     settings = load_settings()
     assert settings.auth_enabled is False
     assert settings.jwt_secret is None
+
+
+# --- Token_Signing_Secret strength guard (RFC 7518 §3.2) ---------------------------
+
+
+def test_load_settings_rejects_weak_jwt_secret_in_production(monkeypatch):
+    """A production jwt_secret shorter than the HS256 key minimum aborts startup.
+
+    HS256 is HMAC-SHA-256, so RFC 7518 §3.2 requires a key of at least the 32-byte hash
+    output size. A shorter secret makes Access_Tokens cheaper to forge, which would let an
+    attacker mint arbitrary ``org_id``/``role`` claims and defeat RBAC + tenant isolation.
+    """
+    from agentforge.config.settings import MIN_JWT_SECRET_BYTES, ConfigError, load_settings
+
+    _apply_prod_env(monkeypatch)
+    weak = "x" * (MIN_JWT_SECRET_BYTES - 1)
+    monkeypatch.setenv("JWT_SECRET", weak)
+
+    with pytest.raises(ConfigError) as exc_info:
+        load_settings()
+    assert "jwt_secret" in exc_info.value.missing
+    # The abort names the setting and the requirement, and never leaks the value itself.
+    assert weak not in str(exc_info.value)
+
+
+def test_load_settings_accepts_jwt_secret_at_exact_minimum(monkeypatch):
+    """A secret at exactly the minimum length is accepted (boundary is inclusive)."""
+    from agentforge.config.settings import MIN_JWT_SECRET_BYTES, load_settings
+
+    _apply_prod_env(monkeypatch)
+    monkeypatch.setenv("JWT_SECRET", "y" * MIN_JWT_SECRET_BYTES)
+
+    settings = load_settings()
+    assert len(settings.jwt_secret.get_secret_value()) == MIN_JWT_SECRET_BYTES
+
+
+def test_generated_local_dev_secret_satisfies_the_production_minimum():
+    """The per-boot local dev secret is well above the HS256 minimum.
+
+    Guards against the guard only being satisfiable in production: the keyless local boot
+    path must never generate a secret that production would reject.
+    """
+    from agentforge.config.settings import MIN_JWT_SECRET_BYTES, Settings
+    from agentforge.config.container import build_auth_service
+    from agentforge.enterprise.identity import InMemory_Identity_Store
+
+    settings = Settings(  # type: ignore[call-arg]
+        profile="local",
+        database_url="postgresql+asyncpg://u:p@localhost:5432/agentforge",
+        redis_url="redis://localhost:6379/0",
+    )
+    auth = build_auth_service(settings, InMemory_Identity_Store())
+    assert len(auth._secret.encode("utf-8")) >= MIN_JWT_SECRET_BYTES

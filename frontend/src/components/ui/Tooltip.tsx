@@ -2,6 +2,7 @@
  * `Tooltip`: token-styled tooltip over Radix Tooltip. Export the provider so a
  * single delay-duration group can wrap the app.
  */
+import type { JSX } from "react";
 import * as RadixTooltip from "@radix-ui/react-tooltip";
 import { type ReactNode } from "react";
 

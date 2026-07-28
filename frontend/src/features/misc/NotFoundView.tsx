@@ -5,7 +5,8 @@
  * the Operator keeps their navigation and context while being told the
  * destination does not exist, with a clear path back to the dashboard.
  */
-import { Link } from "react-router-dom";
+import type { JSX } from "react";
+import { Link } from "react-router";
 import { Compass, ArrowLeft } from "lucide-react";
 
 export function NotFoundView(): JSX.Element {

@@ -8,6 +8,7 @@
  * The layout is fully responsive and centered, with generous rhythm. It is
  * presentational only — the views own all Backend_API interaction.
  */
+import type { JSX } from "react";
 import { type ReactNode } from "react";
 
 import { MotionFade } from "../../components/motion/MotionFade";

@@ -12,6 +12,7 @@
  * A `409 run-not-awaiting-approval` surfaces a message and asks the parent to
  * refresh the run status (Req 10.8).
  */
+import type { JSX } from "react";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Check, PauseCircle, Pencil, X } from "lucide-react";

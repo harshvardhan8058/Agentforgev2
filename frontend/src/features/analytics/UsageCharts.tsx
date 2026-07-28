@@ -10,6 +10,7 @@
  *
  * Default-exported so it can be consumed by `React.lazy`.
  */
+import type { JSX } from "react";
 import {
   Bar,
   BarChart,

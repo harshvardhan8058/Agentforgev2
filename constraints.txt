@@ -10,22 +10,27 @@
 #
 # See the backend image note in docs/INFRASTRUCTURE.md.
 
-# sentence-transformers==3.3.1 depends on an unpinned `transformers`; without this
-# constraint pip backtracks across many transformers releases. We bound it to a
-# COMPATIBLE RANGE (not an exact pin) that satisfies sentence-transformers==3.3.1
-# (which requires transformers>=4.41,<5) — this both prevents pathological backtracking
-# AND stays portable: it never pins an exact version that might not exist on the real
-# upstream PyPI (an exact pin resolved from this sandbox's mirror could fail on a
-# GitHub-hosted runner). The upper bound stays well within transformers 4.x so it never
-# drifts into a release that breaks sentence-transformers==3.3.1.
-transformers>=4.41,<4.48
+# `sentence-transformers` depends on an unpinned `transformers` (it accepts
+# >=4.41,<6.0.0); without a constraint pip backtracks across many transformers releases.
+# We bound it to a COMPATIBLE RANGE (not an exact pin) that both prevents pathological
+# backtracking AND stays portable: it never pins an exact version that might not exist on
+# the real upstream PyPI (an exact pin resolved from a local mirror could fail on a
+# GitHub-hosted runner).
+#
+# The LOWER bound is a security floor, not just a compatibility one. `transformers` is on
+# the embedding path (it loads model config/weights), and the 4.x line it previously
+# pinned to carried 25+ known advisories — the old `<4.48` upper bound sat *below* the
+# fix version for most of them, so the image was pinned to a knowingly-vulnerable release
+# even after the advisories were published. Keep this floor at an advisory-clean version
+# and re-verify with `pip-audit` (see docs/SECURITY_MAINTENANCE.md) before relaxing it.
+transformers>=5.14.1,<6.0
 
 # NOTE: torch is NOT resolved from PyPI. The Dockerfile builder stage installs a pinned
 # CPU-only build FIRST from the PyTorch CPU wheel index
-# (`pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.5.1"`), before the
+# (`pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"`), before the
 # `pip install -r requirements.txt -c constraints.txt` step. Because torch is already
-# satisfied, the sentence-transformers==3.3.1 resolve (which requires torch>=1.11) reuses the
+# satisfied, the sentence-transformers resolve (which requires torch>=1.11) reuses the
 # CPU build instead of pulling the CUDA/NVIDIA PyPI wheel. This removes the multi-GB
 # `nvidia-cu*` payload and drops the backend image from ~17.8 GB to well under the 4 GB budget,
 # with byte-identical application behavior (no source or app-dependency change). The
-# `transformers>=4.41,<4.48` bound above still applies to keep the resolve deterministic.
+# `transformers` bound above still applies to keep the resolve deterministic.

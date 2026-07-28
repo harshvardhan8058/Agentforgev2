@@ -16,7 +16,9 @@ from hypothesis import strategies as st
 from agentforge.enterprise.auth import Auth_Service
 from agentforge.enterprise.rbac import Role
 
-_SECRET = "dev-signing-secret-for-tests"
+# At least 32 bytes, matching the HS256 key minimum that `load_settings` enforces in
+# production (RFC 7518 §3.2), so the property suite signs with a realistically-sized key.
+_SECRET = "dev-signing-secret-for-tests-0123456789"
 _ROLES = list(Role)
 _BASE = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 

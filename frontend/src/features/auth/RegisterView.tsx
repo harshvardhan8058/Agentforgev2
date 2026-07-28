@@ -14,8 +14,9 @@
  * success toast, keyboard submit, visible focus rings, WCAG 2.1 AA. Motion is
  * instant under test.
  */
+import type { JSX } from "react";
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";

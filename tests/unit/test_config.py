@@ -15,7 +15,7 @@ def test_loads_settings_from_environment(monkeypatch):
     monkeypatch.setenv("API_PORT", "9001")
     monkeypatch.setenv("PROFILE", "production")
     # The production profile requires a Token_Signing_Secret (Phase 5, Req 1.8).
-    monkeypatch.setenv("JWT_SECRET", "prod-signing-secret")
+    monkeypatch.setenv("JWT_SECRET", "prod-signing-secret-of-at-least-32-bytes")
 
     settings = load_settings()
 
@@ -52,7 +52,7 @@ def test_credentials_activate_providers_when_present(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "secret-key-value")
     monkeypatch.setenv("PROFILE", "production")
     # The production profile requires a Token_Signing_Secret (Phase 5, Req 1.8).
-    monkeypatch.setenv("JWT_SECRET", "prod-signing-secret")
+    monkeypatch.setenv("JWT_SECRET", "prod-signing-secret-of-at-least-32-bytes")
     settings = load_settings()
 
     assert isinstance(settings.groq_api_key, SecretStr)

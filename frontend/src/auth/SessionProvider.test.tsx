@@ -1,6 +1,7 @@
+import type { JSX } from "react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 
 import { SessionProvider } from "./SessionProvider";
 import { useSession } from "./useSession";

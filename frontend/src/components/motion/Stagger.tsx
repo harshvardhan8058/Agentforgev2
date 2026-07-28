@@ -4,6 +4,7 @@
  * Each direct child fades/slides in with a small incremental delay. Under
  * reduced motion / test it renders all children instantly with no animation.
  */
+import type { JSX } from "react";
 import { motion } from "framer-motion";
 import { Children, type ReactNode } from "react";
 

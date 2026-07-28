@@ -15,6 +15,7 @@
  * `aria-live="polite"` region. An explicit empty state is shown before the
  * first query. Responsive from mobile → ultrawide.
  */
+import type { JSX } from "react";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ChevronDown, FilePlus2, Search, Sparkles } from "lucide-react";

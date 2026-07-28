@@ -1,8 +1,112 @@
 # AgentForge — Session Handoff
 
-**Repo:** `harshvardhan8058/AgentForge` · **Branch of record:** `main` · **Last updated:** 2026-07-09
+**Repo:** `harshvardhan8058/AgentForge` · **Branch of record:** `main` · **Last updated:** 2026-07-28
 
 > Self-contained handoff: a new session can continue from this file alone. Treat git/PR history as truth over the older docs (some are stale).
+
+## 0. Latest session (2026-07-28) — dependency modernization + Monaco CSP fix
+
+Branch `chore/dependency-security-modernization`. **Nothing was broken on entry** — all gates
+were green (484 backend tests, 183 frontend tests, lint, typecheck, OpenAPI drift, secret
+scan). The findings below came from security scanning and a CSP review, not failing tests.
+
+### 0.1 One real production bug fixed: Monaco was CDN-loaded
+
+`@monaco-editor/react` ships no copy of Monaco; by default its loader injects a `<script>`
+from `cdn.jsdelivr.net`. The gateway sends `script-src 'self'`, so **the Prompt Studio editor
+never mounted in the Docker/production stack** while working fine under `vite dev` (no CSP).
+It also broke the keyless "no external network calls" promise and was a supply-chain hole.
+
+Fixed by self-hosting: `monaco-editor` is now a dependency and
+`frontend/src/features/prompts/monacoSetup.ts` passes it to `loader.config({ monaco })` and
+wires `MonacoEnvironment.getWorker`. Proven by experiment — with the fix reverted, 13
+requests to `cdn.jsdelivr.net` fire on `/prompts`. Guarded by a new e2e spec
+(`frontend/e2e/monaco-selfhosted.spec.ts`) that fails on any third-party request; it was
+verified to fail without the fix.
+
+**Chunking gotcha (do not regress):** giving Monaco its own manual chunk was not enough —
+Rollup parked Vite's preload helper inside `vendor-monaco`, making the 2.6 MB editor a
+*static* import of the entry (with a `modulepreload` link) and defeating its `React.lazy`
+boundary. `vite.config.ts` now pins the helper to `vendor-react`. If you touch
+`manualChunks`, re-check that `dist/index.html` has **no** `vendor-monaco` preload link.
+
+**Monaco 0.56 import specifiers** are easy to get wrong: the package `exports` map is
+`"./*": "./esm/vs/*.js"`, so subpaths are written relative to `esm/vs` (e.g.
+`monaco-editor/editor/editor.api`, **not** `monaco-editor/esm/vs/editor/editor.api`). Also,
+per-language files moved to `languages/definitions/<lang>/register.js`;
+`basic-languages/<lang>/<lang>.contribution` no longer exists.
+
+### 0.2 Dependency security: 96 advisories → 1 accepted
+
+Pins were ~1.5 years stale. `pip-audit` found 96 advisories across 8 packages, several on
+paths that process untrusted input. All `pyproject.toml` pins were bumped — notably
+`pyjwt` 2.10.1→2.13.0 (token forgery: `crit` bypass, algorithm allow-list bypass),
+`python-multipart` 0.0.20→0.0.32 (upload path traversal + parser DoS), `pypdf` 5.1.0→6.14.2
+(35 advisories, parses uploaded PDFs), `starlette` 0.41.3→1.3.1 via `fastapi`
+0.115.6→0.140.9, plus pydantic/sqlalchemy/redis/chromadb/sentence-transformers/langgraph.
+
+Also: `Dockerfile` torch pin 2.5.1→2.13.0 (2.5.1 had 22 advisories including a `torch.load`
+RCE, directly on the model-load path), and `constraints.txt` `transformers` `<4.48`→
+`>=5.14.1,<6.0` — **the old upper bound sat below the fix version for most published
+transformers advisories, actively pinning the image to a knowingly-vulnerable release.**
+
+Result: `pip-audit` → 1 finding; `npm audit --omit=dev` → **0**. Rationale, the accepted
+`chromadb` finding, and the remaining build-only advisories are documented in the new
+**`docs/SECURITY_MAINTENANCE.md`**. Read that before bumping dependencies.
+
+### 0.3 New hardening: production JWT secret strength guard
+
+`load_settings` now rejects a production `JWT_SECRET` shorter than 32 bytes
+(`MIN_JWT_SECRET_BYTES`). HS256 is HMAC-SHA-256 and RFC 7518 §3.2 requires a key of at least
+the hash output size; a weak operator secret makes Access_Tokens brute-forceable, which would
+let an attacker mint arbitrary `org_id`/`role` claims and defeat both RBAC and tenant
+isolation. The error names the setting, never the value. The generated local dev secret is
+well above the bound, so keyless boot is unaffected.
+
+### 0.4 Framework upgrades: React 19 + React Router v8
+
+Driven by a security advisory: the installed `react-router` 6.30.4 had an open-redirect→XSS
+plus a constructor-injection advisory, fixed only in 7.18.0; 7.x then had its own advisory
+fixed in 8.3.0, which requires React ≥19.2.7. So the chain forced React 18→19.
+
+- Imports moved from `react-router-dom` to `react-router` (19 files). `react-router-dom` is a
+  deprecated re-export shim from v7 on and was **removed** as a dependency.
+- The `<BrowserRouter future={{...}}>` opt-in flags no longer exist (they are v7+ default
+  behavior) and were removed.
+- **React 19 removed the global `JSX` namespace** from `@types/react`. Rather than
+  re-declaring the global (which React removed deliberately), 69 files gained
+  `import type { JSX } from "react";` — the 90 `JSX.Element` usage sites are unchanged.
+- Side benefit: `framer-motion` 12 tree-shakes far better — `vendor-motion` fell from ~107 kB
+  to ~29 kB.
+
+### 0.5 FastAPI ≥0.140 breaking change worth knowing
+
+`include_router` no longer flattens routes onto `app.routes`; it appends an
+`_IncludedRouter` delegate that keeps routes on `.original_router`. This **silently turned
+three introspection-based security tests into failures** (and, had they been written slightly
+differently, into vacuous passes over an empty list) — they assert that every Phase 6 route
+declares `get_current_principal` + `require_permission`. New `tests/route_helpers.py`
+(`iter_api_routes`) walks the tree and handles both layouts. Use it for any future
+route-introspection test rather than iterating `app.routes` directly.
+
+### 0.6 Verification for this session
+
+Backend **487 passed** (3 new JWT-guard tests), OpenAPI drift check, secret scan, frontend
+`npm run ci` (183 tests), and **23 Playwright e2e** (21 existing + 2 new Monaco) all green.
+`frontend/openapi.json` + `schema.d.ts` regenerated (two benign OpenAPI 3.1 changes:
+`file` gains `contentMediaType`; `ValidationError` gains `input`/`ctx`).
+
+### 0.7 Deliberately NOT done (scope stopped here)
+
+- The 8 remaining **build-only** `npm audit` highs (`js-yaml`, `brace-expansion`) — clearing
+  them needs an `eslint` major bump. Production deps are clean.
+- nginx CSP/security-header hardening (missing `object-src`, `form-action`, `frame-src`,
+  `worker-src`, `Permissions-Policy`, COOP/CORP). **Note:** `worker-src 'self'` is worth
+  adding since Monaco now spawns a same-origin worker.
+- Site metadata: `frontend/index.html` still has only charset/viewport/title — no favicon,
+  description, `theme-color`, Open Graph/Twitter cards, web manifest, or `robots.txt`.
+- Everything in §5 still needs a real Docker host. The torch pin changed, so **re-verify the
+  image build and size** (§7).
 
 ## 1. Current repository state (actual `main`)
 - `main` is the complete, production-ready source of truth. Phases 1–9 + production hardening are all merged. **No open PRs.**
@@ -32,7 +136,7 @@
   - Also merged: `Redis_Rate_Limiter` uses a sync redis client (async client caused 500 on every authed endpoint); `RATE_LIMIT_ENABLED=false` default locally.
 
 ## 3. Current production-readiness status
-- Code complete. Keyless unit lane **484 passed**; frontend `npm run ci` green; `scripts/check_openapi.py` passes; migrations 0001–0011 intact.
+- Code complete. Keyless unit lane **487 passed**; frontend `npm run ci` green; Playwright e2e 23 passed; `scripts/check_openapi.py` passes; migrations 0001–0011 intact.
 - Static audit clean (interface parity, schema match, tenancy for all nine `Pg_*` stores; torch/sentence-transformers version compat).
 - NOT yet validated on a real Docker host (see §5). This is the gating item for "verified production ready."
 
@@ -47,7 +151,7 @@
 
 ## 5. Not yet verified on a real Docker host
 All require Docker/Postgres (unavailable in the assistant sandbox):
-- `docker compose build` — esp. B4: PyTorch CPU index (`download.pytorch.org/whl/cpu`) reachability and image ≤4 GB.
+- `docker compose build` — esp. B4: PyTorch CPU index (`download.pytorch.org/whl/cpu`) reachability and image ≤4 GB. **Re-verify: the torch pin moved 2.5.1→2.13.0 and the `transformers` constraint to `>=5.14.1,<6.0` (§0.2), so wheel availability and image size are both unproven on a real build.** The `2.13.0+cpu` cp311 manylinux wheel was confirmed present on `download.pytorch.org`.
 - `docker compose up` → all 5 healthy; live migrations incl. `CREATE EXTENSION vector`.
 - B1 persistence live — nine `Pg_*` stores' first real run; data survives `docker compose restart`.
 - B3 SSE incremental delivery through nginx; long-lived timeouts.
@@ -85,7 +189,7 @@ curl.exe http://localhost/health/ready                    # database:up, redis:u
 - 14 routers: health, ingest, query, documents, conversations, agent, multi_agent, auth, orgs, analytics, prompts, guardrails, evaluations, integrations.
 - Keyless defaults: Fallback LLM, SentenceTransformer embeddings, Chroma vectors, in-memory domain stores — unless `USE_DATABASE=true`/production (→ `Pg_*` stores) and credentials present.
 - DB access: `Pg_*` domain stores are sync psycopg, called via `run_in_threadpool`; async engine reserved for migrations/health. Additive migrations `0001–0011`. `org_id` tenancy → cross-tenant resolves to 404. Uniform `AppError` envelope. Secrets typed `SecretStr`.
-- Frontend: React 18 + Vite SPA; runtime config via `/config.js` (`window.__AGENTFORGE_CONFIG__.apiBaseUrl`); talks to API same-origin through nginx.
+- Frontend: React 19 + Vite SPA; runtime config via `/config.js` (`window.__AGENTFORGE_CONFIG__.apiBaseUrl`); talks to API same-origin through nginx.
 - Infra: nginx is the sole published entry (`:80→:8080`), routes `/`→frontend:8080 and API prefixes (+SSE)→api:8000; Postgres+pgvector; Redis. Production overlay adds TLS, GHCR images, secrets, one-shot migrate.
 
 ## 9. Known risks
@@ -104,6 +208,6 @@ curl.exe http://localhost/health/ready                    # database:up, redis:u
 
 ## Quick reference
 - Env toggles: `PROFILE` (local|production), `USE_DATABASE` (true locally), `RATE_LIMIT_ENABLED` (false locally), `API_BASE_URL` (frontend; `http://localhost` locally), `JWT_SECRET` (required in production, SecretStr from overlay), optional `GROQ_API_KEY`/`SEARCH_API_KEY`/`HOSTED_EMBEDDING_API_KEY`/`LANGSMITH_API_KEY`/integration tokens.
-- Keyless backend lane: `pytest -m "not integration" -q` (expect 484). Frontend: `cd frontend && npm run ci`. Contract: `python scripts/check_openapi.py`.
+- Keyless backend lane: `pytest -m "not integration" -q` (expect 487). Frontend: `cd frontend && npm run ci`, browser lane `npm run e2e` (expect 23). Contract: `python scripts/check_openapi.py`. Dependency CVE gates: `pip-audit` and `cd frontend && npm audit --omit=dev` — see `docs/SECURITY_MAINTENANCE.md`.
 
 ## End of handoff.

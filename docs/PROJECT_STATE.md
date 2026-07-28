@@ -184,7 +184,7 @@ engine + async Redis, runs migrations, then builds nine context graphs via the s
 composition root `config/container.py`. 14 routers. Keyless defaults (Fallback LLM,
 SentenceTransformer embeddings, Chroma vectors, in-memory stores) unless `USE_DATABASE=true`/
 production selects the `Pg_*` stores. `org_id` tenancy → 404; uniform `AppError` envelope;
-`SecretStr` secrets; additive migrations `0001`–`0011`. React 18 + Vite SPA served behind nginx,
+`SecretStr` secrets; additive migrations `0001`–`0011`. React 19 + Vite SPA served behind nginx,
 which is the sole published entry point (`:80→:8080`) routing `/`→frontend and API prefixes
 (+SSE)→api. Postgres+pgvector and Redis complete the stack; the production overlay adds TLS,
 GHCR images, secrets, and a one-shot migrate service.

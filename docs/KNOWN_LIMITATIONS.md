@@ -33,14 +33,15 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
 
 ## 3. Deployment & infrastructure limitations
 
-- **Backend image size:** ~11–12 GB because it ships CUDA-enabled torch. The CPU-only wheel CDN is unreachable from CI, so CI relocates Docker's storage to `/mnt` to build the image. A CPU-slim (~3.5 GB) image is deferred to future work.
+- **Backend image size:** the builder installs a **CPU-only** `torch` from the PyTorch CPU wheel index before resolving the app requirements, so the multi-GB `nvidia-cu*` CUDA payload is never pulled and the image stays under the 4 GB budget. CI still relocates Docker's storage to `/mnt` as a safety margin. GPU inference is therefore **not** available in the shipped image — the embedding model runs on CPU by design.
 - **Runtime properties gated:** the compose-smoke and migration-idempotence correctness properties (Properties 2 & 3) run only in the integration lane / against a real Docker host, not in the fast keyless unit lane.
 - **No managed-cloud primitives in v1:** Kubernetes/Helm, cloud autoscaling, DNS management, and real TLS certificate issuance are out of scope and documented as external responsibilities. v1 targets `docker compose` (local) and a production compose overlay.
 
 ## 4. Contract & testing gaps
 
-- **`frontend/openapi.json` is slightly stale:** it predates Phase 8's `GET /integrations/status`. This is a contract-freshness gap only — the SPA does not call that endpoint — and a regen is optional.
-- **Deterministic test posture:** the keyless backend lane (472 tests + Hypothesis properties) and `frontend npm run ci` are the source of truth. Integration-lane tests require external services/credentials and are not part of the default fast lane.
+- **`frontend/openapi.json` freshness is now enforced, not manual:** the committed contract is regenerated from `app.openapi()` and verified by `scripts/check_openapi.py`, which runs as its own CI step and as a property test. Drift fails the build, so the previously-noted staleness gap is closed.
+- **Deterministic test posture:** the keyless backend lane (487 tests + Hypothesis properties) and `frontend npm run ci` are the source of truth. Integration-lane tests require external services/credentials and are not part of the default fast lane.
+- **Dev-toolchain advisories remain open:** `npm audit` reports 0 vulnerabilities for **production** dependencies, but 8 high-severity findings persist in build-only tooling (`js-yaml` via `openapi-typescript` → `@redocly/openapi-core`, and `brace-expansion`/`minimatch` via `eslint`). Both are CPU-exhaustion DoS classes reachable only by feeding hostile input to a local codegen/lint run, so they do not affect the shipped artifacts. Clearing them requires an `eslint` major bump; see `SECURITY_MAINTENANCE.md`.
 
 ## 5. Manual sign-off items (intentionally open)
 

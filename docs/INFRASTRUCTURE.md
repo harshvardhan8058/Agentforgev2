@@ -142,7 +142,7 @@ prior immutable tag.
 
 The backend image installs `torch` / `sentence-transformers` for the default local embedding
 provider. `torch` is installed as an ordinary transitive dependency of
-`sentence-transformers==3.3.1` **from PyPI** (`files.pythonhosted.org`) during the single
+`sentence-transformers==5.6.1` **from PyPI** (`files.pythonhosted.org`) during the single
 constrained `pip install -r requirements.txt -c constraints.txt` step in the builder stage.
 
 The image does **not** use the PyTorch CPU wheel index

@@ -6,7 +6,7 @@ contracts and changes **no backend behavior or contract**.
 
 ## What shipped
 
-A React 18 + Vite + TypeScript operator console in [`/frontend`](../frontend), mirroring
+A React 19 + Vite + TypeScript operator console in [`/frontend`](../frontend), mirroring
 the backend's clean layering with a **pure logic layer** isolated from I/O.
 
 **Architecture**

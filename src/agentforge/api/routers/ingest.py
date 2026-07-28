@@ -97,11 +97,11 @@ async def ingest_document(
         ) from exc
     except ExtractionTimeoutError as exc:
         raise AppError(
-            "extraction_timeout", str(exc), status.HTTP_422_UNPROCESSABLE_ENTITY
+            "extraction_timeout", str(exc), status.HTTP_422_UNPROCESSABLE_CONTENT
         ) from exc
     except ExtractionError as exc:
         raise AppError(
-            "extraction_failure", str(exc), status.HTTP_422_UNPROCESSABLE_ENTITY
+            "extraction_failure", str(exc), status.HTTP_422_UNPROCESSABLE_CONTENT
         ) from exc
     except EmbeddingError as exc:
         raise AppError(

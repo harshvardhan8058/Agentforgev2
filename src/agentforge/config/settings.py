@@ -239,6 +239,12 @@ class Settings(BaseSettings):
 # default is considered satisfied; these two have no default and drive Req 3.3/3.4.
 _REQUIRED_NON_SECRET = ("database_url", "redis_url")
 
+# Minimum Token_Signing_Secret length enforced in the production profile. HS256 is
+# HMAC-SHA-256, and RFC 7518 §3.2 requires a key of at least the hash output size
+# (256 bits = 32 bytes). Enforced in `load_settings` so a weak operator-supplied secret
+# aborts startup instead of silently shipping forgeable Access_Tokens.
+MIN_JWT_SECRET_BYTES = 32
+
 
 def load_settings() -> Settings:
     """Load and validate settings, aborting with the offending key on failure.
@@ -263,12 +269,24 @@ def load_settings() -> Settings:
     # Phase 5 production guard: the Token_Signing_Secret is optional in the local profile
     # (a dev secret is generated at boot) but REQUIRED in production. Its absence aborts
     # startup before any handler is reachable (Req 1.7, 1.8).
-    if (
-        settings.profile == "production"
-        and settings.auth_enabled
-        and settings.jwt_secret is None
-    ):
-        raise ConfigError(["jwt_secret"], detail="required in production profile")
+    if settings.profile == "production" and settings.auth_enabled:
+        if settings.jwt_secret is None:
+            raise ConfigError(["jwt_secret"], detail="required in production profile")
+        # Strength guard: HS256 is an HMAC-SHA-256 MAC, so RFC 7518 §3.2 requires a key of
+        # at least the hash output size (256 bits / 32 bytes). A shorter operator-supplied
+        # secret reduces the work needed to forge an Access_Token by brute force, which
+        # would let an attacker mint arbitrary `org_id`/`role` claims and defeat both RBAC
+        # and tenant isolation. The generated local dev secret is well above this bound,
+        # so only a deliberately weak production value can trip it. The error names the
+        # setting and the required length, never the value itself (Req 3.6).
+        if len(settings.jwt_secret.get_secret_value().encode("utf-8")) < MIN_JWT_SECRET_BYTES:
+            raise ConfigError(
+                ["jwt_secret"],
+                detail=(
+                    f"must be at least {MIN_JWT_SECRET_BYTES} bytes for "
+                    f"{settings.jwt_algorithm} (RFC 7518 section 3.2)"
+                ),
+            )
     return settings
 
 

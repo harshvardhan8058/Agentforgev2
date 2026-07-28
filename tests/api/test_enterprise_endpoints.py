@@ -38,6 +38,7 @@ from agentforge.vectorstore.chroma_store import Chroma_Store
 
 from tests.enterprise_helpers import install_enterprise_auth, issue_principal_headers
 from tests.fakes import DeterministicFakeEmbeddings
+from tests.route_helpers import iter_api_routes
 
 _DIM = 8
 
@@ -255,12 +256,13 @@ def test_enterprise_context_and_dependencies_are_wired():
         "/multi-agent/runs",
     }
     seen = set()
-    for route in _APP.routes:
-        path = getattr(route, "path", None)
-        if path in protected_paths:
+    for route in iter_api_routes(_APP):
+        if route.path in protected_paths:
             dep_names = _dependency_names(route)
-            assert "get_current_principal" in dep_names, f"{path} missing auth dependency"
-            seen.add(path)
+            assert (
+                "get_current_principal" in dep_names
+            ), f"{route.path} missing auth dependency"
+            seen.add(route.path)
     assert seen == protected_paths
 
 

@@ -3,6 +3,7 @@
  * chunk is fetched. A lightweight, layout-matching skeleton (header + content
  * blocks) so route transitions never flash empty. Decorative and aria-hidden.
  */
+import type { JSX } from "react";
 import { Skeleton } from "../components/ui/Skeleton";
 
 export function PageFallback(): JSX.Element {

@@ -13,6 +13,7 @@
  * static ordered layout** under `prefers-reduced-motion` (and under test) — no
  * information is ever hidden by the reduced-motion fallback.
  */
+import type { JSX } from "react";
 import { MotionFade } from "../../components/motion";
 import { Badge } from "../../components/ui/Badge";
 import { cn } from "../../lib/cn";

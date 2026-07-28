@@ -36,6 +36,7 @@ from agentforge.vectorstore.chroma_store import Chroma_Store
 
 from tests.enterprise_helpers import install_enterprise_auth
 from tests.fakes import DeterministicFakeEmbeddings
+from tests.route_helpers import api_route_paths, iter_api_routes
 
 _DIM = 8
 
@@ -95,7 +96,7 @@ def _wire_keyless(app, settings) -> None:
 
 def test_all_four_phase6_routers_registered():
     app = create_app(_make_settings())
-    paths = {getattr(r, "path", None) for r in app.routes}
+    paths = api_route_paths(app)
     assert "/analytics/usage" in paths
     assert "/prompts" in paths
     assert "/guardrails/config" in paths
@@ -117,10 +118,7 @@ def _flatten_calls(dependant) -> list:
 def test_every_phase6_route_declares_principal_and_permission():
     app = create_app(_make_settings())
     phase6_routes = [
-        r
-        for r in app.routes
-        if getattr(r, "path", "").startswith(_PHASE6_PREFIXES)
-        and hasattr(r, "dependant")
+        r for r in iter_api_routes(app) if r.path.startswith(_PHASE6_PREFIXES)
     ]
     assert phase6_routes, "expected Phase 6 routes to be registered"
     for route in phase6_routes:

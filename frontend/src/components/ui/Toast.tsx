@@ -4,6 +4,7 @@
  * glass surface. The imperative `useToast` API is layered on top in a later
  * task; these are the presentational/accessible primitives.
  */
+import type { JSX } from "react";
 import * as RadixToast from "@radix-ui/react-toast";
 import { X } from "lucide-react";
 import { forwardRef, type ComponentPropsWithoutRef } from "react";

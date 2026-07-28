@@ -7,6 +7,7 @@
  * (`missingVariables`, Property 12). On success it shows the rendered string;
  * on `400 missing_variable` it surfaces `details.missing` via `ErrorBanner`.
  */
+import type { JSX } from "react";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Play } from "lucide-react";

@@ -941,10 +941,7 @@ export interface components {
         };
         /** Body_ingest_document_documents_post */
         Body_ingest_document_documents_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
             /** Filename */
             filename?: string | null;
@@ -1505,6 +1502,10 @@ export interface components {
         };
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */

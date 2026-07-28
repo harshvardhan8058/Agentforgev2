@@ -14,6 +14,7 @@
  * A completed run exposes its trace via `TraceView`
  * (`GET /agent/runs/{run_id}/trace`, Req 9.5, 9.6).
  */
+import type { JSX } from "react";
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Bot, PlayCircle, Radio, StopCircle } from "lucide-react";

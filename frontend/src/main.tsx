@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // Self-hosted fonts (subset latin woff2, font-display: swap via @fontsource).
@@ -25,7 +25,11 @@ import { CommandPaletteProvider } from "./providers/CommandPaletteProvider";
  * React root + provider shell.
  *
  * Establishes the two cross-cutting providers the whole app depends on:
- *  - React Router v6 (`BrowserRouter`) for SPA routing.
+ *  - React Router v8 (`BrowserRouter`) for SPA routing. The `future` opt-in flags this
+ *    previously passed (`v7_startTransition`, `v7_relativeSplatPath`) became standard
+ *    behavior in v7 and the prop no longer exists, so they are gone rather than disabled.
+ *    Imports come from `react-router`; `react-router-dom` is a deprecated re-export shim
+ *    from v7 onward and is no longer a dependency.
  *  - TanStack Query v5 (`QueryClientProvider`) for server-state caching.
  *
  * No feature routes and no auth/session provider are mounted yet — those arrive
@@ -49,12 +53,7 @@ if (rootElement) {
         <ToastProvider>
           <CommandPaletteProvider>
             <QueryClientProvider client={queryClient}>
-              <BrowserRouter
-                future={{
-                  v7_startTransition: true,
-                  v7_relativeSplatPath: true,
-                }}
-              >
+              <BrowserRouter>
                 <App />
               </BrowserRouter>
             </QueryClientProvider>

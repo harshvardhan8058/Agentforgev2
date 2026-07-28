@@ -6,6 +6,8 @@
  * a new Operator can see a meaningful result immediately instead of facing a
  * blank field. Purely presentational and keyboard-accessible.
  */
+
+import type { JSX } from "react";
 interface ExampleChipsProps {
   /** Leading label (e.g. "Try"). */
   label?: string;

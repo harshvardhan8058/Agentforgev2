@@ -45,7 +45,7 @@ def error_body(code: str, message: str, details: dict[str, Any] | None = None) -
 _STATUS_CODE_NAMES = {
     status.HTTP_404_NOT_FOUND: "not_found",
     status.HTTP_405_METHOD_NOT_ALLOWED: "method_not_allowed",
-    status.HTTP_422_UNPROCESSABLE_ENTITY: "validation_error",
+    status.HTTP_422_UNPROCESSABLE_CONTENT: "validation_error",
     status.HTTP_503_SERVICE_UNAVAILABLE: "not_ready",
 }
 
@@ -69,7 +69,7 @@ async def _validation_exception_handler(
     _: Request, exc: RequestValidationError
 ) -> JSONResponse:
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         content=error_body(
             "validation_error",
             "Request validation failed.",

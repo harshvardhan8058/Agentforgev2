@@ -10,7 +10,16 @@
  * deterministic.
  *
  * Default-exported for `React.lazy`.
+ *
+ * Monaco is **self-hosted**: importing `./monacoSetup` hands the locally-installed
+ * `monaco-editor` to `@monaco-editor/react`'s loader, which otherwise fetches the editor
+ * from a public CDN — a request the gateway's `script-src 'self'` CSP blocks outright. See
+ * that module for the full rationale. The import must come before the
+ * `@monaco-editor/react` components mount, which it does as a module-level side effect.
  */
+import type { JSX } from "react";
+import "./monacoSetup";
+
 import Editor, { DiffEditor } from "@monaco-editor/react";
 
 export interface PromptStudioProps {

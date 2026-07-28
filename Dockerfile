@@ -28,7 +28,7 @@ WORKDIR /app
 #    is cached and only rebuilds when these inputs change — a source-only change
 #    reuses it.
 #
-#    `torch` is a heavy transitive dependency of sentence-transformers==3.3.1. The PyPI
+#    `torch` is a heavy transitive dependency of sentence-transformers. The PyPI
 #    Linux wheel bundles the full CUDA/NVIDIA payload (multi-GB `nvidia-cu*` wheels), which
 #    ballooned the image to ~17.8 GB. We install a pinned CPU-only torch build FIRST from the
 #    PyTorch CPU wheel index, so the later `pip install -r requirements.txt` sees `torch`
@@ -36,6 +36,12 @@ WORKDIR /app
 #    application behavior — no source and no pinned app dependency changes — while dropping
 #    the image well under the 4 GB budget (R4.2, R4.3, R4.4). `--retries`/`--timeout` add
 #    resilience against transient network hiccups reaching download.pytorch.org.
+#
+#    The torch pin is ALSO a security pin, not just a size one: torch is what loads the
+#    embedding model weights, so a `torch.load` deserialization RCE is directly on the
+#    ingestion path. Keep this at an advisory-clean release — 2.5.1 carried 22 known
+#    advisories including GHSA-53q9-r3pm-6pq6 (`torch.load` RCE even with
+#    `weights_only=True`). Re-check with `pip-audit` before changing it.
 #
 #    One build-only measure keeps the resolve deterministic WITHOUT touching pyproject's
 #    [project].dependencies (behavior is identical): resolve under a build-time constraints
@@ -50,7 +56,7 @@ COPY pyproject.toml README.md constraints.txt ./
 RUN pip install --upgrade pip \
     && pip install --retries 5 --timeout 120 \
         --index-url https://download.pytorch.org/whl/cpu \
-        "torch==2.5.1"
+        "torch==2.13.0"
 
 RUN python -c "import tomllib; d = tomllib.load(open('pyproject.toml','rb')); open('requirements.txt','w').write(chr(10).join(d['project']['dependencies']) + chr(10))" \
     && pip install --retries 5 --timeout 120 -r requirements.txt -c constraints.txt

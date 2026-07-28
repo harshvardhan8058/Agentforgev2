@@ -6,6 +6,7 @@
  * palette and overlay UI (which need router/session/theme context) are rendered
  * lower by `CommandLayer`, and the global key bindings are registered there too.
  */
+import type { JSX } from "react";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 
 import {
