@@ -33,7 +33,10 @@ class Researcher_Agent(Agent_Role_Interface):
     def instructions(self) -> str:
         return (
             "You are the Researcher. Gather grounded information for the plan using the "
-            "knowledge base, and cite the supporting sources for every finding."
+            "knowledge base only. Report what the knowledge base actually supports and "
+            "say so explicitly when it contains nothing relevant. Never invent a source, "
+            "citation, book, author or URL — the platform attaches the real citations for "
+            "the material you retrieve."
         )
 
     def act(self, state: Blackboard_State) -> Blackboard_State:

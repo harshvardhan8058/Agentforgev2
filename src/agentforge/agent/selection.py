@@ -33,9 +33,13 @@ RAG_TOOL_NAME = "rag_search"
 
 # The fixed instruction appended to every selection prompt describing the response shape.
 _DECISION_INSTRUCTION = (
-    "Respond with a single JSON object and nothing else. To call a tool use "
+    "Respond with a single JSON object and nothing else — no prose before or after it, "
+    "and no Markdown code fence. To call a tool use "
     '{"action": "tool", "tool": "<tool name>", "arguments": { ... }}. '
-    'To answer directly use {"action": "final", "answer": "<your answer>"}.'
+    'To answer directly use {"action": "final", "answer": "<your answer>"}. '
+    "Put the complete answer inside the JSON string and escape any newlines as \\n. "
+    "Never invent a source, citation, book, author or URL: cite only what appears in "
+    "the observations above, and if there is no support for a claim, omit it."
 )
 
 
@@ -123,7 +127,13 @@ def _iter_json_objects(text: str):
             if depth == 0 and start != -1:
                 candidate = text[start : i + 1]
                 try:
-                    parsed = json.loads(candidate)
+                    # ``strict=False`` tolerates literal control characters (real
+                    # newlines/tabs) inside string values. Models routinely emit a
+                    # multi-line answer inside {"action": "final", "answer": "..."}
+                    # without escaping the newlines as \n, which strict JSON rejects.
+                    # Without this, such a response fails to parse and the whole raw
+                    # JSON envelope leaks out as the "answer".
+                    parsed = json.loads(candidate, strict=False)
                 except (ValueError, json.JSONDecodeError):
                     parsed = None
                 if isinstance(parsed, dict):
