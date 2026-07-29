@@ -1,17 +1,19 @@
 # AgentForge CI/CD pipeline (Phase 9, Req 14.x, 15.x, 18.x).
 #
-#     changes ─┬─ secret_scan ────────────────┐
-#              ├─ backend ────────────────────┤
-#              ├─ frontend ───────────────────┼─ image ─ deploy
-#              └─ e2e ────────────────────────┘     │
+#     preflight ─┬─ backend ──────────────────┐
+#                ├─ frontend ─────────────────┼─ image ─ deploy
+#                └─ e2e ──────────────────────┘     │
 #                                                   └─ ci (aggregate gate)
 #
-#   changes      Resolves which parts of the repo a pull request touched, so unaffected
-#                lanes are skipped. On `push` (main / v* tags) every lane is forced on,
-#                so anything that gets published is always fully validated.
-#   secret_scan  Always runs. Credential-shaped-value scan over sources, *.env.example
-#                and rendered config (Property 1, Req 14.1-14.3, 21.x). Seconds long, so
-#                it is never conditional — it is the one lane that must never be skipped.
+#   preflight    Always runs, and does the two things that must never be skipped or
+#                conditional: the credential-shaped-value scan over sources,
+#                *.env.example and rendered config (Property 1, Req 14.1-14.3, 21.x),
+#                and resolving which areas a pull request touched so unaffected lanes
+#                below can be skipped. On `push` (main / v* tags) and manual dispatch
+#                every lane is forced on, so anything published is fully validated.
+#                Both halves live in ONE job on purpose: each are seconds long, and
+#                GitHub bills every job rounded UP to a whole minute, so splitting them
+#                would cost an extra billed minute per run for no benefit.
 #   backend      Keyless `pytest -m 'not integration' -q` + the server-side OpenAPI
 #                contract drift check.
 #   frontend     Keyless `npm run ci` (codegen check, lint, typecheck, unit tests, build,
@@ -50,6 +52,13 @@
 #  * Image builds are skipped on pull requests that cannot affect an image (see the
 #    `docker` filter). Every merge to main still builds, scans and verifies all three.
 #  * Draft pull requests skip the browser and image lanes.
+#  * Job count is kept deliberately low. GitHub rounds EVERY job up to a whole billed
+#    minute, so a 15-second job still costs a minute — adding "cheap" jobs is not free.
+#
+# Every action used here is either `actions/*` (GitHub) or `docker/*` (a verified
+# creator). No unverified third-party action runs in this pipeline, so it stays
+# compatible with a restrictive Actions allow-list policy and has a smaller supply-chain
+# surface. Change detection is a plain `git diff` for exactly that reason.
 # ---------------------------------------------------------------------------------
 
 name: ci-cd
@@ -102,73 +111,21 @@ jobs:
   # ---------------------------------------------------------------------------
   # 0) changes — which lanes does this run actually need?
   # ---------------------------------------------------------------------------
-  changes:
-    name: changes
+  preflight:
+    name: preflight (secret scan + change detection)
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
     outputs:
-      # On anything other than a pull request (push to main, a v* tag, or a manual
-      # dispatch) every lane is forced on: whatever we publish is fully validated.
-      backend: ${{ github.event_name != 'pull_request' || steps.filter.outputs.backend == 'true' }}
-      frontend: ${{ github.event_name != 'pull_request' || steps.filter.outputs.frontend == 'true' }}
-      docker: ${{ github.event_name != 'pull_request' || steps.filter.outputs.docker == 'true' }}
+      backend: ${{ steps.changed.outputs.backend }}
+      frontend: ${{ steps.changed.outputs.frontend }}
+      docker: ${{ steps.changed.outputs.docker }}
     steps:
+      # Full history so a pull request can be diffed against its merge base.
       - name: Check out repository
         uses: actions/checkout@v4
-
-      - name: Resolve changed areas (pull requests only)
-        id: filter
-        if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@v3
         with:
-          filters: |
-            backend:
-              - 'src/**'
-              - 'tests/**'
-              - 'migrations/**'
-              - 'scripts/**'
-              - 'pyproject.toml'
-              - 'constraints.txt'
-              # The drift check compares the committed contract to the live app schema,
-              # so a contract edit must re-run the backend lane.
-              - 'frontend/openapi.json'
-              - '.github/workflows/**'
-            frontend:
-              - 'frontend/**'
-              - '.github/workflows/**'
-            # Inputs that can change how an image BUILDS. Application source is
-            # deliberately excluded: the Dockerfiles only COPY it, so a source edit
-            # cannot break the build, and secrets in source are already caught by the
-            # always-on secret-scan lane. Every merge to main rebuilds and rescans all
-            # three images regardless, so nothing reaches GHCR unverified.
-            docker:
-              - 'Dockerfile'
-              - '.dockerignore'
-              - 'constraints.txt'
-              - 'pyproject.toml'
-              - 'docker-compose*.yml'
-              - 'nginx/**'
-              - 'frontend/Dockerfile'
-              - 'frontend/.dockerignore'
-              - 'frontend/docker/**'
-              - 'frontend/package.json'
-              - 'frontend/package-lock.json'
-              - '.github/workflows/**'
-
-  # ---------------------------------------------------------------------------
-  # 1) secret_scan — always runs (Property 1, Req 14.1-14.3, 21.x).
-  #    NO secrets are referenced anywhere in this job.
-  # ---------------------------------------------------------------------------
-  secret_scan:
-    name: secret scan (repo-wide)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+          fetch-depth: 0
 
       # The scanner is standard-library only, so no dependency install is needed.
       - name: Set up Python 3.11
@@ -176,8 +133,72 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Always runs. This is the one lane that must never be skipped, so it lives in
+      # the unconditional preflight job.
       - name: Repo-wide secret scan (sources, *.env.example, config.js renders)
         run: python scripts/scan_secrets.py
+
+      # Change detection is a plain `git diff` rather than a third-party action: it is
+      # a handful of greps, so it needs no external dependency in the pipeline.
+      #
+      # On anything other than a pull request (push to main, a v* tag, or a manual
+      # dispatch) every lane is forced on, so whatever gets published is fully
+      # validated regardless of what changed.
+      - name: Resolve changed areas
+        id: changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "${EVENT}" != "pull_request" ]; then
+            echo "Event '${EVENT}' is not a pull request — running every lane."
+            {
+              echo "backend=true"
+              echo "frontend=true"
+              echo "docker=true"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          FILES=$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          echo "Changed files:"
+          printf '%s\n' "${FILES}" | sed 's/^/  /'
+
+          # `if` blocks (not `cmd && var=true`) so a non-match cannot trip `set -e`.
+          matches() { printf '%s\n' "${FILES}" | grep -qE "$1"; }
+
+          backend=false
+          frontend=false
+          docker=false
+
+          # The drift check compares the committed contract to the live app schema, so
+          # a contract edit must re-run the backend lane.
+          if matches '^(src/|tests/|migrations/|scripts/|pyproject\.toml|constraints\.txt|frontend/openapi\.json|\.github/workflows/)'; then
+            backend=true
+          fi
+
+          if matches '^(frontend/|\.github/workflows/)'; then
+            frontend=true
+          fi
+
+          # Inputs that can change how an image BUILDS. Application source is
+          # deliberately excluded: the Dockerfiles only COPY it, so a source edit cannot
+          # break the build, and secrets in source are already caught by the secret scan
+          # above. Every merge to main rebuilds and rescans all three images regardless,
+          # so nothing reaches GHCR unverified.
+          if matches '^(Dockerfile|\.dockerignore|constraints\.txt|pyproject\.toml|docker-compose[^/]*\.yml|nginx/|frontend/Dockerfile|frontend/\.dockerignore|frontend/docker/|frontend/package\.json|frontend/package-lock\.json|\.github/workflows/)'; then
+            docker=true
+          fi
+
+          echo "Lanes -> backend=${backend} frontend=${frontend} docker=${docker}"
+          {
+            echo "backend=${backend}"
+            echo "frontend=${frontend}"
+            echo "docker=${docker}"
+          } >> "${GITHUB_OUTPUT}"
 
   # ---------------------------------------------------------------------------
   # 2) backend — keyless test lane + OpenAPI contract drift check.
@@ -185,8 +206,8 @@ jobs:
   backend:
     name: backend (keyless)
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    needs: preflight
+    if: needs.preflight.outputs.backend == 'true'
     permissions:
       contents: read
     steps:
@@ -231,8 +252,8 @@ jobs:
   frontend:
     name: frontend (keyless)
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
+    needs: preflight
+    if: needs.preflight.outputs.frontend == 'true'
     permissions:
       contents: read
     steps:
@@ -260,9 +281,9 @@ jobs:
   e2e:
     name: e2e (keyless, Playwright)
     runs-on: ubuntu-latest
-    needs: changes
+    needs: preflight
     if: >-
-      needs.changes.outputs.frontend == 'true' &&
+      needs.preflight.outputs.frontend == 'true' &&
       github.event.pull_request.draft != true
     permissions:
       contents: read
@@ -317,7 +338,7 @@ jobs:
   image:
     name: image (${{ matrix.image }})
     runs-on: ubuntu-latest
-    needs: [changes, secret_scan, backend, frontend, e2e]
+    needs: [preflight, backend, frontend, e2e]
     # `!cancelled() && !failure()` is required because backend/frontend/e2e are
     # conditional: a SKIPPED dependency would otherwise skip this job too, whereas a
     # FAILED one must still block it.
@@ -326,7 +347,7 @@ jobs:
       (
         (github.event_name == 'push' &&
           (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
-        (needs.changes.outputs.docker == 'true' && github.event.pull_request.draft != true)
+        (needs.preflight.outputs.docker == 'true' && github.event.pull_request.draft != true)
       )
     permissions:
       contents: read
@@ -513,18 +534,17 @@ jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
-    needs: [changes, secret_scan, backend, frontend, e2e, image]
+    needs: [preflight, backend, frontend, e2e, image]
     if: always()
     permissions:
       contents: read
     steps:
       - name: Verify no lane failed or was cancelled
         env:
-          # `changes` is included deliberately: without it, a failure while resolving the
-          # changed areas would skip every lane below and still report this gate green.
+          # `preflight` is included deliberately: without it, a failed secret scan or
+          # change-resolution step would skip every lane below and still report green.
           RESULTS: >-
-            changes=${{ needs.changes.result }}
-            secret_scan=${{ needs.secret_scan.result }}
+            preflight=${{ needs.preflight.result }}
             backend=${{ needs.backend.result }}
             frontend=${{ needs.frontend.result }}
             e2e=${{ needs.e2e.result }}
