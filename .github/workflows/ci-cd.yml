@@ -382,9 +382,16 @@ jobs:
         run: |
           set -euo pipefail
           sudo systemctl stop docker || true
-          sudo mkdir -p /mnt/docker /etc/docker /mnt/tmp
+          sudo mkdir -p /mnt/docker /etc/docker
           echo '{ "data-root": "/mnt/docker" }' | sudo tee /etc/docker/daemon.json
           sudo systemctl start docker || sudo service docker start || true
+
+          # Scratch space for the `docker save` archive further down. /mnt is root-owned,
+          # and `docker save -o` writes as the unprivileged runner user (it is the CLI
+          # that creates the file, not the daemon), so this directory must be owned by
+          # that user or the write fails with "permission denied".
+          sudo install -d -o "$(id -u)" -g "$(id -g)" -m 700 /mnt/tmp
+
           df -h /mnt /
 
       - name: Set up Docker Buildx
