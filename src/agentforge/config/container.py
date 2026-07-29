@@ -357,6 +357,7 @@ def build_app_context(
         top_k_default=settings.top_k_default,
         top_k_min=settings.top_k_min,
         top_k_max=settings.top_k_max,
+        allow_ungrounded=settings.allow_ungrounded_answers,
     )
 
     return AppContext(

@@ -6,7 +6,11 @@ Ties retrieval and generation together (design Flow 2):
    into ``[top_k_min, top_k_max]`` (Req 12.1).
 2. Retrieve the top-K chunks **before** any generation call (Req 12.1).
 3. If **zero** chunks are retrieved, return a "no grounding information available"
-   answer with an empty citation list and no fabricated content (Req 12.5).
+   answer with an empty citation list and no fabricated content (Req 12.5). A
+   deployment may opt in to ``allow_ungrounded`` instead, which answers that specific
+   case from the model's general knowledge — still with ``grounded=False`` and zero
+   citations, and built from a separate template, so it can never be confused with a
+   document-backed answer.
 4. Otherwise build a **grounding-only** prompt from the retrieved chunk texts (Req 12.4),
    call the active ``LLM_Provider``, and attach **exactly one Citation per used chunk**
    (Req 12.2, 12.3).
@@ -22,7 +26,7 @@ from uuid import UUID
 from agentforge.enterprise.tenancy import current_org
 from agentforge.llm.base import LLM_Provider
 from agentforge.models.domain import Citation, Grounded_Answer
-from agentforge.rag.prompt import build_prompt
+from agentforge.rag.prompt import build_general_prompt, build_prompt
 from agentforge.retrieval.retriever import Retriever, clamp_k
 
 # Fixed message used when nothing relevant is retrieved. It fabricates no source or
@@ -42,12 +46,14 @@ class RAG_Service:
         top_k_default: int,
         top_k_min: int = 1,
         top_k_max: int = 10,
+        allow_ungrounded: bool = False,
     ) -> None:
         self._retriever = retriever
         self._llm = llm_provider
         self._top_k_default = top_k_default
         self._top_k_min = top_k_min
         self._top_k_max = top_k_max
+        self._allow_ungrounded = allow_ungrounded
 
     def resolve_k(self, top_k: int | None) -> int:
         """Resolve the effective retrieval count within ``[top_k_min, top_k_max]``."""
@@ -71,8 +77,21 @@ class RAG_Service:
         # Retrieval always precedes generation (Req 12.1), scoped to the caller's tenant.
         retrieved = self._retriever.retrieve(query, k, org_id=resolved_org)
 
-        # No grounding: do not call the LLM, do not fabricate, no citations (Req 12.5).
         if not retrieved:
+            # Opt-in only: answer from the model's general knowledge instead of
+            # refusing. Built from the separate ungrounded template and reported with
+            # ``grounded=False`` and zero citations, so it is never presentable as a
+            # document-backed answer.
+            if self._allow_ungrounded:
+                result = self._llm.generate(build_general_prompt(query))
+                return Grounded_Answer(
+                    text=result.text,
+                    citations=[],
+                    provider=result.provider,
+                    grounded=False,
+                )
+
+            # Default: do not call the LLM, do not fabricate, no citations (Req 12.5).
             return Grounded_Answer(
                 text=NO_GROUNDING_MESSAGE,
                 citations=[],
