@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setupServer } from "msw/node";
@@ -75,6 +75,40 @@ describe("RagQueryView (MSW)", () => {
     );
     // top_k was sent.
     expect(typeof sentTopK).toBe("number");
+  });
+
+  it("constrains the sources control to the range the API accepts", async () => {
+    let sentTopK: number | null | undefined;
+    server.use(
+      http.post(`${BASE}/query`, async ({ request }) => {
+        const body = (await request.json()) as { top_k?: number | null };
+        sentTopK = body.top_k;
+        return HttpResponse.json({
+          answer: "ok",
+          grounded: true,
+          provider: "openai",
+          citations: [],
+          flags: [],
+        });
+      }),
+    );
+
+    renderView("member");
+    const user = userEvent.setup();
+    const slider = screen.getByTestId("query-top-k");
+
+    // `POST /query` rejects top_k outside 1..10, so an out-of-range value must be
+    // clamped client-side rather than sent and 422'd.
+    fireEvent.change(slider, { target: { value: "50" } });
+    expect(screen.getByTestId("query-top-k-value")).toHaveTextContent("10 of 10");
+
+    fireEvent.change(slider, { target: { value: "0" } });
+    expect(screen.getByTestId("query-top-k-value")).toHaveTextContent("1 of 10");
+
+    await user.type(screen.getByTestId("query-input"), "anything");
+    await user.click(screen.getByTestId("query-submit"));
+
+    await waitFor(() => expect(sentTopK).toBe(1));
   });
 
   it("citations render with document_id and chunk_id (7.2)", async () => {

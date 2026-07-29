@@ -70,6 +70,20 @@ interface DocumentSummary {
 
 const DEFAULT_TOP_K = 5;
 
+/**
+ * The inclusive range `POST /query` accepts for `top_k`. Mirrored here so the
+ * control cannot emit a value the API would reject with a 422.
+ */
+const TOP_K_MIN = 1;
+const TOP_K_MAX = 10;
+
+/** Coerce arbitrary input into a valid `top_k`, falling back to the default. */
+function clampTopK(raw: string): number {
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed)) return DEFAULT_TOP_K;
+  return Math.min(TOP_K_MAX, Math.max(TOP_K_MIN, parsed));
+}
+
 export function RagQueryView(): JSX.Element {
   const { role, orgId } = useSession();
   const permitted = role !== null && can(role, "run_agents");
@@ -162,23 +176,38 @@ export function RagQueryView(): JSX.Element {
                   onPick={setQuery}
                 />
               </div>
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="query-top-k" className="text-sm font-medium text-text">
-                    Top K
-                  </label>
-                  <Input
+              <div className="flex flex-wrap items-end gap-4">
+                {/* Retrieval breadth. Presented in plain language rather than as
+                    "Top K", and constrained to the range the API accepts so an
+                    out-of-range value can never produce a 422. */}
+                <div className="flex min-w-[15rem] flex-1 flex-col gap-1.5 sm:max-w-xs">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <label htmlFor="query-top-k" className="text-sm font-medium text-text">
+                      Sources to search
+                    </label>
+                    <span
+                      className="text-sm font-medium tabular-nums text-text-muted"
+                      data-testid="query-top-k-value"
+                    >
+                      {topK} of {TOP_K_MAX}
+                    </span>
+                  </div>
+                  <input
                     id="query-top-k"
                     data-testid="query-top-k"
-                    type="number"
-                    min={1}
-                    className="w-24"
+                    type="range"
+                    min={TOP_K_MIN}
+                    max={TOP_K_MAX}
+                    step={1}
                     value={topK}
-                    onChange={(e) => {
-                      const next = Number.parseInt(e.target.value, 10);
-                      setTopK(Number.isNaN(next) ? DEFAULT_TOP_K : next);
-                    }}
+                    aria-describedby="query-top-k-hint"
+                    onChange={(e) => setTopK(clampTopK(e.target.value))}
+                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-bg-subtle accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
                   />
+                  <p id="query-top-k-hint" className="text-xs text-text-muted">
+                    How many excerpts from your documents are used as context. Fewer
+                    keeps the answer tightly focused; more covers longer documents.
+                  </p>
                 </div>
                 <Button
                   type="submit"
