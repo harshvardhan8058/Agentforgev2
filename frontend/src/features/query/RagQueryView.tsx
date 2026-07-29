@@ -32,6 +32,10 @@ import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorSurface } from "../../components/ErrorSurface";
 import { FallbackNotice } from "../../components/FallbackNotice";
+import {
+  GeneralKnowledgeNotice,
+  isGeneralKnowledgeAnswer,
+} from "../../components/GeneralKnowledgeNotice";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Badge } from "../../components/ui/Badge";
@@ -288,6 +292,9 @@ export function RagQueryView(): JSX.Element {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             {result.provider === "fallback" && <FallbackNotice />}
+            {isGeneralKnowledgeAnswer(result.grounded, result.answer) && (
+              <GeneralKnowledgeNotice />
+            )}
             <div
               aria-live="polite"
               data-testid="answer-body"

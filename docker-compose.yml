@@ -83,6 +83,11 @@ services:
       # DB-backed Pg_* implementations via Settings.persist_domain_stores(). Override to
       # "false" to keep the (ephemeral) in-memory stores.
       USE_DATABASE: ${USE_DATABASE:-true}
+      # Local convenience: when retrieval finds nothing, answer from the model's
+      # general knowledge instead of refusing, so the assistant is useful before the
+      # corpus is populated. Such answers are always reported as ungrounded with no
+      # citations. Set to "false" to enforce document-backed answers only.
+      ALLOW_UNGROUNDED_ANSWERS: ${ALLOW_UNGROUNDED_ANSWERS:-true}
       # Per-principal rate limiting is Redis-backed; keep it OFF for the local single-user
       # keyless stack (the documented keyless default). Override to "true" to exercise it.
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-false}
