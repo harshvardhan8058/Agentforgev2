@@ -158,6 +158,13 @@ class Settings(BaseSettings):
     guardrail_max_input_chars: int = 8000
     guardrail_blocklist_json: str | None = None
 
+    # Per-completion budget for the hosted LLM provider. Every call is bounded because a
+    # single agent run issues many completions in sequence and a multi-agent run
+    # multiplies that by its roles and rounds — one unbounded call is enough to make the
+    # whole synchronous request appear to hang.
+    llm_timeout_seconds: float = 30.0
+    llm_max_retries: int = 2
+
     # --- credentials (ALL optional) ---
     groq_api_key: SecretStr | None = None
     hosted_embedding_api_key: SecretStr | None = None

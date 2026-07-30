@@ -19,6 +19,12 @@ from agentforge.llm.base import GenerationResult, LLM_Provider, LLMProviderError
 
 _DEFAULT_MODEL = "llama-3.1-8b-instant"
 
+# Per-completion budget. Every call is bounded so a stalled upstream request cannot
+# block the agent loop indefinitely; retries are bounded for the same reason (an
+# unbounded retry policy turns one slow call into an unbounded one).
+_DEFAULT_TIMEOUT_SECONDS = 30.0
+_DEFAULT_MAX_RETRIES = 2
+
 
 class Groq_Provider(LLM_Provider):
     """LLM provider that generates completions via the Groq chat API."""
@@ -28,10 +34,18 @@ class Groq_Provider(LLM_Provider):
         api_key: str,
         model: str = _DEFAULT_MODEL,
         client: Any | None = None,
+        timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+        max_retries: int = _DEFAULT_MAX_RETRIES,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._client = client  # injectable for tests; lazily created otherwise
+        # Bounded so a single stalled HTTP call cannot hang the request that owns it.
+        # An agent run issues many completions in sequence, and a multi-agent run
+        # multiplies that by its roles and rounds, so one unbounded call is enough to
+        # make the whole synchronous request appear to hang forever.
+        self._timeout_seconds = timeout_seconds
+        self._max_retries = max_retries
 
     @property
     def name(self) -> str:
@@ -46,7 +60,11 @@ class Groq_Provider(LLM_Provider):
                 raise LLMProviderError(
                     "groq provider failed: the 'groq' package is not installed"
                 ) from exc
-            self._client = Groq(api_key=self._api_key)
+            self._client = Groq(
+                api_key=self._api_key,
+                timeout=self._timeout_seconds,
+                max_retries=self._max_retries,
+            )
         return self._client
 
     def generate(self, prompt: str) -> GenerationResult:
