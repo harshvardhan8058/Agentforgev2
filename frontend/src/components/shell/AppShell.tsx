@@ -134,7 +134,16 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
           >
             <BrandMark compact={collapsed} />
           </div>
-          <div className="flex-1 overflow-y-auto px-3 py-4">
+          {/*
+            The nav scrolls independently of the brand and footer. On a short
+            viewport twelve destinations overflow, and a hidden overflow with no
+            visible edge reads as "that is all there is" — hence the masked
+            fade, which makes a clipped list look clipped.
+          */}
+          <div
+            data-nav-scroll
+            className="af-scroll-fade min-h-0 flex-1 overflow-y-auto px-3 py-4"
+          >
             <SidebarNav collapsed={collapsed} />
           </div>
           <div
@@ -227,7 +236,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
                 Primary navigation
               </RadixDialog.Description>
               <BrandMark onNavigate={() => setDrawerOpen(false)} />
-              <div className="-mx-1 flex-1 overflow-y-auto">
+              <div data-nav-scroll className="-mx-1 min-h-0 flex-1 overflow-y-auto">
                 <SidebarNav onNavigate={() => setDrawerOpen(false)} />
               </div>
             </RadixDialog.Content>

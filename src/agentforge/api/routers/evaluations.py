@@ -118,11 +118,22 @@ async def list_datasets(
     principal: Principal = Depends(require_permission(Permission.READ)),
 ) -> list[DatasetSummary]:
     """List the caller org's datasets; never cross-org (Req 6.5, 6.8)."""
-    datasets = await run_in_threadpool(store.list_datasets, principal.org_id)
-    return [
-        DatasetSummary(dataset_id=d.id, name=d.name, created_at=d.created_at)
-        for d in datasets
-    ]
+    org_id = principal.org_id
+
+    def _list() -> list[DatasetSummary]:
+        # Counted inside a single threadpool hop rather than awaiting per dataset,
+        # so listing N datasets costs one thread switch instead of N + 1.
+        return [
+            DatasetSummary(
+                dataset_id=d.id,
+                name=d.name,
+                created_at=d.created_at,
+                item_count=len(store.list_items(org_id, d.id)),
+            )
+            for d in store.list_datasets(org_id)
+        ]
+
+    return await run_in_threadpool(_list)
 
 
 @router.post("/evaluations/runs", response_model=EvaluationRunResponse)

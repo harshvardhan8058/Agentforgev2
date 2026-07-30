@@ -24,6 +24,7 @@ import { useSession } from "../../auth/useSession";
 import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
+import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
@@ -31,11 +32,19 @@ import { ExampleChips } from "../../components/ui/ExampleChips";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { DATASET_NAME_EXAMPLES, EVALUATOR_EXAMPLES } from "../../lib/examples";
 import { ScoreBars } from "./ScoreBars";
+import {
+  DatasetItemsEditor,
+  emptyItem,
+  toRequestItems,
+  type DraftItem,
+} from "./DatasetItemsEditor";
 
 interface DatasetSummary {
   dataset_id: string;
   name: string;
   created_at: string;
+  /** How many items the dataset holds; 0 means a run over it scores nothing. */
+  item_count: number;
 }
 interface EvaluationItemScore {
   item_id: string;
@@ -56,6 +65,7 @@ export function EvaluationsView(): JSX.Element {
   const datasetNameRef = useRef<HTMLInputElement>(null);
 
   const [datasetName, setDatasetName] = useState("");
+  const [datasetItems, setDatasetItems] = useState<DraftItem[]>([emptyItem()]);
   const [runDatasetId, setRunDatasetId] = useState("");
   const [evaluators, setEvaluators] = useState("");
   const [viewRunId, setViewRunId] = useState("");
@@ -84,11 +94,18 @@ export function EvaluationsView(): JSX.Element {
     mutationFn: () =>
       runRequest(() =>
         apiClient.POST("/evaluations/datasets", {
-          body: { name: datasetName.trim(), items: [] },
+          // The items the operator actually entered. This used to be a hardcoded
+          // empty list, which made every dataset unusable: a run scores each item
+          // in the dataset, so zero items meant zero results and an aggregate of 0.
+          body: { name: datasetName.trim(), items: toRequestItems(datasetItems) },
         }),
       ),
-    onSuccess: () => {
+    onSuccess: (created) => {
       void queryClient.invalidateQueries({ queryKey: orgScopedKey(orgId, "eval-datasets") });
+      // Select the new dataset for the run form: it is invariably the one the
+      // operator wants next, and its id is otherwise only obtainable by reading
+      // it back off the list and retyping it.
+      setRunDatasetId(created.dataset_id);
     },
   });
 
@@ -158,6 +175,11 @@ export function EvaluationsView(): JSX.Element {
                       testId="dataset-name-examples"
                     />
                   </div>
+
+                  <DatasetItemsEditor
+                    items={datasetItems}
+                    onChange={setDatasetItems}
+                  />
                   <div>
                     <Button type="submit" data-testid="create-dataset-submit" loading={createDataset.isPending}>
                       Create dataset
@@ -217,8 +239,20 @@ export function EvaluationsView(): JSX.Element {
                       <span className="text-sm font-medium text-text" data-testid="dataset-name-cell">
                         {d.name}
                       </span>
-                      <span className="text-xs text-text-muted" data-testid="dataset-created-at">
-                        {d.created_at}
+                      <span className="flex items-center gap-2">
+                        {/* An empty dataset can only ever score 0, so it is called
+                            out rather than looking like any other row. */}
+                        <Badge
+                          tone={d.item_count > 0 ? "neutral" : "warning"}
+                          data-testid="dataset-item-count-badge"
+                        >
+                          {d.item_count > 0
+                            ? `${d.item_count} item${d.item_count === 1 ? "" : "s"}`
+                            : "empty"}
+                        </Badge>
+                        <span className="text-xs text-text-muted" data-testid="dataset-created-at">
+                          {d.created_at}
+                        </span>
                       </span>
                     </li>
                   ))}

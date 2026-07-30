@@ -1081,6 +1081,11 @@ export interface components {
              * Format: uuid
              */
             dataset_id: string;
+            /**
+             * Item Count
+             * @default 0
+             */
+            item_count: number;
             /** Name */
             name: string;
         };

@@ -39,6 +39,7 @@ import { orgMonogram, orgMonogramStyle } from "../../lib/orgIdentity";
 import { cn } from "../../lib/cn";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Badge } from "../../components/ui/Badge";
+import { CopyableId } from "../../components/ui/CopyableId";
 import { Kbd } from "../../components/ui/Kbd";
 import { WorkspaceStats } from "./WorkspaceStats";
 import { GettingStarted } from "./GettingStarted";
@@ -218,14 +219,16 @@ export function DashboardView(): JSX.Element {
             >
               {orgId ? orgLabel(orgId) : "—"}
             </span>
+            {/* The id is needed for API calls and support requests, but a full
+                UUID printed in the header spent a line on something unreadable
+                and unselectable. Shortened, with the full value on the copy
+                button. */}
             {orgId && orgLabel(orgId) !== orgId && (
-              <span
-                className="truncate font-mono text-xs text-text-subtle"
-                data-testid="workspace-org-id"
-                title={orgId}
-              >
-                {orgId}
-              </span>
+              <CopyableId
+                value={orgId}
+                label="organization id"
+                testId="workspace-org-id"
+              />
             )}
           </div>
         </div>

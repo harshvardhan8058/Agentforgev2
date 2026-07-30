@@ -44,7 +44,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenuSelectTrigger,
 } from "../../components/ui/DropdownMenu";
 
 const MANAGE_MEMBERS: Permission = "manage_members";
@@ -178,13 +178,12 @@ export function MembersView(): JSX.Element {
                   Role
                 </label>
                 <DropdownMenu>
-                  <DropdownMenuTrigger
+                  <DropdownMenuSelectTrigger
                     id="member-role"
                     data-testid="member-role-trigger"
-                    className="inline-flex h-10 w-40 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-sm capitalize text-text hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                  >
-                    {memberRole}
-                  </DropdownMenuTrigger>
+                    className="w-40 capitalize"
+                    value={memberRole}
+                  />
                   <DropdownMenuContent>
                     {ASSIGNABLE_ROLES.map((r) => (
                       <DropdownMenuItem
@@ -268,13 +267,13 @@ export function MembersView(): JSX.Element {
                       Team
                     </label>
                     <DropdownMenu>
-                      <DropdownMenuTrigger
+                      <DropdownMenuSelectTrigger
                         id="team-select"
                         data-testid="team-select-trigger"
-                        className="inline-flex h-10 min-w-[10rem] items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-sm text-text hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                      >
-                        {selectedTeam ? selectedTeam.name : "Select a team"}
-                      </DropdownMenuTrigger>
+                        className="min-w-[10rem]"
+                        value={selectedTeam?.name}
+                        placeholder="Select a team"
+                      />
                       <DropdownMenuContent>
                         {teams.map((t) => (
                           <DropdownMenuItem

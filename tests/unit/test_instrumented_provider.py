@@ -118,3 +118,76 @@ def test_deterministic_token_count_whitespace_and_invariant():
 
     empty = deterministic_token_count("   ", GenerationResult(text="", provider="fallback"))
     assert empty == Token_Count(prompt=0, completion=0)
+
+
+
+class _Capturing_Sink(Usage_Sink):
+    """Captures the keyword arguments of every emitted usage record."""
+
+    def __init__(self) -> None:
+        self.records: list[dict] = []
+
+    def record(self, *, provider, model, tokens, org_id, user_id) -> None:
+        self.records.append(
+            {
+                "provider": provider,
+                "model": model,
+                "tokens": tokens,
+                "org_id": org_id,
+                "user_id": user_id,
+            }
+        )
+
+
+class _Model_Reporting_Provider(LLM_Provider):
+    """A provider that reports the concrete model that served the call."""
+
+    def __init__(self, model: str | None) -> None:
+        self._model = model
+
+    @property
+    def name(self) -> str:
+        return "groq"
+
+    def generate(self, prompt: str) -> GenerationResult:
+        return GenerationResult(text="ok", provider=self.name, model=self._model)
+
+
+def test_usage_records_the_model_the_provider_reports():
+    """The usage record carries the real model, not the provider name.
+
+    ``GenerationResult`` previously had no model field, so this decorator recorded
+    the provider name as the model. Every usage row therefore had model ==
+    provider, which made the analytics "by model" breakdown an exact duplicate of
+    "by provider" — three identical charts for one workspace.
+    """
+    sink = _Capturing_Sink()
+    provider = Instrumented_Provider(
+        _Model_Reporting_Provider("llama-3.1-8b-instant"), sink
+    )
+
+    provider.generate("hello")
+
+    assert sink.records[0]["provider"] == "groq"
+    assert sink.records[0]["model"] == "llama-3.1-8b-instant"
+
+
+def test_usage_falls_back_to_the_provider_name_without_a_model():
+    """A provider that cannot name a model still yields a populated model field.
+
+    The keyless ``Fallback_Provider`` has no model concept, and the usage record
+    requires an identifier, so the provider name remains the fallback.
+    """
+    sink = _Capturing_Sink()
+    provider = Instrumented_Provider(_Model_Reporting_Provider(None), sink)
+
+    provider.generate("hello")
+
+    assert sink.records[0]["model"] == "groq"
+
+
+def test_generation_result_model_defaults_to_none():
+    """The new field is additive: positional construction is unchanged."""
+    result = GenerationResult("text", "provider")
+
+    assert result.model is None

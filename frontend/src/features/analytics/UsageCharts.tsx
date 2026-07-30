@@ -51,15 +51,28 @@ export default function UsageCharts({
   sections,
 }: {
   sections: ChartSection[];
-}): JSX.Element {
-  const populated = sections.filter((s) => s.entries.length > 0);
+}): JSX.Element | null {
+  /*
+   * A breakdown with a single entry has nothing to compare, so its chart is one
+   * lone bar restating a number already shown in the totals tile and the table
+   * below. With one provider serving one model for one user — the normal case
+   * for a fresh workspace — that rendered three identical charts side by side.
+   * Charts are therefore shown only where there is a distribution to see, and
+   * appear on their own as usage diversifies.
+   */
+  const comparable = sections.filter((s) => s.entries.length > 1);
+  if (comparable.length === 0) return null;
 
   return (
     <div
-      className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3"
+      className={
+        comparable.length === 1
+          ? "grid grid-cols-1 gap-4"
+          : "grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3"
+      }
       data-testid="usage-charts"
     >
-      {populated.map((section) => (
+      {comparable.map((section) => (
         <div
           key={section.id}
           className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3"

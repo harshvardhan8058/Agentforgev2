@@ -147,6 +147,17 @@ export function SingleAgentRunView(): JSX.Element {
       : null;
   const effectiveTraceRunId = traceRunId ?? streamRunId;
 
+  // Whether the output column has anything to show. Covers a live or finished
+  // stream, a non-streaming result, either failure path, and a resolved trace.
+  const hasOutput =
+    stream.isStreaming ||
+    streamState.events.length > 0 ||
+    streamState.closed ||
+    Boolean(stream.error) ||
+    nonStreaming.isError ||
+    Boolean(runResult) ||
+    Boolean(effectiveTraceRunId);
+
   return (
     <div className="flex flex-col gap-6" data-testid="agent-view">
       <PageHeader
@@ -156,6 +167,24 @@ export function SingleAgentRunView(): JSX.Element {
         description="Run a single agent and watch its reasoning stream live, or run it to completion."
       />
 
+      {!permitted && (
+        <EmptyState
+          title="Agent runs unavailable"
+          message="Your role does not permit running agents in this organization."
+          icon={<Bot className="h-8 w-8" />}
+        />
+      )}
+
+      {/*
+        A run page is a form plus the output it produces. Stacked vertically, the
+        form was one short card at the top of an otherwise empty viewport, and
+        once a run finished the form scrolled away — so re-running with a tweaked
+        message meant scrolling back up. Side by side on a wide screen, the form
+        stays put while the output fills the space next to it.
+      */}
+      {permitted && (
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)]">
+      <div className="flex flex-col gap-4 lg:sticky lg:top-4">
       <Can permission="run_agents">
         <Card data-testid="agent-form-card">
           <CardHeader>
@@ -215,13 +244,51 @@ export function SingleAgentRunView(): JSX.Element {
           </CardContent>
         </Card>
       </Can>
+      </div>
 
-      {!permitted && (
-        <EmptyState
-          title="Agent runs unavailable"
-          message="Your role does not permit running agents in this organization."
-          icon={<Bot className="h-8 w-8" />}
-        />
+      <div className="flex min-w-0 flex-col gap-4" data-testid="agent-output">
+      {/* Nothing has been run yet: explain the two modes rather than leaving the
+          column blank, since the difference between them is not obvious from the
+          button labels alone. */}
+      {!hasOutput && (
+        <Card data-testid="agent-idle">
+          <CardHeader>
+            <CardTitle className="text-base">No run yet</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm text-text-muted">
+            <p className="leading-relaxed">
+              Pick an example or write a message, then choose how to run it.
+            </p>
+            <div className="flex flex-col gap-2">
+              <p className="flex items-start gap-2">
+                <Radio
+                  className="mt-0.5 h-4 w-4 shrink-0 text-primary"
+                  aria-hidden="true"
+                />
+                <span>
+                  <span className="font-medium text-text">Run (streaming)</span> —
+                  each reasoning step and tool call appears as it happens, and the
+                  run can be cancelled part-way.
+                </span>
+              </p>
+              <p className="flex items-start gap-2">
+                <PlayCircle
+                  className="mt-0.5 h-4 w-4 shrink-0 text-text-subtle"
+                  aria-hidden="true"
+                />
+                <span>
+                  <span className="font-medium text-text">Run</span> — waits for
+                  the agent to finish and returns the final answer with its
+                  citations.
+                </span>
+              </p>
+            </div>
+            <p className="leading-relaxed">
+              Either way the answer is grounded in your documents. Load the sample
+              corpus from the Documents page if yours is empty.
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {/* Streaming run output. */}
@@ -321,6 +388,9 @@ export function SingleAgentRunView(): JSX.Element {
             <TraceView runId={effectiveTraceRunId} />
           </CardContent>
         </Card>
+      )}
+      </div>
+      </div>
       )}
     </div>
   );

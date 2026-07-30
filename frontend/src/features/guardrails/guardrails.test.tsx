@@ -50,8 +50,62 @@ describe("GuardrailsView (MSW)", () => {
     renderView("member");
     await waitFor(() => expect(screen.getByTestId("guardrails-list")).toBeInTheDocument());
     expect(screen.getByTestId("guardrail-name-0").textContent).toBe("profanity");
-    expect(screen.getByTestId("guardrail-kind-0").textContent).toBe("KeywordGuardrail");
     expect(screen.getByTestId("guardrail-name-1").textContent).toBe("pii");
+    // `kind` is `type(guardrail).__name__` — an implementation detail. It used to
+    // be rendered as a badge, so the page showed Python class names. It is now
+    // only a tooltip on the guardrail's stable name.
+    expect(screen.queryByTestId("guardrail-kind-0")).not.toBeInTheDocument();
+    expect(screen.getByTestId("guardrail-name-0")).toHaveAttribute(
+      "title",
+      "Implementation: KeywordGuardrail",
+    );
+  });
+
+  it("explains what each built-in guardrail enforces (13.1)", async () => {
+    // Previously the list gave a name and a class name and never said what any
+    // guardrail actually does.
+    server.use(
+      http.get(`${BASE}/guardrails/config`, () =>
+        HttpResponse.json({
+          guardrails: [
+            { name: "non_empty", kind: "Non_Empty_Guardrail" },
+            { name: "max_length", kind: "Max_Length_Guardrail" },
+            { name: "blocklist", kind: "Blocklist_Guardrail" },
+          ],
+        }),
+      ),
+    );
+
+    renderView("member");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("guardrail-description-0")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("guardrail-description-0").textContent).toContain(
+      "empty or only whitespace",
+    );
+    expect(screen.getByText("Maximum length")).toBeInTheDocument();
+    expect(screen.getByText("Term blocklist")).toBeInTheDocument();
+  });
+
+  it("omits a description for a guardrail this build does not know", async () => {
+    // Inventing a behaviour would be worse than saying nothing: an operator
+    // would rely on it.
+    server.use(
+      http.get(`${BASE}/guardrails/config`, () =>
+        HttpResponse.json({
+          guardrails: [{ name: "custom_policy", kind: "Custom" }],
+        }),
+      ),
+    );
+
+    renderView("member");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("guardrail-0")).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("guardrail-description-0")).not.toBeInTheDocument();
+    expect(screen.getByText("Custom policy")).toBeInTheDocument();
   });
 
   it("renders an empty no-active-guardrails state (13.5)", async () => {

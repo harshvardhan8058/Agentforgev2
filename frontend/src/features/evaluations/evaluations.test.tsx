@@ -39,7 +39,12 @@ describe("EvaluationsView (MSW)", () => {
     server.use(
       http.get(`${BASE}/evaluations/datasets`, () =>
         HttpResponse.json([
-          { dataset_id: "ds-1", name: "smoke", created_at: "2024-01-01T00:00:00Z" },
+          {
+            dataset_id: "ds-1",
+            name: "smoke",
+            created_at: "2024-01-01T00:00:00Z",
+            item_count: 3,
+          },
         ]),
       ),
     );
@@ -48,6 +53,28 @@ describe("EvaluationsView (MSW)", () => {
     await waitFor(() => expect(screen.getByTestId("dataset-ds-1")).toBeInTheDocument());
     expect(screen.getByTestId("dataset-name-cell").textContent).toBe("smoke");
     expect(screen.getByTestId("dataset-created-at").textContent).toBe("2024-01-01T00:00:00Z");
+    expect(screen.getByTestId("dataset-item-count-badge").textContent).toBe("3 items");
+  });
+
+  it("flags a dataset with no items, which can only ever score 0", async () => {
+    server.use(
+      http.get(`${BASE}/evaluations/datasets`, () =>
+        HttpResponse.json([
+          {
+            dataset_id: "ds-empty",
+            name: "empty",
+            created_at: "2024-01-01T00:00:00Z",
+            item_count: 0,
+          },
+        ]),
+      ),
+    );
+
+    renderView("member");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("dataset-item-count-badge").textContent).toBe("empty"),
+    );
   });
 
   it("creates a dataset and shows the returned id (14.1)", async () => {
@@ -69,6 +96,53 @@ describe("EvaluationsView (MSW)", () => {
     await waitFor(() => expect(created).toBe(1));
     await waitFor(() =>
       expect(screen.getByTestId("create-dataset-result").textContent).toContain("ds-new"),
+    );
+  });
+
+  it("sends the entered items, not an empty list (the defect this fixes)", async () => {
+    // Regression test: the body used to be `{ name, items: [] }` unconditionally,
+    // so every dataset was created empty and every run over it scored 0.
+    let sent: { name: string; items: unknown[] } | null = null;
+    server.use(
+      http.get(`${BASE}/evaluations/datasets`, () => HttpResponse.json([])),
+      http.post(`${BASE}/evaluations/datasets`, async ({ request }) => {
+        sent = (await request.json()) as { name: string; items: unknown[] };
+        return HttpResponse.json({ dataset_id: "ds-new", name: sent.name });
+      }),
+    );
+
+    renderView("member");
+    const user = userEvent.setup();
+    await user.type(await screen.findByTestId("dataset-name"), "regression");
+    await user.type(screen.getByTestId("dataset-item-input-0"), "the question");
+    await user.type(screen.getByTestId("dataset-item-expected-0"), "the answer");
+    await user.click(screen.getByTestId("create-dataset-submit"));
+
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent).toEqual({
+      name: "regression",
+      items: [{ input: "the question", expected: "the answer" }],
+    });
+  });
+
+  it("selects the newly created dataset for the run form", async () => {
+    // The id is generated server-side; before this it had to be read off the
+    // list and retyped into the run form by hand.
+    server.use(
+      http.get(`${BASE}/evaluations/datasets`, () => HttpResponse.json([])),
+      http.post(`${BASE}/evaluations/datasets`, () =>
+        HttpResponse.json({ dataset_id: "ds-generated-id", name: "n" }),
+      ),
+    );
+
+    renderView("member");
+    const user = userEvent.setup();
+    await user.type(await screen.findByTestId("dataset-name"), "n");
+    await user.type(screen.getByTestId("dataset-item-input-0"), "q");
+    await user.click(screen.getByTestId("create-dataset-submit"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("run-dataset-id")).toHaveValue("ds-generated-id"),
     );
   });
 

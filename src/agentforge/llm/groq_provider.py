@@ -160,7 +160,15 @@ class Groq_Provider(LLM_Provider):
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = completion.choices[0].message.content or ""
-                return GenerationResult(text=text, provider=self.name)
+                # Prefer the model the API reports actually serving the request:
+                # a provider may resolve an alias to a concrete version, and the
+                # usage breakdown should record what ran, not what was asked for.
+                served = getattr(completion, "model", None)
+                return GenerationResult(
+                    text=text,
+                    provider=self.name,
+                    model=served if isinstance(served, str) and served else self._model,
+                )
             except LLMProviderError:
                 raise
             except Exception as exc:  # noqa: BLE001 - any SDK error is a provider failure
