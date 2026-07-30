@@ -25,6 +25,11 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Input } from "../../components/ui/Input";
+import { ExampleChips } from "../../components/ui/ExampleChips";
+import {
+  APPROVAL_EDIT_EXAMPLES,
+  APPROVAL_REJECT_EXAMPLES,
+} from "../../lib/examples";
 
 type Decision = "approve" | "reject" | "edit";
 
@@ -155,6 +160,14 @@ export function ApprovalPanel({
               onChange={(e) => setFeedback(e.target.value)}
               placeholder="Why is this rejected?"
             />
+            {/* The common rejection reasons, since this feedback is fed back to
+                the Writer and a vague reason produces a vague revision. */}
+            <ExampleChips
+              label="Common reasons"
+              examples={APPROVAL_REJECT_EXAMPLES}
+              onPick={setFeedback}
+              testId="approval-feedback-examples"
+            />
             <Button
               type="button"
               variant="danger"
@@ -179,6 +192,12 @@ export function ApprovalPanel({
               value={editedContent}
               onChange={(e) => setEditedContent(e.target.value)}
               placeholder="Replacement content…"
+            />
+            <ExampleChips
+              label="Example"
+              examples={APPROVAL_EDIT_EXAMPLES}
+              onPick={setEditedContent}
+              testId="approval-edited-content-examples"
             />
             <Button
               type="button"

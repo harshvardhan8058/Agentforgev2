@@ -41,17 +41,11 @@ import { Input } from "../../components/ui/Input";
 import { Badge } from "../../components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { ExampleChips } from "../../components/ui/ExampleChips";
+import { QUERY_EXAMPLES } from "../../lib/examples";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { UploadControl } from "../documents/UploadControl";
 import { StreamingAnswer } from "./StreamingAnswer";
 import { cn } from "../../lib/cn";
-
-/** One-click starter questions for an empty corpus/first-time Operator. */
-const QUERY_EXAMPLES: readonly string[] = [
-  "Summarize the key points of this document",
-  "What are the important dates mentioned?",
-  "What does the document say about compensation?",
-];
 
 /** The shape `POST /query` resolves to (mirrors the generated `QueryResponse`). */
 interface QueryResult {

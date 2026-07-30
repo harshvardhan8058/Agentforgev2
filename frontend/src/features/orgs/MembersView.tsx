@@ -38,6 +38,8 @@ import { ErrorBanner } from "../../components/ErrorBanner";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Input } from "../../components/ui/Input";
+import { ExampleChips } from "../../components/ui/ExampleChips";
+import { MEMBER_EMAIL_EXAMPLES, TEAM_NAME_EXAMPLES } from "../../lib/examples";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -165,6 +167,11 @@ export function MembersView(): JSX.Element {
                   onChange={(e) => setMemberEmail(e.target.value)}
                   placeholder="teammate@company.com"
                 />
+                <ExampleChips
+                  examples={MEMBER_EMAIL_EXAMPLES}
+                  onPick={setMemberEmail}
+                  testId="member-email-examples"
+                />
               </div>
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="member-role" className="text-sm font-medium text-text">
@@ -220,6 +227,11 @@ export function MembersView(): JSX.Element {
                   value={teamName}
                   onChange={(e) => setTeamName(e.target.value)}
                   placeholder="Platform"
+                />
+                <ExampleChips
+                  examples={TEAM_NAME_EXAMPLES}
+                  onPick={setTeamName}
+                  testId="team-name-examples"
                 />
               </div>
               <Button
@@ -289,6 +301,11 @@ export function MembersView(): JSX.Element {
                       value={teamMemberEmail}
                       onChange={(e) => setTeamMemberEmail(e.target.value)}
                       placeholder="teammate@company.com"
+                    />
+                    <ExampleChips
+                      examples={MEMBER_EMAIL_EXAMPLES}
+                      onPick={setTeamMemberEmail}
+                      testId="team-member-email-examples"
                     />
                   </div>
                   <Button

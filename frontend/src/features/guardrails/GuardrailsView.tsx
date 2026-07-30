@@ -26,7 +26,9 @@ import { Badge, type BadgeTone } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
+import { ExampleChips } from "../../components/ui/ExampleChips";
 import { Skeleton } from "../../components/ui/Skeleton";
+import { GUARDRAIL_EXAMPLES } from "../../lib/examples";
 
 interface GuardrailInfo {
   name: string;
@@ -141,6 +143,15 @@ export function GuardrailsView(): JSX.Element {
                   data-testid="guardrail-content"
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
+                  placeholder="Paste content to check against the pipeline…"
+                />
+                {/* Presets that exercise the guardrails active by default. The
+                    blocklist is empty unless GUARDRAIL_BLOCKLIST_JSON is set, so
+                    no preset here claims to trip it. */}
+                <ExampleChips
+                  examples={GUARDRAIL_EXAMPLES}
+                  onPick={setContent}
+                  testId="guardrail-examples"
                 />
               </div>
               <div>

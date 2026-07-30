@@ -33,7 +33,9 @@ import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Badge } from "../../components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
+import { ExampleChips } from "../../components/ui/ExampleChips";
 import { Skeleton } from "../../components/ui/Skeleton";
+import { PROMPT_STARTERS } from "../../lib/examples";
 import { RenderPromptForm } from "./RenderPromptForm";
 import type { PromptStudioProps } from "./PromptStudio";
 
@@ -239,6 +241,26 @@ export function PromptRegistryView(): JSX.Element {
                     create.mutate();
                   }}
                 >
+                  {/* A prompt is three coupled fields — name, body and the
+                      variables the body references — so a starter fills all
+                      three at once. Filling only the name would leave an
+                      inconsistent form that still needs a body written by hand. */}
+                  <ExampleChips
+                    label="Start from"
+                    examples={PROMPT_STARTERS.map((s) => ({
+                      label: s.label,
+                      value: s.name,
+                    }))}
+                    onPick={(name) => {
+                      const starter = PROMPT_STARTERS.find((s) => s.name === name);
+                      if (!starter) return;
+                      setNewName(starter.name);
+                      setNewBody(starter.body);
+                      setNewVariables(starter.variables);
+                    }}
+                    testId="prompt-starters"
+                  />
+
                   <div className="flex flex-col gap-1.5">
                     <label htmlFor="prompt-name" className="text-sm font-medium text-text">
                       Name
@@ -249,6 +271,7 @@ export function PromptRegistryView(): JSX.Element {
                       ref={promptNameRef}
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
+                      placeholder="grounded-answer"
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
@@ -268,6 +291,7 @@ export function PromptRegistryView(): JSX.Element {
                       data-testid="prompt-variables"
                       value={newVariables}
                       onChange={(e) => setNewVariables(e.target.value)}
+                      placeholder="context, question"
                     />
                   </div>
                   <div>

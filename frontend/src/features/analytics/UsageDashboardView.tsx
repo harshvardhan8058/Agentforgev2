@@ -34,6 +34,7 @@ import { Input } from "../../components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { BREAKDOWN_GROUPS, type UsageReport } from "./types";
+import { RANGE_PRESETS } from "./rangePresets";
 import { UsageTotals } from "./UsageTotals";
 import { UsageBreakdownTable } from "./UsageBreakdownTable";
 import { BreakdownBoundary } from "./BreakdownBoundary";
@@ -151,6 +152,36 @@ export function UsageDashboardView(): JSX.Element {
                   Apply range
                 </Button>
               </form>
+
+              {/* Quick ranges. These apply immediately rather than only filling
+                  the inputs: a preset is an expressed intent ("last 7 days"),
+                  so making the Operator then press Apply would be a pointless
+                  second step. */}
+              <div
+                className="mt-3 flex flex-wrap items-center gap-1.5"
+                data-testid="range-presets"
+              >
+                <span className="text-xs font-medium text-text-subtle">Quick:</span>
+                {RANGE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    data-testid={`range-preset-${preset.label
+                      .toLowerCase()
+                      .replace(/\s+/g, "-")}`}
+                    onClick={() => {
+                      const [nextStart, nextEnd] = preset.resolve(new Date());
+                      setDraftStart(nextStart);
+                      setDraftEnd(nextEnd);
+                      setStart(nextStart);
+                      setEnd(nextEnd);
+                    }}
+                    className="rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-text-muted transition-colors hover:border-primary/60 hover:bg-primary-subtle hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
             </CardContent>
           </Card>
 
