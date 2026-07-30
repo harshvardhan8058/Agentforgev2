@@ -155,6 +155,7 @@ def _build_groq(settings: Settings) -> LLM_Provider:
         api_key=settings.groq_api_key.get_secret_value(),
         timeout_seconds=settings.llm_timeout_seconds,
         max_retries=settings.llm_max_retries,
+        rate_limit_max_wait_seconds=settings.llm_rate_limit_max_wait_seconds,
     )
 
 

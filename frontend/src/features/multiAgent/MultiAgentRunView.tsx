@@ -38,6 +38,7 @@ import {
   type MultiAgentStreamState,
 } from "../../api/sse/multiAgentReducer";
 import { can } from "../../auth/rbac";
+import { stripDecisionEnvelope } from "../../lib/agentText";
 import { useSession } from "../../auth/useSession";
 import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
@@ -74,14 +75,28 @@ function roleOf(frame: SseFrame): string | null {
   return typeof frame.data.role_id === "string" ? frame.data.role_id : null;
 }
 
-/** A short summary of an event for the ordered log. */
+/**
+ * A short summary of an event for the ordered log.
+ *
+ * Event text originates from the model, so it passes through
+ * `stripDecisionEnvelope` for the same reason `Markdown` does: the log is plain
+ * text, not markdown, so it would otherwise be the one surface where a leaked
+ * decision envelope could still be displayed verbatim. The transform is
+ * identity for anything that is not envelope-shaped.
+ */
 function summarize(frame: SseFrame): string {
   const d = frame.data;
-  if (typeof d.content === "string" && d.content.length > 0) return d.content;
-  if (typeof d.comments === "string" && d.comments.length > 0) return d.comments;
+  if (typeof d.content === "string" && d.content.length > 0) {
+    return stripDecisionEnvelope(d.content);
+  }
+  if (typeof d.comments === "string" && d.comments.length > 0) {
+    return stripDecisionEnvelope(d.comments);
+  }
   if (typeof d.checkpoint === "string" && d.checkpoint.length > 0) return d.checkpoint;
   if (Array.isArray(d.steps) && d.steps.length > 0) {
-    return d.steps.filter((s) => typeof s === "string").join(", ");
+    return stripDecisionEnvelope(
+      d.steps.filter((s) => typeof s === "string").join(", "),
+    );
   }
   return "";
 }

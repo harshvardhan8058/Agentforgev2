@@ -17,6 +17,7 @@ import rehypeHighlight from "rehype-highlight";
 
 import type { Citation } from "../../api/domain";
 import { cn } from "../../lib/cn";
+import { stripDecisionEnvelope } from "../../lib/agentText";
 import { extractCitations } from "./extractCitations";
 
 /** A single rendered citation link. */
@@ -124,7 +125,11 @@ export function Markdown({
         rehypePlugins={[rehypeSanitize, [rehypeHighlight, { ignoreMissing: true }]]}
         components={buildComponents(citations)}
       >
-        {content}
+        {/* This component renders model-generated prose exclusively, so it is
+            the one place where a leaked decision envelope can be caught for
+            every caller at once. The transform is identity for anything that is
+            not envelope-shaped — see lib/agentText. */}
+        {stripDecisionEnvelope(content)}
       </ReactMarkdown>
     </div>
   );
