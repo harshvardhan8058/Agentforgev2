@@ -36,20 +36,25 @@ export function UsageTotals({
           <CardTitle className="text-sm text-text-muted">Total cost</CardTitle>
         </CardHeader>
         <CardContent>
-          {/* Friendly, human-readable primary display. */}
+          {/*
+            The backend returns an exact Decimal string, which serializes forms
+            like `0E-8` and `10.0000`. Printing that next to the total as
+            "Exact: 0E-8" read as a defect rather than as precision, so the
+            formatted value is the visible one and the exact string is carried
+            verbatim in the adjacent element (Req 11.4, Property 11) — the same
+            arrangement the per-breakdown tables already use. It also stays on
+            the title, so it can be read without a screen reader.
+          */}
           <p
             className="text-3xl font-semibold tabular-nums text-text"
             data-testid="usage-total-cost-display"
+            title={`Exact value from the API: ${totalCost}`}
           >
             {formatCost(totalCost)}
           </p>
-          {/* The exact backend string, preserved verbatim (Req 11.4, Property 11). */}
-          <p className="mt-1 text-xs text-text-subtle">
-            Exact:{" "}
-            <span className="font-mono tabular-nums" data-testid="usage-total-cost">
-              {totalCost}
-            </span>
-          </p>
+          <span className="sr-only" data-testid="usage-total-cost">
+            {totalCost}
+          </span>
         </CardContent>
       </Card>
     </div>

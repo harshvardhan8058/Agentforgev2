@@ -574,6 +574,11 @@
             "title": "Dataset Id",
             "type": "string"
           },
+          "item_count": {
+            "default": 0,
+            "title": "Item Count",
+            "type": "integer"
+          },
           "name": {
             "title": "Name",
             "type": "string"

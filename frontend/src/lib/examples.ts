@@ -100,6 +100,56 @@ export const DATASET_NAME_EXAMPLES: readonly Example[] = [
   { label: "Regression set", value: "Grounded-answer regression set" },
 ];
 
+/** A ready-made set of dataset items. */
+export interface EvaluationItemPreset {
+  readonly label: string;
+  readonly items: readonly { readonly input: string; readonly expected: string }[];
+}
+
+/**
+ * Item sets whose questions are answerable from `SAMPLE_DOCUMENTS`.
+ *
+ * Every item carries an `expected` value on purpose: `exact_match` and
+ * `contains` both score 0 when `expected` is absent, so a preset without one
+ * would produce a run that scores zero and look like a broken feature. The
+ * expectations are short substrings so `contains` and `heuristic` can score
+ * meaningfully against a generated answer.
+ */
+export const EVALUATION_ITEM_PRESETS: readonly EvaluationItemPreset[] = [
+  {
+    label: "Onboarding policy",
+    items: [
+      {
+        input: "What equipment does onboarding provide on day one?",
+        expected: "laptop",
+      },
+      { input: "How long is the probation period?", expected: "ninety days" },
+      {
+        input: "How long is a new engineer assigned a buddy for?",
+        expected: "thirty days",
+      },
+    ],
+  },
+  {
+    label: "Q3 incident",
+    items: [
+      { input: "How long did the checkout outage last?", expected: "42 minutes" },
+      {
+        input: "What was the root cause of the outage?",
+        expected: "connection pooling",
+      },
+      { input: "What fraction of sessions were affected?", expected: "12%" },
+    ],
+  },
+  {
+    label: "Launch plan",
+    items: [
+      { input: "Who owns the private beta phase?", expected: "product lead" },
+      { input: "When does general availability happen?", expected: "week 8" },
+    ],
+  },
+];
+
 /** The three evaluators registered by the composition root. */
 export const EVALUATOR_EXAMPLES: readonly Example[] = [
   { label: "All three", value: "exact_match, contains, heuristic" },

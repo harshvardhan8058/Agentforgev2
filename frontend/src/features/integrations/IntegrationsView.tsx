@@ -107,13 +107,19 @@ export function IntegrationsView(): JSX.Element {
     },
   });
 
-  const providers = useQuery<ProviderUsage[], ClientError>({
+  const providers = useQuery<
+    { byProvider: ProviderUsage[]; byModel: ProviderUsage[] },
+    ClientError
+  >({
     queryKey: orgScopedKey(orgId, "usage-providers"),
     queryFn: async () => {
       const data = await runRequest(() =>
         apiClient.GET("/analytics/usage", { params: { query: {} } }),
       );
-      return Array.isArray(data.by_provider) ? data.by_provider : [];
+      return {
+        byProvider: Array.isArray(data.by_provider) ? data.by_provider : [],
+        byModel: Array.isArray(data.by_model) ? data.by_model : [],
+      };
     },
     retry: false,
     staleTime: 30_000,
@@ -122,9 +128,14 @@ export function IntegrationsView(): JSX.Element {
   const integrations = status.data ?? [];
 
   // Only providers that actually served traffic are meaningful signals.
-  const active = (providers.data ?? []).filter((p) => p.total_tokens > 0);
+  const active = (providers.data?.byProvider ?? []).filter((p) => p.total_tokens > 0);
   const usingFallback = active.some((p) => p.key === FALLBACK_PROVIDER);
   const realProviders = active.filter((p) => p.key !== FALLBACK_PROVIDER);
+  // The concrete models observed, excluding the keyless fallback's own label so
+  // it is not presented as if it were a model.
+  const models = (providers.data?.byModel ?? []).filter(
+    (m) => m.total_tokens > 0 && m.key !== FALLBACK_PROVIDER,
+  );
 
   return (
     <div className="flex flex-col gap-6" data-testid="integrations-view">
@@ -164,13 +175,54 @@ export function IntegrationsView(): JSX.Element {
             </div>
           )}
 
+          {/* A healthy hosted provider previously rendered as a single small
+              badge alone in a large card, which said almost nothing: not what it
+              means, not which model, not how much it has served. */}
           {realProviders.length > 0 && (
-            <div className="flex flex-wrap gap-2" data-testid="model-provider-active">
-              {realProviders.map((p) => (
-                <Badge key={p.key} tone="success" data-testid={`model-provider-${p.key}`}>
-                  {p.key}
-                </Badge>
-              ))}
+            <div className="flex flex-col gap-3" data-testid="model-provider-active">
+              <div className="flex flex-col gap-2">
+                {realProviders.map((p) => (
+                  <div
+                    key={p.key}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span
+                        className="h-2 w-2 rounded-full bg-success"
+                        aria-hidden="true"
+                      />
+                      <Badge tone="success" data-testid={`model-provider-${p.key}`}>
+                        {p.key}
+                      </Badge>
+                      <span className="text-sm text-text">serving your traffic</span>
+                    </span>
+                    <span
+                      className="text-xs tabular-nums text-text-muted"
+                      data-testid={`model-provider-tokens-${p.key}`}
+                    >
+                      {p.total_tokens.toLocaleString("en-US")} tokens
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {models.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-text-subtle">Models seen:</span>
+                  {models.map((m) => (
+                    <code
+                      key={m.key}
+                      className="rounded bg-bg-subtle px-1.5 py-0.5 font-mono text-xs text-text-muted"
+                      data-testid={`model-name-${m.key}`}
+                    >
+                      {m.key}
+                    </code>
+                  ))}
+                </div>
+              )}
+              <p className="text-sm leading-relaxed text-text-muted">
+                Answers are written by the model. Credentials are read from the
+                server environment and are never sent to the browser.
+              </p>
             </div>
           )}
 

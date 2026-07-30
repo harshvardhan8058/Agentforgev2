@@ -29,6 +29,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Ca
 import { ExampleChips } from "../../components/ui/ExampleChips";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { GUARDRAIL_EXAMPLES } from "../../lib/examples";
+import { describeGuardrail } from "./guardrailCatalog";
 
 interface GuardrailInfo {
   name: string;
@@ -101,20 +102,44 @@ export function GuardrailsView(): JSX.Element {
           )}
           {guardrails.length > 0 && (
             <ol className="flex flex-col gap-2" data-testid="guardrails-list">
-              {guardrails.map((g, i) => (
-                <li
-                  key={`${g.name}-${i}`}
-                  data-testid={`guardrail-${i}`}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2"
-                >
-                  <span className="text-sm font-medium text-text" data-testid={`guardrail-name-${i}`}>
-                    {g.name}
-                  </span>
-                  <Badge tone="neutral" data-testid={`guardrail-kind-${i}`}>
-                    {g.kind}
-                  </Badge>
-                </li>
-              ))}
+              {guardrails.map((g, i) => {
+                const described = describeGuardrail(g.name);
+                return (
+                  <li
+                    key={`${g.name}-${i}`}
+                    data-testid={`guardrail-${i}`}
+                    className="flex flex-col gap-1 rounded-lg border border-border bg-surface px-3 py-2.5"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* The order is the order the pipeline applies them, so it
+                          is worth stating rather than leaving implicit. */}
+                      <span className="text-xs tabular-nums text-text-subtle">
+                        {i + 1}
+                      </span>
+                      <span className="text-sm font-medium text-text">
+                        {described.label}
+                      </span>
+                      {/* The stable API name, and the implementation class only as
+                          a tooltip: useful for support, not a headline. */}
+                      <code
+                        className="rounded bg-bg-subtle px-1.5 py-0.5 font-mono text-xs text-text-muted"
+                        title={`Implementation: ${g.kind}`}
+                        data-testid={`guardrail-name-${i}`}
+                      >
+                        {g.name}
+                      </code>
+                    </div>
+                    {described.description && (
+                      <p
+                        className="text-xs leading-relaxed text-text-muted"
+                        data-testid={`guardrail-description-${i}`}
+                      >
+                        {described.description}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
             </ol>
           )}
         </CardContent>

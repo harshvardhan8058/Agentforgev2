@@ -47,13 +47,14 @@ def deterministic_token_count(prompt: str, result: GenerationResult) -> Token_Co
 
 
 def _model_of(result: GenerationResult) -> str:
-    """Best-effort model name for the completed call.
+    """Return the model that served the call, falling back to the provider name.
 
-    ``GenerationResult`` carries no model field in the current contract, so the provider
-    name is used as the model identifier; a richer provider can attach a real model later
-    without changing this decorator.
+    A provider that knows its model reports it on ``GenerationResult.model``; the
+    fallback keeps the field populated for providers that cannot, since the usage
+    record requires a model identifier. When every provider fell back, the "by
+    model" analytics breakdown was an exact duplicate of "by provider".
     """
-    return result.provider
+    return result.model or result.provider
 
 
 class Instrumented_Provider(LLM_Provider):

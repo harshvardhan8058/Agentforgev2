@@ -170,6 +170,30 @@
   }
 
   /*
+   * Scroll-edge fade for an independently scrolling panel (the sidebar nav).
+   * `scroll-timeline`-free and purely visual: the mask softens the top and
+   * bottom few pixels so a clipped list is visibly clipped rather than looking
+   * like it simply ends. Applied to the scroll container, not its content, so it
+   * does not affect layout or hit-testing.
+   */
+  .af-scroll-fade {
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 0.75rem,
+      #000 calc(100% - 0.75rem),
+      transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 0.75rem,
+      #000 calc(100% - 0.75rem),
+      transparent 100%
+    );
+  }
+
+  /*
    * Aurora field: slow-drifting brand-tinted blobs used as the decorative
    * backdrop of the auth brand panel. Purely presentational (the elements are
    * aria-hidden) and heavily blurred, so it never competes with foreground

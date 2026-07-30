@@ -46,7 +46,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenuSelectTrigger,
 } from "../../components/ui/DropdownMenu";
 import { Skeleton } from "../../components/ui/Skeleton";
 
@@ -178,24 +178,27 @@ export function ApiKeysView(): JSX.Element {
         description="Issue and revoke org-scoped API keys. A key's secret is shown once at creation and never stored."
       />
 
+      {/* The create form is two controls; on its own row above the list it left
+          most of the viewport empty. Beside the list it reads as one screen. */}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
+      <div className="flex flex-col gap-4">
       <Can permission={MANAGE_API_KEYS}>
         <Card>
           <CardHeader>
             <CardTitle>Create a key</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-wrap items-end gap-3">
+          <CardContent className="flex flex-col items-stretch gap-3">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="api-key-role" className="text-sm font-medium text-text">
                 Role
               </label>
               <DropdownMenu>
-                <DropdownMenuTrigger
+                <DropdownMenuSelectTrigger
                   id="api-key-role"
                   data-testid="api-key-role-trigger"
-                  className="inline-flex h-10 min-w-[8rem] items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-sm text-text hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                >
-                  <span className="capitalize">{newRole}</span>
-                </DropdownMenuTrigger>
+                  className="w-40 capitalize"
+                  value={newRole}
+                />
                 <DropdownMenuContent>
                   {ASSIGNABLE_ROLES.map((r) => (
                     <DropdownMenuItem
@@ -224,6 +227,8 @@ export function ApiKeysView(): JSX.Element {
 
       {createKey.isError && <ErrorBanner error={createKey.error} />}
 
+      {/* A key's secret is only ever shown once, so it stays in the left column
+          next to the form that produced it rather than below a long list. */}
       {createdSecret && (
         <Card raised data-testid="created-secret">
           <CardHeader>
@@ -247,7 +252,9 @@ export function ApiKeysView(): JSX.Element {
         </Card>
       )}
 
-      <section className="flex flex-col gap-3">
+      </div>
+
+      <section className="flex min-w-0 flex-col gap-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-text-muted">
           Active keys
         </h2>
@@ -338,6 +345,7 @@ export function ApiKeysView(): JSX.Element {
 
         {revokeKey.isError && <ErrorBanner error={revokeKey.error} />}
       </section>
+      </div>
     </div>
   );
 }

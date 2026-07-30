@@ -430,6 +430,11 @@ class DatasetSummary(BaseModel):
     dataset_id: UUID
     name: str
     created_at: datetime
+    # A run scores every item in the dataset, so a dataset with no items produces
+    # no results and an aggregate of 0. The count is included so a caller can
+    # tell a usable dataset from an empty one before running it; defaulted so
+    # existing clients that ignore the field are unaffected.
+    item_count: int = 0
 
 
 class EvaluationRunRequest(BaseModel):
