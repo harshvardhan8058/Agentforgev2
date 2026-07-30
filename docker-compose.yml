@@ -101,6 +101,10 @@ services:
       # Bound every hosted-LLM call so one stalled request cannot hang the run.
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
       LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+      # Free hosted tiers meter tokens per minute and one multi-role run can exhaust
+      # that on its own. The limit clears in seconds, so wait it out (bounded) instead
+      # of killing the run; raise this if you see rate-limit errors mid-run.
+      LLM_RATE_LIMIT_MAX_WAIT_SECONDS: ${LLM_RATE_LIMIT_MAX_WAIT_SECONDS:-8}
       # Per-principal rate limiting is Redis-backed; keep it OFF for the local single-user
       # keyless stack (the documented keyless default). Override to "true" to exercise it.
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-false}

@@ -165,6 +165,12 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 30.0
     llm_max_retries: int = 2
 
+    # Total time one completion may spend waiting out an upstream rate limit (HTTP 429)
+    # before failing with an actionable message. Free hosted tiers meter tokens per
+    # minute and a multi-role run can exhaust that on its own; the limit clears in
+    # seconds, so a short bounded wait turns a dead run into a slightly slower one.
+    llm_rate_limit_max_wait_seconds: float = 8.0
+
     # --- credentials (ALL optional) ---
     groq_api_key: SecretStr | None = None
     hosted_embedding_api_key: SecretStr | None = None
