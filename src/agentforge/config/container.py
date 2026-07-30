@@ -151,7 +151,11 @@ def _build_groq(settings: Settings) -> LLM_Provider:
     from agentforge.llm.groq_provider import Groq_Provider  # local import by design
 
     assert settings.groq_api_key is not None
-    return Groq_Provider(api_key=settings.groq_api_key.get_secret_value())
+    return Groq_Provider(
+        api_key=settings.groq_api_key.get_secret_value(),
+        timeout_seconds=settings.llm_timeout_seconds,
+        max_retries=settings.llm_max_retries,
+    )
 
 
 _DEFAULT_LLM_BUILDERS: dict[str, Callable[[Settings], LLM_Provider]] = {

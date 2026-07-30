@@ -88,6 +88,19 @@ services:
       # corpus is populated. Such answers are always reported as ungrounded with no
       # citations. Set to "false" to enforce document-backed answers only.
       ALLOW_UNGROUNDED_ANSWERS: ${ALLOW_UNGROUNDED_ANSWERS:-true}
+      # Work budgets. The code-level defaults (10 agent iterations, 6 rounds,
+      # 3 revisions) are worst-case safety ceilings, not sensible interactive values:
+      # a multi-agent run nests them, so 4 roles x up to 11 completions x several
+      # rounds is well over a hundred sequential LLM calls for ONE synchronous request.
+      # With a real provider that takes many minutes and looks like a hang. These
+      # local values keep an interactive run to a handful of calls per role; raise them
+      # for batch/offline work.
+      ITERATION_LIMIT: ${ITERATION_LIMIT:-4}
+      MAX_ROUNDS: ${MAX_ROUNDS:-2}
+      MAX_REVISIONS: ${MAX_REVISIONS:-1}
+      # Bound every hosted-LLM call so one stalled request cannot hang the run.
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
       # Per-principal rate limiting is Redis-backed; keep it OFF for the local single-user
       # keyless stack (the documented keyless default). Override to "true" to exercise it.
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-false}
