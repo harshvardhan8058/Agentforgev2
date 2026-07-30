@@ -253,10 +253,13 @@ export function GettingStarted(): JSX.Element | null {
                 />
 
                 <span className="flex min-w-0 flex-col">
+                  {/* Struck-through text conventionally means retracted or no
+                      longer applicable, not accomplished. A completed step is
+                      de-emphasised instead; its tick is the completion signal. */}
                   <span
                     className={cn(
                       "text-sm font-medium",
-                      step.done ? "text-text-muted line-through" : "text-text",
+                      step.done ? "text-text-muted" : "text-text",
                     )}
                   >
                     {step.label}
