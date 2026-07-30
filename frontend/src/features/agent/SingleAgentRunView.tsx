@@ -43,15 +43,9 @@ import { Button } from "../../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Input } from "../../components/ui/Input";
 import { ExampleChips } from "../../components/ui/ExampleChips";
+import { AGENT_EXAMPLES } from "../../lib/examples";
 import { useSseRun } from "./useSseRun";
 import { TraceView } from "./TraceView";
-
-/** One-click starter tasks for a first single-agent run. */
-const AGENT_EXAMPLES: readonly string[] = [
-  "Summarize the latest incident report",
-  "Draft a short status update",
-  "Extract the action items from the notes",
-];
 
 interface AgentRunResponse {
   answer: string;

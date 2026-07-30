@@ -50,18 +50,12 @@ import { Button } from "../../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Input } from "../../components/ui/Input";
 import { ExampleChips } from "../../components/ui/ExampleChips";
+import { MULTI_AGENT_EXAMPLES } from "../../lib/examples";
 import { useSseRun } from "../agent/useSseRun";
 import { useConversation } from "../conversations/ConversationContext";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { MultiAgentRunResult } from "./MultiAgentRunResult";
 import { WorkflowVisualizer } from "./WorkflowVisualizer";
-
-/** One-click starter tasks for a first multi-agent collaboration. */
-const MULTI_AGENT_EXAMPLES: readonly string[] = [
-  "Draft a briefing on the Q3 incident with sources",
-  "Research and outline a product launch plan",
-  "Compare two approaches and recommend one",
-];
 
 interface StartRunResponse {
   run_id: string;
