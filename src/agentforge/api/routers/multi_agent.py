@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
@@ -34,9 +34,10 @@ from agentforge.api.deps import (
     get_multi_agent_context,
     get_trace_export_service,
     get_optional_guardrail_pipeline,
+    get_webhook_emitter,
     require_permission,
 )
-from agentforge.api.errors import AppError
+from agentforge.api.errors import AppError, defer_after_error
 from agentforge.api.schemas import (
     ApprovalDecisionRequest,
     ApprovalDecisionResponse,
@@ -64,6 +65,12 @@ from agentforge.multiagent.models import (
     Multi_Agent_Run,
     Termination_Reason,
 )
+from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.events import (
+    RUN_KIND_MULTI,
+    emit_guardrail_blocked,
+    emit_run_outcome,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +93,39 @@ def _export_trace_quietly(
         trace_export.export_run(run_id, org_id=org_id, user_id=user_id)
     except Exception:  # noqa: BLE001 - the service already swallows; belt and braces
         logger.warning("Trace export failed for multi-agent run %s.", run_id, exc_info=True)
+
+
+def _emit_stream_outcome(
+    ctx: MultiAgentContext,
+    emitter: Webhook_Emitter,
+    org_id,
+    run_id: str,
+    conversation_id: str,
+) -> None:
+    """Report a streamed run's terminal outcome to webhook subscribers, absorbing failures.
+
+    Runs inside the response generator, after the terminal frame has been handed to the
+    client — so like the trace export beside it, an exception raised here would surface
+    mid-response and must not be allowed to. Emission itself never raises; the store read
+    that precedes it can, which is what this guards.
+    """
+    try:
+        run = ctx.run_store.get(org_id, run_id)
+        if run is None or run.termination_reason is None:
+            return
+        emit_run_outcome(
+            emitter,
+            org_id,
+            run_id=run_id,
+            kind=RUN_KIND_MULTI,
+            termination_reason=run.termination_reason.value,
+            conversation_id=conversation_id,
+            citation_count=len(run.final_output.citations) if run.final_output else 0,
+        )
+    except Exception:  # noqa: BLE001 - a notification must not break a completed stream
+        logger.warning(
+            "Webhook emission failed for multi-agent run %s.", run_id, exc_info=True
+        )
 
 
 def _run_status_name(run: Multi_Agent_Run) -> str:
@@ -136,9 +176,11 @@ def _termination_reason_name(run: Multi_Agent_Run) -> str | None:
 async def start_multi_agent_run(
     payload: StartMultiAgentRunRequest,
     background: BackgroundTasks,
+    request: Request,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
+    emitter: Webhook_Emitter = Depends(get_webhook_emitter),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> StartMultiAgentRunResponse:
@@ -156,12 +198,26 @@ async def start_multi_agent_run(
     runs on the terminal output and its flags are attached to the response (Req 5.5, 5.6).
 
     The completed run's trace is exported as a **background task** — after the response is
-    sent, so it adds no latency and cannot fail the run (Req 10.2).
+    sent, so it adds no latency and cannot fail the run (Req 10.2). The ``run.completed`` /
+    ``run.failed`` webhook rides the same task, for the same reason. A guardrail block raises,
+    so its ``guardrail.blocked`` webhook is deferred onto the error response instead.
     """
 
     org_id = principal.org_id
 
-    def _start() -> StartMultiAgentRunResponse:
+    def _report_block(reason: str | None) -> None:
+        defer_after_error(
+            request,
+            lambda: emit_guardrail_blocked(
+                emitter, org_id, surface="multi_agent.run", reason=reason
+            ),
+        )
+
+    # Returned alongside the response because the outcome the webhook reports is not part of
+    # the response body: a caller learns the run's status, while a subscriber is told which
+    # terminal reason it ended on. Carried out of the worker thread rather than re-read from
+    # the store afterwards, which would be a second query for facts already in hand.
+    def _start() -> tuple[StartMultiAgentRunResponse, str | None, int]:
         conversation_id = payload.conversation_id or ctx.agent.conversation_store.create(
             org_id
         )
@@ -195,7 +251,9 @@ async def start_multi_agent_run(
 
         # Input guardrail: a block prevents run creation + orchestration entirely (Req 5.4).
         if pipeline is not None:
-            run = apply_input_guardrail(pipeline, payload.task, _invoke)
+            run = apply_input_guardrail(
+                pipeline, payload.task, _invoke, on_block=_report_block
+            )
         else:
             run = _invoke()
 
@@ -206,20 +264,38 @@ async def start_multi_agent_run(
         if pipeline is not None and persisted.final_output is not None:
             flags = list(pipeline.evaluate(persisted.final_output.content).flags)
 
-        return StartMultiAgentRunResponse(
-            run_id=persisted.id,
-            conversation_id=persisted.conversation_id,
-            status=_run_status_name(persisted),
-            flags=flags,
+        return (
+            StartMultiAgentRunResponse(
+                run_id=persisted.id,
+                conversation_id=persisted.conversation_id,
+                status=_run_status_name(persisted),
+                flags=flags,
+            ),
+            _termination_reason_name(persisted),
+            len(persisted.final_output.citations) if persisted.final_output else 0,
         )
 
-    response = await run_in_threadpool(_start)
+    response, termination_reason, citation_count = await run_in_threadpool(_start)
     background.add_task(
         trace_export.export_run,
         response.run_id,
         org_id=org_id,
         user_id=principal.user_id,
     )
+    if termination_reason is not None:
+        # No reason means the run has not reached a terminal state (it paused at an approval
+        # checkpoint). Nothing has completed or failed yet, so nothing is reported; the
+        # approval endpoint emits when the resumed run ends.
+        background.add_task(
+            emit_run_outcome,
+            emitter,
+            org_id,
+            run_id=response.run_id,
+            kind=RUN_KIND_MULTI,
+            termination_reason=termination_reason,
+            conversation_id=response.conversation_id,
+            citation_count=citation_count,
+        )
     return response
 
 
@@ -231,6 +307,7 @@ async def stream_multi_agent_run(
     run_id: str,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
+    emitter: Webhook_Emitter = Depends(get_webhook_emitter),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> StreamingResponse:
@@ -257,6 +334,10 @@ async def stream_multi_agent_run(
         _export_trace_quietly(
             trace_export, run.id, org_id=org_id, user_id=principal.user_id
         )
+        # Re-read the run: the streamed orchestration persisted its terminal reason, and the
+        # copy fetched before streaming predates it. Emitting nothing when the run did not
+        # terminate (it paused for approval) is correct — nothing has completed or failed.
+        _emit_stream_outcome(ctx, emitter, org_id, run.id, run.conversation_id)
 
     return StreamingResponse(_iter(), media_type="text/event-stream")
 
@@ -274,6 +355,7 @@ async def submit_approval(
     background: BackgroundTasks,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
+    emitter: Webhook_Emitter = Depends(get_webhook_emitter),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> ApprovalDecisionResponse:
     """Forward an ``Approval_Decision`` to the ``Human_Approval_Gate`` (Req 9.3).
@@ -349,6 +431,18 @@ async def submit_approval(
             run_id,
             org_id=org_id,
             user_id=principal.user_id,
+        )
+        # The decision that ended the run is the moment it completed or failed, so this is
+        # where the outcome is reported — a run resumed past its revision bound and rejected
+        # never reaches the start endpoint's emission.
+        background.add_task(
+            emit_run_outcome,
+            emitter,
+            org_id,
+            run_id=run_id,
+            kind=RUN_KIND_MULTI,
+            termination_reason=response.termination_reason or "unknown",
+            conversation_id=run.conversation_id,
         )
     return response
 

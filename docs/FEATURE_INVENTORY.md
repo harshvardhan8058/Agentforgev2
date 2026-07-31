@@ -211,6 +211,61 @@
   application rather than by database grants, there is no retention policy or export, and
   authentication events (logins) are not audited.
 
+## 11c. Outbound webhooks (v1.1)
+
+**Signed, org-scoped event delivery with a per-endpoint delivery log**
+- **Purpose:** three features already produced facts somebody outside the console needed to
+  hear about — a run finishing, a guardrail refusing an input, a document finishing ingestion —
+  and the only way to learn any of them was to be looking at a page. This is the one seam that
+  serves all of them, and the seam budget notifications and future alerting will reuse.
+- **Backend modules:** `webhooks/base.py` (the `Webhook_Event` vocabulary, `Subscribable_Event`
+  contract subset, domain records, and the subscription-store / delivery-store / transport
+  seams), `webhooks/security.py` (URL admission + HMAC signing), `webhooks/store.py`
+  (in-memory + Postgres), `webhooks/transport.py` (`httpx`, redirects disabled, response body
+  never read), `webhooks/emitter.py` (`Webhook_Emitter`: match, sign, retry, record, never
+  raise), `webhooks/events.py` (every payload in one place), `api/routers/webhooks.py`,
+  migration `0015`. `api/errors.py` gained `defer_after_error` so a guardrail refusal — which
+  raises — can still be reported.
+- **Frontend:** `features/webhooks/WebhooksView` — register/pause/resume/delete, one-time
+  secret disclosure with copy-to-clipboard, an on-demand delivery log per endpoint (status,
+  attempts, duration, diagnostic), skeleton/empty/error states, live-region announcements,
+  `manage_webhooks`-gated nav entry and route. The event checklist is generated from the
+  contract's `Subscribable_Event`, so a new event cannot be silently missing.
+- **Endpoints (all `manage_webhooks`):** `GET /webhooks`, `POST /webhooks` (the only response
+  carrying the secret), `PATCH /webhooks/{id}`, `DELETE /webhooks/{id}`,
+  `POST /webhooks/{id}/test`, `GET /webhooks/{id}/deliveries?before=&before_id=&limit=`
+  (keyset-paginated on `(created_at, id)`).
+- **Events:** `run.completed`, `run.failed`, `document.ingested`, `guardrail.blocked`, plus
+  `webhook.ping` sent only by the test endpoint and deliberately not subscribable. Emitted from
+  all four run paths (single sync + streamed, multi sync + streamed, and the approval decision
+  that terminates a run), the ingest endpoint, and every guardrail entry point.
+- **RBAC:** `manage_webhooks`, granted from **admin** upwards — webhook configuration is
+  administrative and discloses no credential, unlike the owner-only audit trail and budget.
+- **Security:** https-only URLs with no credentials/fragment/non-standard port; the host is
+  resolved and refused unless **every** answer is globally routable unicast (an allow-list, so
+  RFC1918, loopback, link-local/metadata, CGNAT, reserved and multicast are all excluded);
+  re-validated at delivery time because DNS is mutable; redirects never followed; signature
+  `X-AgentForge-Signature: t=<unix>,v1=HMAC-SHA256(secret, "t.body")`, replay-resistant, with a
+  shipped-and-tested `verify_signature()` so the documented recipe is executable.
+- **Guarantees:** the emitter never raises, so a webhook problem cannot turn a finished run
+  into a failed request; with no matching subscription it returns after one indexed read;
+  emission is always off the request path; payloads carry identifiers and counts, never answer
+  text, document text, or the blocked input; the secret appears in exactly one response model;
+  create/update/delete are audited (`webhook.created|updated|deleted`).
+- **Telemetry:** one `webhook_deliveries` row per (event, subscription) with attempt count,
+  response status, bounded diagnostic and duration; every failure also logged at WARNING.
+- **Status:** Fully working.
+- **Keyless:** Yes (in-memory stores; Postgres when the domain stores persist). Outside the
+  production profile a loopback endpoint may be targeted over http, so a subscription can be
+  developed against a local listener.
+- **Optional credentials:** None.
+- **Documentation:** `docs/WEBHOOKS.md` (consumer guide), `docs/CONFIGURATION.md` (bounds).
+- **Limitations:** see `docs/KNOWN_LIMITATIONS.md` — the signing secret is stored as-is (a
+  signature must be produced, not verified), there is no rotation endpoint, retries are
+  in-process with no durable queue or manual redelivery, delivery is at-least-once and
+  unordered, and there is no `budget.exceeded` event (a standing condition needs threshold
+  tracking, not an enum member).
+
 ## 12. Deployment (Phase 9)
 
 **One-command Docker stack, production overlay, CI/CD**
@@ -229,11 +284,12 @@
 - **Uniform error envelope** `AppError { error: {code, message, details} }` across all APIs; frontend normalizes via `mapError`/`ErrorBanner`.
 - **Cost governance** (see §7b): a monthly spend ceiling per org that warns or blocks, enforced in front of every spending endpoint.
 - **Audit trail** over every administrative mutation (see §11b): append-only, org-scoped, credential-free, with a configurable fail-open/fail-closed posture.
+- **Outbound webhooks** (see §11c): signed, org-scoped delivery of run, ingestion and guardrail events, emitted off the request path from every run path, with a per-endpoint delivery log and SSRF-hardened URL admission.
 - **SSE streaming** with exactly-one-terminal invariant (single & multi-agent).
 - **Conversation context** (`POST /conversations`, `GET /conversations/{id}`) threading `conversation_id` into agent + multi-agent runs.
 - **Premium frontend platform:** dark/light theming (design tokens, no-FOWT), command palette (⌘K, RBAC-gated), keyboard shortcuts, responsive app shell, skeleton/empty/error states, markdown+citations, Monaco, charts — all lazy-loaded.
 - **Observability everywhere:** trace recorder + pluggable exporter (NoOp keyless / LangSmith / OTLP), invoked on **every** completed run — single-agent sync and streamed, multi-agent sync and streamed, and the approval decision that terminates a run. Export runs after the response (background task) or after the stream's single terminal event (completion hook), swallows every failure, and short-circuits before touching the trace store when it is off, so it never changes run outcomes or adds latency. `GET /observability/status` reports the active destination.
-- **Testing posture:** backend keyless lane (**793** tests) + Hypothesis properties; frontend `npm run ci` (**445**); Playwright e2e (**20**, real production build with the API mocked at the network layer); all deterministic and keyless. A live-PostgreSQL integration lane (`pytest -m integration`) runs in CI against an ephemeral `pgvector` service container.
+- **Testing posture:** backend keyless lane (**1042** tests) + Hypothesis properties; frontend `npm run ci` (**486**); Playwright e2e (**28**, real production build with the API mocked at the network layer); all deterministic and keyless. A live-PostgreSQL integration lane (`pytest -m integration`) runs in CI against an ephemeral `pgvector` service container.
 
 ## Known v1.0 limitations / open items
 

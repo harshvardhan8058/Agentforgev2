@@ -27,6 +27,12 @@ export interface paths {
          *     it must add nothing to the caller's latency and must not be able to fail the run
          *     (Req 10.2). With the keyless NoOp exporter the task returns immediately without
          *     touching the trace store.
+         *
+         *     Webhook emission rides the same background task for the same reason — a delivery involves
+         *     the open internet and cannot be on the caller's path. A guardrail block is reported too,
+         *     but a block *raises*, so its emission is deferred onto the error response instead (see
+         *     ``defer_after_error``): a refused input is a security event whose subscribers must not be
+         *     dropped merely because the caller received a 400.
          */
         post: operations["run_agent_agent_run_post"];
         delete?: never;
@@ -372,6 +378,11 @@ export interface paths {
         /**
          * Ingest Document
          * @description Ingest an uploaded document into the caller's org and return its summary (Req 7.3).
+         *
+         *     A successful ingestion emits ``document.ingested`` as a **background task**: subscribers
+         *     that index or post-process a new document should hear about it, and a delivery to the open
+         *     internet must add nothing to the uploader's latency. A rejected upload emits nothing —
+         *     nothing was ingested.
          */
         post: operations["ingest_document_documents_post"];
         delete?: never;
@@ -675,7 +686,9 @@ export interface paths {
          *     runs on the terminal output and its flags are attached to the response (Req 5.5, 5.6).
          *
          *     The completed run's trace is exported as a **background task** — after the response is
-         *     sent, so it adds no latency and cannot fail the run (Req 10.2).
+         *     sent, so it adds no latency and cannot fail the run (Req 10.2). The ``run.completed`` /
+         *     ``run.failed`` webhook rides the same task, for the same reason. A guardrail block raises,
+         *     so its ``guardrail.blocked`` webhook is deferred onto the error response instead.
          */
         post: operations["start_multi_agent_run_multi_agent_runs_post"];
         delete?: never;
@@ -1117,9 +1130,119 @@ export interface paths {
          *     The input guardrail pipeline runs **before** the RAG_Service is invoked: a blocking
          *     guardrail raises ``AppError("guardrail_blocked", 400)`` and the downstream generation
          *     is never reached (Req 5.4). The output pipeline then runs on the produced answer and
-         *     its flags are attached to the response without blocking (Req 5.5, 5.6).
+         *     its flags are attached to the response without blocking (Req 5.5, 5.6). A block also
+         *     emits the ``guardrail.blocked`` webhook, deferred onto the error response so a refused
+         *     input still reaches the subscribers who need to know about it.
          */
         post: operations["query_query_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Webhooks
+         * @description Return this organization's webhook subscriptions, newest first.
+         *
+         *     Unpaginated: an organization has a handful of endpoints, not a feed of them, and the row
+         *     count is bounded by how many integrations a team actually runs.
+         */
+        get: operations["list_webhooks_webhooks_get"];
+        put?: never;
+        /**
+         * Create Webhook
+         * @description Register an endpoint and return its signing secret **once**.
+         *
+         *     The secret is generated here and appears in this response only; no other endpoint returns
+         *     it. Deliveries start immediately — a new subscription is active.
+         */
+        post: operations["create_webhook_webhooks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/{webhook_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Webhook
+         * @description Delete a subscription and its delivery log (the log has no reader without it).
+         *
+         *     404 rather than a silent 204 for an unknown id: unlike ``DELETE /budget``, this names a
+         *     specific resource, and reporting success for an id the caller made up would hide a typo.
+         */
+        delete: operations["delete_webhook_webhooks__webhook_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Webhook
+         * @description Apply the supplied fields to a subscription. Omitted fields are left alone.
+         */
+        patch: operations["update_webhook_webhooks__webhook_id__patch"];
+        trace?: never;
+    };
+    "/webhooks/{webhook_id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Webhook Deliveries
+         * @description Return this subscription's deliveries, newest first.
+         *
+         *     The subscription is resolved first so an unknown or cross-tenant id is a 404 rather than an
+         *     empty page — an empty page would read as "delivered nothing", which is a different fact.
+         */
+        get: operations["list_webhook_deliveries_webhooks__webhook_id__deliveries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/{webhook_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Webhook
+         * @description Send a signed ``webhook.ping`` now and return what happened.
+         *
+         *     Returns **200 with the delivery outcome** even when the endpoint refused or timed out: the
+         *     request to this platform succeeded, and the consumer's failure is the payload, not an error.
+         *     A 502 here would be indistinguishable from this API being broken.
+         *
+         *     Ignores ``active`` and the subscription's event list — it is an explicit, addressed request,
+         *     and verifying a paused endpoint before resuming it is exactly when this is useful. Not
+         *     audited: it changes nothing.
+         */
+        post: operations["test_webhook_webhooks__webhook_id__test_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1341,7 +1464,7 @@ export interface components {
          *     still being a single authoritative list on the server.
          * @enum {string}
          */
-        Audit_Action: "org.created" | "member.added" | "member.role_changed" | "member.removed" | "team.created" | "team.deleted" | "team_member.added" | "team_member.removed" | "api_key.created" | "api_key.revoked" | "budget.set" | "budget.removed" | "integration_connection.created" | "integration_connection.updated" | "integration_connection.deleted";
+        Audit_Action: "org.created" | "member.added" | "member.role_changed" | "member.removed" | "team.created" | "team.deleted" | "team_member.added" | "team_member.removed" | "api_key.created" | "api_key.revoked" | "budget.set" | "budget.removed" | "integration_connection.created" | "integration_connection.updated" | "integration_connection.deleted" | "webhook.created" | "webhook.updated" | "webhook.deleted";
         /** Body_ingest_document_documents_post */
         Body_ingest_document_documents_post: {
             /**
@@ -1605,6 +1728,62 @@ export interface components {
              * Format: uuid
              */
             team_id: string;
+        };
+        /**
+         * CreateWebhookRequest
+         * @description Register an endpoint and the events it wants.
+         */
+        CreateWebhookRequest: {
+            /** Description */
+            description?: string | null;
+            /**
+             * Events
+             * @description At least one event. A subscription that wants nothing would never fire.
+             */
+            events: components["schemas"]["Subscribable_Event"][];
+            /**
+             * Url
+             * @description An https URL to POST deliveries to. Must not embed credentials or a fragment, and must not resolve to a private, loopback or link-local address.
+             */
+            url: string;
+        };
+        /**
+         * CreateWebhookResponse
+         * @description The creation response — the **only** response carrying the signing secret.
+         *
+         *     The same one-time disclosure contract as an API key: store it now, because no endpoint
+         *     will ever show it again. Unlike an API key, the platform does retain the value (it must, to
+         *     produce an HMAC rather than verify one); see ``docs/KNOWN_LIMITATIONS.md``.
+         */
+        CreateWebhookResponse: {
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description?: string | null;
+            /** Events */
+            events: components["schemas"]["Subscribable_Event"][];
+            /**
+             * Secret
+             * @description The HMAC-SHA256 signing secret for this endpoint's deliveries. Shown once, here, and never returned by any other endpoint.
+             */
+            secret: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Url */
+            url: string;
+            /**
+             * Webhook Id
+             * Format: uuid
+             */
+            webhook_id: string;
         };
         /**
          * DatasetSummary
@@ -2074,6 +2253,18 @@ export interface components {
             status: "running" | "awaiting_approval" | "terminated";
         };
         /**
+         * Subscribable_Event
+         * @description The subset of :class:`Webhook_Event` a subscription may ask for.
+         *
+         *     A separate enum rather than a runtime check against the full vocabulary, because this is
+         *     what the *contract* admits: the request and response models are typed with it, so
+         *     ``webhook.ping`` is rejected by schema validation and never appears in a generated client's
+         *     event picker as if it were subscribable. :data:`SUBSCRIBABLE_EVENTS` is derived from this
+         *     list rather than restated, so the two cannot drift.
+         * @enum {string}
+         */
+        Subscribable_Event: "run.completed" | "run.failed" | "document.ingested" | "guardrail.blocked";
+        /**
          * TeamMemberSummary
          * @description One row of ``GET /orgs/{id}/teams/{tid}/members`` (Req 2.4).
          *
@@ -2187,6 +2378,25 @@ export interface components {
             role: components["schemas"]["Role"];
         };
         /**
+         * UpdateWebhookRequest
+         * @description Change some fields of a subscription. Omitted fields are left alone.
+         *
+         *     A partial update, unlike the integration connection's replace-the-config semantics: these
+         *     fields are independent, and pausing a subscription should not require restating its URL and
+         *     event list. The secret is not rotatable here — silently re-keying would break the consumer
+         *     with no way for them to notice except failing verification.
+         */
+        UpdateWebhookRequest: {
+            /** Active */
+            active?: boolean | null;
+            /** Description */
+            description?: string | null;
+            /** Events */
+            events?: components["schemas"]["Subscribable_Event"][] | null;
+            /** Url */
+            url?: string | null;
+        };
+        /**
          * UsageBreakdownEntry
          * @description One grouped row of a usage breakdown (by provider / model / user) (Req 3.2).
          */
@@ -2243,6 +2453,96 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * WebhookDeliveryResponse
+         * @description The recorded outcome of delivering one event to one endpoint.
+         *
+         *     ``event`` is typed against the full vocabulary rather than the subscribable subset,
+         *     because a ``webhook.ping`` from the test endpoint is a real delivery and appears here.
+         *
+         *     ``response_status`` is ``null`` when no response was obtained at all — DNS, TLS, timeout,
+         *     refused connection — which is exactly the case ``error`` explains. ``error`` is a short
+         *     diagnostic and never a response body: the endpoint belongs to the tenant, and its output
+         *     is not this platform's to store.
+         */
+        WebhookDeliveryResponse: {
+            /** Attempts */
+            attempts: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Delivery Id
+             * Format: uuid
+             */
+            delivery_id: string;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Error */
+            error?: string | null;
+            event: components["schemas"]["Webhook_Event"];
+            /** Response Status */
+            response_status?: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "delivered" | "failed";
+            /**
+             * Webhook Id
+             * Format: uuid
+             */
+            webhook_id: string;
+        };
+        /**
+         * WebhookSubscriptionResponse
+         * @description One registered endpoint.
+         *
+         *     **There is no ``secret`` field, by construction.** The signing secret is returned exactly
+         *     once, by ``POST /webhooks``, in :class:`CreateWebhookResponse`. Every other path renders
+         *     this model, so the secret cannot leak from a listing, a read-back after an update, or a
+         *     delivery log — not because each handler remembers to strip it, but because the shape it
+         *     would have to travel in does not have the field.
+         */
+        WebhookSubscriptionResponse: {
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description?: string | null;
+            /** Events */
+            events: components["schemas"]["Subscribable_Event"][];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Url */
+            url: string;
+            /**
+             * Webhook Id
+             * Format: uuid
+             */
+            webhook_id: string;
+        };
+        /**
+         * Webhook_Event
+         * @description The events an organization may subscribe to.
+         *
+         *     Every member of this vocabulary is **single-shot**: it describes something that happened
+         *     once, at a point in time. That is a deliberate constraint on what belongs here — a
+         *     condition that stays true (an org sitting over its budget for a week) would fire on every
+         *     request that observed it, so a state-based notification needs threshold tracking rather
+         *     than an event, and is not pretended at.
+         * @enum {string}
+         */
+        Webhook_Event: "run.completed" | "run.failed" | "document.ingested" | "guardrail.blocked" | "webhook.ping";
     };
     responses: never;
     parameters: never;
@@ -4027,6 +4327,191 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QueryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_webhooks_webhooks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookSubscriptionResponse"][];
+                };
+            };
+        };
+    };
+    create_webhook_webhooks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWebhookRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateWebhookResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_webhook_webhooks__webhook_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_webhook_webhooks__webhook_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWebhookRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookSubscriptionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_webhook_deliveries_webhooks__webhook_id__deliveries_get: {
+        parameters: {
+            query?: {
+                /** @description Keyset cursor: the `created_at` of the last delivery of the previous page. Must be sent together with `before_id`. */
+                before?: string | null;
+                /** @description Keyset cursor: the `delivery_id` of the last delivery of the previous page. Paired with `before`, because one event fanned out in one burst produces deliveries a timestamp alone cannot separate. */
+                before_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookDeliveryResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_webhook_webhooks__webhook_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookDeliveryResponse"];
                 };
             };
             /** @description Validation Error */

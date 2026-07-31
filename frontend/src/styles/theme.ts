@@ -101,7 +101,7 @@ export const TOKENS: Record<ThemeName, Record<SemanticRole, string>> = {
     "primary-subtle": "rgba(79, 70, 229, 0.1)",
     "primary-fg": "#ffffff",
     accent: "#0891b2",
-    success: "#16a34a",
+    success: "#136c33",
     warning: "#b45309",
     danger: "#dc2626",
     info: "#2563eb",

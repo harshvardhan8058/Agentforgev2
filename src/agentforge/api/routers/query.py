@@ -11,16 +11,17 @@ to avoid blocking the event loop.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.concurrency import run_in_threadpool
 
 from agentforge.api.deps import (
     enforce_budget,
     get_optional_guardrail_pipeline,
     get_rag_service,
+    get_webhook_emitter,
     require_permission,
 )
-from agentforge.api.errors import AppError
+from agentforge.api.errors import AppError, defer_after_error
 from agentforge.api.schemas import CitationModel, QueryRequest, QueryResponse
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.rbac import Permission
@@ -30,6 +31,8 @@ from agentforge.observability.guardrails.base import (
     apply_input_guardrail,
 )
 from agentforge.rag.service import RAG_Service
+from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.events import emit_guardrail_blocked
 
 router = APIRouter(tags=["query"])
 
@@ -37,8 +40,10 @@ router = APIRouter(tags=["query"])
 @router.post("/query", response_model=QueryResponse)
 async def query(
     payload: QueryRequest,
+    request: Request,
     service: RAG_Service = Depends(get_rag_service),
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
+    emitter: Webhook_Emitter = Depends(get_webhook_emitter),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> QueryResponse:
@@ -47,16 +52,28 @@ async def query(
     The input guardrail pipeline runs **before** the RAG_Service is invoked: a blocking
     guardrail raises ``AppError("guardrail_blocked", 400)`` and the downstream generation
     is never reached (Req 5.4). The output pipeline then runs on the produced answer and
-    its flags are attached to the response without blocking (Req 5.5, 5.6).
+    its flags are attached to the response without blocking (Req 5.5, 5.6). A block also
+    emits the ``guardrail.blocked`` webhook, deferred onto the error response so a refused
+    input still reaches the subscribers who need to know about it.
     """
 
     def _downstream():
         return service.answer(payload.query, payload.top_k, org_id=principal.org_id)
 
+    def _report_block(reason: str | None) -> None:
+        defer_after_error(
+            request,
+            lambda: emit_guardrail_blocked(
+                emitter, principal.org_id, surface="query", reason=reason
+            ),
+        )
+
     try:
         if pipeline is not None:
             answer = await run_in_threadpool(
-                apply_input_guardrail, pipeline, payload.query, _downstream
+                lambda: apply_input_guardrail(
+                    pipeline, payload.query, _downstream, on_block=_report_block
+                )
             )
         else:
             answer = await run_in_threadpool(_downstream)

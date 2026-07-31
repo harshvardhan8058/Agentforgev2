@@ -12,10 +12,13 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from agentforge.enterprise.audit import Audit_Action as AuditAction
 from agentforge.enterprise.rbac import Role as RbacRole
+from agentforge.webhooks.base import Subscribable_Event as SubscribableEvent
+from agentforge.webhooks.base import Webhook_Event as WebhookEvent
+from agentforge.webhooks.security import MAX_URL_LENGTH as MAX_WEBHOOK_URL_LENGTH
 
 # A JSON scalar: the value type for every free-form mapping this API accepts or returns.
 # Declaring it precisely (rather than as an opaque object) states what the server actually
@@ -757,3 +760,133 @@ class IntegrationStatusResponse(BaseModel):
     """
 
     integrations: list[IntegrationStatusEntry] = Field(default_factory=list)
+
+
+
+# --- outbound webhooks ---
+# The description bound is a display bound, not a safety one: the field is shown in a table
+# next to the URL, and an unbounded string there is a layout problem as much as a storage one.
+MAX_WEBHOOK_DESCRIPTION_LENGTH = 200
+
+
+def _unique_events(events: list[SubscribableEvent]) -> list[SubscribableEvent]:
+    """Drop duplicate events, preserving the caller's order.
+
+    ``["run.completed", "run.completed"]`` means the same thing as one entry, so it is
+    normalised rather than refused: the stored set is what matters, and a 422 here would be
+    pedantry about a request whose intent is unambiguous.
+    """
+    seen: set[str] = set()
+    unique: list[SubscribableEvent] = []
+    for event in events:
+        if event.value not in seen:
+            seen.add(event.value)
+            unique.append(event)
+    return unique
+
+
+class WebhookSubscriptionResponse(BaseModel):
+    """One registered endpoint.
+
+    **There is no ``secret`` field, by construction.** The signing secret is returned exactly
+    once, by ``POST /webhooks``, in :class:`CreateWebhookResponse`. Every other path renders
+    this model, so the secret cannot leak from a listing, a read-back after an update, or a
+    delivery log — not because each handler remembers to strip it, but because the shape it
+    would have to travel in does not have the field.
+    """
+
+    webhook_id: UUID
+    url: str
+    events: list[SubscribableEvent]
+    description: str | None = None
+    # False for a paused subscription. Paused subscriptions are kept, with their delivery
+    # history, so silencing a noisy endpoint does not mean re-keying it later.
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class CreateWebhookResponse(WebhookSubscriptionResponse):
+    """The creation response — the **only** response carrying the signing secret.
+
+    The same one-time disclosure contract as an API key: store it now, because no endpoint
+    will ever show it again. Unlike an API key, the platform does retain the value (it must, to
+    produce an HMAC rather than verify one); see ``docs/KNOWN_LIMITATIONS.md``.
+    """
+
+    secret: str = Field(
+        ...,
+        description=(
+            "The HMAC-SHA256 signing secret for this endpoint's deliveries. Shown once, here, "
+            "and never returned by any other endpoint."
+        ),
+    )
+
+
+class CreateWebhookRequest(BaseModel):
+    """Register an endpoint and the events it wants."""
+
+    url: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_WEBHOOK_URL_LENGTH,
+        description=(
+            "An https URL to POST deliveries to. Must not embed credentials or a fragment, "
+            "and must not resolve to a private, loopback or link-local address."
+        ),
+    )
+    events: list[SubscribableEvent] = Field(
+        ...,
+        min_length=1,
+        description="At least one event. A subscription that wants nothing would never fire.",
+    )
+    description: str | None = Field(default=None, max_length=MAX_WEBHOOK_DESCRIPTION_LENGTH)
+
+    _dedupe_events = field_validator("events")(_unique_events)
+
+
+class UpdateWebhookRequest(BaseModel):
+    """Change some fields of a subscription. Omitted fields are left alone.
+
+    A partial update, unlike the integration connection's replace-the-config semantics: these
+    fields are independent, and pausing a subscription should not require restating its URL and
+    event list. The secret is not rotatable here — silently re-keying would break the consumer
+    with no way for them to notice except failing verification.
+    """
+
+    url: str | None = Field(default=None, min_length=1, max_length=MAX_WEBHOOK_URL_LENGTH)
+    events: list[SubscribableEvent] | None = Field(default=None, min_length=1)
+    description: str | None = Field(default=None, max_length=MAX_WEBHOOK_DESCRIPTION_LENGTH)
+    active: bool | None = None
+
+    @field_validator("events")
+    @classmethod
+    def _dedupe_events(
+        cls, events: list[SubscribableEvent] | None
+    ) -> list[SubscribableEvent] | None:
+        return None if events is None else _unique_events(events)
+
+
+class WebhookDeliveryResponse(BaseModel):
+    """The recorded outcome of delivering one event to one endpoint.
+
+    ``event`` is typed against the full vocabulary rather than the subscribable subset,
+    because a ``webhook.ping`` from the test endpoint is a real delivery and appears here.
+
+    ``response_status`` is ``null`` when no response was obtained at all — DNS, TLS, timeout,
+    refused connection — which is exactly the case ``error`` explains. ``error`` is a short
+    diagnostic and never a response body: the endpoint belongs to the tenant, and its output
+    is not this platform's to store.
+    """
+
+    delivery_id: UUID
+    webhook_id: UUID
+    event: WebhookEvent
+    status: Literal["delivered", "failed"]
+    # How many HTTP attempts this delivery needed. >1 with status "delivered" means the
+    # endpoint was flaky, which is the number an operator is actually looking for.
+    attempts: int
+    response_status: int | None = None
+    error: str | None = None
+    duration_ms: int | None = None
+    created_at: datetime

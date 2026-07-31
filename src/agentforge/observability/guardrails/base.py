@@ -97,15 +97,25 @@ def apply_input_guardrail(
     pipeline: Guardrail_Pipeline,
     content: str,
     downstream: Callable[[], T],
+    *,
+    on_block: Callable[[str | None], None] | None = None,
 ) -> T:
     """Run the input ``pipeline`` on ``content`` before invoking ``downstream``.
 
     When the pipeline blocks, raise ``AppError("guardrail_blocked", 400, {"reason": ...})``
     and do **not** invoke ``downstream`` (Req 5.4). Otherwise invoke ``downstream`` and
     return its result; a flagging pipeline still proceeds (Req 5.5, 5.6).
+
+    ``on_block`` is called with the guardrail's reason immediately before the refusal is
+    raised. It exists so a block can be *reported* — an outbound webhook, today — without this
+    function knowing what reporting means, and it is given the reason rather than the content
+    because the content is exactly what a guardrail decided must not be passed on. It must not
+    raise: a failure to report a refusal cannot be allowed to change the refusal.
     """
     result = pipeline.evaluate(content)
     if result.decision is Guardrail_Decision.BLOCK:
+        if on_block is not None:
+            on_block(result.reason)
         raise AppError(
             "guardrail_blocked",
             "Input was blocked by a guardrail.",

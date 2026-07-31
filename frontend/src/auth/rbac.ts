@@ -15,6 +15,7 @@ export type Permission =
   | "ingest_documents"
   | "manage_api_keys"
   | "manage_integrations"
+  | "manage_webhooks"
   | "manage_budget"
   | "read_audit_log"
   | "manage_members";
@@ -23,7 +24,7 @@ export type Permission =
 // exactly mirroring `enterprise/rbac.py`:
 //   viewer = {read}
 //   member = viewer ∪ {run_agents, ingest_documents}
-//   admin  = member ∪ {manage_api_keys, manage_integrations}
+//   admin  = member ∪ {manage_api_keys, manage_integrations, manage_webhooks}
 //   owner  = admin  ∪ {manage_members}
 const VIEWER: ReadonlySet<Permission> = new Set<Permission>(["read"]);
 const MEMBER: ReadonlySet<Permission> = new Set<Permission>([
@@ -35,6 +36,7 @@ const ADMIN: ReadonlySet<Permission> = new Set<Permission>([
   ...MEMBER,
   "manage_api_keys",
   "manage_integrations",
+  "manage_webhooks",
 ]);
 const OWNER: ReadonlySet<Permission> = new Set<Permission>([
   ...ADMIN,

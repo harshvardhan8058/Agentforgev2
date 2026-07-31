@@ -51,6 +51,16 @@ export default tseslint.config(
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true },
       ],
+      // A horizontally scrollable container with no focusable content inside is
+      // unreachable by keyboard — axe flags exactly that (`scrollable-region-focusable`,
+      // WCAG 2.1.1) and the fix is `tabIndex={0}` on a labelled `role="region"`. The
+      // rule's default allow-list stops at `tabpanel`, so it would otherwise forbid the
+      // one remedy the accessibility scanner demands. Widened to those two roles only;
+      // `tabIndex` on anything else stays an error.
+      "jsx-a11y/no-noninteractive-tabindex": [
+        "error",
+        { tags: [], roles: ["tabpanel", "region"], allowExpressionValues: true },
+      ],
     },
   },
 

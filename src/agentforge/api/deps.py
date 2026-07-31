@@ -47,6 +47,9 @@ from agentforge.observability.evaluation.framework import Evaluation_Framework
 from agentforge.observability.guardrails.base import Guardrail_Pipeline
 from agentforge.observability.prompt_registry.registry import Prompt_Registry
 from agentforge.observability.budget import Budget_Guard, Budget_Store
+from agentforge.webhooks.base import Webhook_Delivery_Store, Webhook_Subscription_Store
+from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.store import disabled_webhook_emitter
 from agentforge.observability.trace_export import (
     Trace_Export_Service,
     disabled_trace_export_service,
@@ -460,6 +463,30 @@ def get_budget_store(request: Request) -> Budget_Store:
 def get_budget_guard(request: Request) -> Budget_Guard:
     """Return the wired Budget_Guard (spend status + the enforcement decision)."""
     return get_observability_context(request).budget_guard
+
+
+def get_webhook_subscription_store(request: Request) -> Webhook_Subscription_Store:
+    """Return the wired webhook subscription store."""
+    return get_observability_context(request).webhook_subscription_store
+
+
+def get_webhook_delivery_store(request: Request) -> Webhook_Delivery_Store:
+    """Return the wired webhook delivery log."""
+    return get_observability_context(request).webhook_delivery_store
+
+
+def get_webhook_emitter(request: Request) -> Webhook_Emitter:
+    """Return the wired Webhook_Emitter, or a disabled one when nothing is wired.
+
+    Like the trace-export accessor, this must not raise: it is consumed by the endpoints that
+    *do the work* (a finished run, a completed ingestion), and a missing observability graph
+    must never turn an emission point into a failed request. With no context there are no
+    subscriptions either, so an emitter over empty in-memory stores is exactly equivalent.
+    """
+    ctx = getattr(request.app.state, "observability_context", None)
+    if ctx is None:
+        return disabled_webhook_emitter()
+    return ctx.webhook_emitter
 
 
 def get_analytics_service(request: Request) -> Analytics_Service:

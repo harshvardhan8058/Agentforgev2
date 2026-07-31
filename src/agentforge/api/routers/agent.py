@@ -15,7 +15,7 @@ blocking the event loop.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
@@ -28,9 +28,10 @@ from agentforge.api.deps import (
     get_streaming_service,
     get_trace_export_service,
     get_trace_recorder,
+    get_webhook_emitter,
     require_permission,
 )
-from agentforge.api.errors import AppError
+from agentforge.api.errors import AppError, defer_after_error
 from agentforge.api.schemas import (
     AgentRunRequest,
     AgentRunResponse,
@@ -48,8 +49,14 @@ from agentforge.observability.guardrails.base import (
 )
 from agentforge.observability.trace_export import Trace_Export_Service
 from agentforge.streaming.base import AgentRunInput
-from agentforge.streaming.sse import SSE_Streaming_Service
+from agentforge.streaming.sse import Completed_Run, SSE_Streaming_Service
 from agentforge.tracing.base import Trace_Recorder
+from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.events import (
+    RUN_KIND_SINGLE,
+    emit_guardrail_blocked,
+    emit_run_outcome,
+)
 
 router = APIRouter(tags=["agent"])
 
@@ -65,10 +72,12 @@ def _resolve_conversation(
 async def run_agent(
     payload: AgentRunRequest,
     background: BackgroundTasks,
+    request: Request,
     orchestrator: Agent_Orchestrator = Depends(get_orchestrator),
     store: Conversation_Store = Depends(get_conversation_store),
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
+    emitter: Webhook_Emitter = Depends(get_webhook_emitter),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> AgentRunResponse:
@@ -84,9 +93,20 @@ async def run_agent(
     it must add nothing to the caller's latency and must not be able to fail the run
     (Req 10.2). With the keyless NoOp exporter the task returns immediately without
     touching the trace store.
+
+    Webhook emission rides the same background task for the same reason — a delivery involves
+    the open internet and cannot be on the caller's path. A guardrail block is reported too,
+    but a block *raises*, so its emission is deferred onto the error response instead (see
+    ``defer_after_error``): a refused input is a security event whose subscribers must not be
+    dropped merely because the caller received a 400.
     """
 
     org_id = principal.org_id
+
+    def _report_block(reason: str | None) -> None:
+        defer_after_error(
+            request, lambda: emit_guardrail_blocked(emitter, org_id, surface="agent.run", reason=reason)
+        )
 
     def _run() -> AgentRunResponse:
         conversation_id = _resolve_conversation(store, org_id, payload.conversation_id)
@@ -103,7 +123,9 @@ async def run_agent(
 
         # Input guardrail: a block prevents the orchestrator invocation entirely (Req 5.4).
         if pipeline is not None:
-            state = apply_input_guardrail(pipeline, payload.message, _invoke)
+            state = apply_input_guardrail(
+                pipeline, payload.message, _invoke, on_block=_report_block
+            )
         else:
             state = _invoke()
 
@@ -137,6 +159,16 @@ async def run_agent(
         org_id=org_id,
         user_id=principal.user_id,
     )
+    background.add_task(
+        emit_run_outcome,
+        emitter,
+        org_id,
+        run_id=response.run_id,
+        kind=RUN_KIND_SINGLE,
+        termination_reason=response.termination_reason,
+        conversation_id=response.conversation_id,
+        citation_count=len(response.citations),
+    )
     return response
 
 
@@ -146,6 +178,7 @@ async def stream_agent(
     streaming: SSE_Streaming_Service = Depends(get_streaming_service),
     store: Conversation_Store = Depends(get_conversation_store),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
+    emitter: Webhook_Emitter = Depends(get_webhook_emitter),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> StreamingResponse:
@@ -169,11 +202,26 @@ async def stream_agent(
         conversation_context=context,
         org_id=org_id,
     )
-    def _export(run_id: str) -> None:
-        trace_export.export_run(run_id, org_id=org_id, user_id=principal.user_id)
+    def _after_stream(completed: Completed_Run) -> None:
+        """Post-stream work: export the trace, then report the outcome to subscribers.
+
+        Runs after the terminal frame has been handed to the client. The streaming service
+        swallows a hook failure, so an exporter or webhook problem cannot turn a completed
+        stream into a second terminal event.
+        """
+        trace_export.export_run(completed.run_id, org_id=org_id, user_id=principal.user_id)
+        emit_run_outcome(
+            emitter,
+            org_id,
+            run_id=completed.run_id,
+            kind=RUN_KIND_SINGLE,
+            termination_reason=completed.termination_reason or "unknown",
+            conversation_id=completed.conversation_id,
+            citation_count=completed.citation_count,
+        )
 
     return StreamingResponse(
-        streaming.iter_sse_frames(run_input, on_complete=_export),
+        streaming.iter_sse_frames(run_input, on_complete=_after_stream),
         media_type="text/event-stream",
     )
 

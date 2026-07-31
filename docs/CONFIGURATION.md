@@ -221,8 +221,52 @@ Guarantees:
   same fact beneath every trace. It reports the wired service rather than the settings, so a
   destination configured without a trace recorder behind it is reported as *off*.
 
+## Outbound webhooks (`WEBHOOK_MAX_ATTEMPTS`, `WEBHOOK_TIMEOUT_SECONDS`, `WEBHOOK_BACKOFF_SECONDS`)
+
+Subscriptions themselves are **not** configuration — an administrator registers them per
+organization through `POST /webhooks` (`manage_webhooks`), stored in `webhook_subscriptions`.
+Only the delivery bounds are environment settings, and all three exist to keep a pathological
+consumer from costing this platform anything unbounded:
+
+| Setting | Default | What it bounds |
+|---|---|---|
+| `WEBHOOK_MAX_ATTEMPTS` | `3` | HTTP attempts per (event, subscription) before the delivery is recorded as failed |
+| `WEBHOOK_TIMEOUT_SECONDS` | `4.0` | One attempt, so a hanging endpoint cannot hold a worker thread |
+| `WEBHOOK_BACKOFF_SECONDS` | `0.5` | The first retry gap; it doubles per attempt (`0.5s`, `1.0s` at the defaults) |
+
+Guarantees that do not depend on configuration:
+
+- **Delivery can never affect the work that triggered it.** Emission happens after the response
+  is sent (a background task) or after a stream's terminal frame (a completion hook), and the
+  emitter's contract is that it never raises — every failure is recorded in `webhook_deliveries`
+  and logged. A guardrail refusal is the one case with no successful response to attach to, so
+  its emission is deferred onto the error response instead; the refusal itself is unaffected
+  either way.
+- **Off costs nothing.** With no matching subscription the emitter returns after one indexed
+  read (`org_id AND active AND :event = ANY(events)`), so the common case — no webhooks
+  configured — adds no work per run.
+- **URL admission is an allow-list, applied at write time and again at delivery time.** https
+  only, no credentials or fragment, default port, and every resolved address must be globally
+  routable unicast — so an endpoint that resolves to the cloud metadata service, RFC1918 space,
+  CGNAT space or loopback is refused (`400 invalid_webhook_url`). Redirects are not followed.
+  Outside the `production` profile a **loopback** host may be targeted over `http`, so a
+  developer can point a subscription at `http://localhost:9000`; production never relaxes this.
+- **The signing secret is returned exactly once**, by `POST /webhooks`. No other response model
+  has the field, so it cannot leak from a listing or a read-back. There is no rotation endpoint.
+- **Payloads carry identifiers, never content.** No answer text, no document text, no blocked
+  input — the endpoint is outside this platform's trust boundary.
+- **Registering, updating and deleting are audited** (`webhook.created`, `webhook.updated`,
+  `webhook.deleted`), recording the URL and which fields changed. A test send is not audited.
+- **Persistence follows the data.** Postgres-backed exactly when the other domain stores are
+  (`USE_DATABASE` / the production profile); the keyless lane keeps in-memory stores so the whole
+  feature is testable without infrastructure.
+
+Full consumer-facing documentation, including the executable signature-verification recipe, is in
+`docs/WEBHOOKS.md`.
+
 ## See also
 
+- `docs/WEBHOOKS.md` — the webhook consumer guide (events, envelope, signature verification).
 - `.env.example` — every `local` setting with placeholder values.
 - `.env.production.example` — every `production` setting with placeholder values.
 - `docs/INFRASTRUCTURE.md` — infrastructure and image notes.

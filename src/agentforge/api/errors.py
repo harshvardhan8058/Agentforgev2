@@ -7,12 +7,17 @@ Unknown routes return 404 ``not_found`` (Req 2.2) and unhandled exceptions retur
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger(__name__)
 
 
 class AppError(Exception):
@@ -50,10 +55,46 @@ _STATUS_CODE_NAMES = {
 }
 
 
-async def _app_error_handler(_: Request, exc: AppError) -> JSONResponse:
+# --- work that must still happen when the response is an error --------------------
+
+# FastAPI's ``BackgroundTasks`` are attached to the response an endpoint *returns*, so an
+# endpoint that raises loses them. Some follow-up work is owed regardless of the status: a
+# guardrail block is a real, reportable security event, and the subscribers who need to hear
+# about it must not be dropped merely because the caller's request ended in a 400.
+#
+# Deliberately narrow: only :class:`AppError` (a *handled* domain outcome) carries deferred
+# work. An unhandled exception means the process is in an unknown state and is no place to be
+# running further side effects.
+_DEFERRED_ATTR = "deferred_error_tasks"
+
+
+def defer_after_error(request: Request, task: Callable[[], None]) -> None:
+    """Run ``task`` after this request's error response has been sent.
+
+    Registered on the request, not the response, because the caller is about to raise. Only
+    honoured for :class:`AppError`; a task registered on a request that then succeeds is simply
+    never run, which is why callers register it immediately before raising.
+    """
+    tasks: list[Callable[[], None]] = getattr(request.state, _DEFERRED_ATTR, [])
+    tasks.append(task)
+    setattr(request.state, _DEFERRED_ATTR, tasks)
+
+
+def _run_deferred(tasks: list[Callable[[], None]]) -> None:
+    """Run every deferred task, isolating failures: one must not cancel the others."""
+    for task in tasks:
+        try:
+            task()
+        except Exception:  # noqa: BLE001 - post-response work cannot affect the response
+            logger.warning("A deferred post-error task failed.", exc_info=True)
+
+
+async def _app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    tasks: list[Callable[[], None]] = getattr(request.state, _DEFERRED_ATTR, [])
     return JSONResponse(
         status_code=exc.status_code,
         content=error_body(exc.code, exc.message, exc.details),
+        background=BackgroundTask(_run_deferred, tasks) if tasks else None,
     )
 
 

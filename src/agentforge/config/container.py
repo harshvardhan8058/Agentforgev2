@@ -134,6 +134,19 @@ from agentforge.observability.prompt_registry.store import (
     InMemory_Prompt_Store,
     Pg_Prompt_Store,
 )
+from agentforge.webhooks.base import (
+    Webhook_Delivery_Store,
+    Webhook_Subscription_Store,
+    Webhook_Transport,
+)
+from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.store import (
+    InMemory_Webhook_Delivery_Store,
+    InMemory_Webhook_Subscription_Store,
+    Pg_Webhook_Delivery_Store,
+    Pg_Webhook_Subscription_Store,
+)
+from agentforge.webhooks.transport import Httpx_Webhook_Transport
 from agentforge.observability.budget import (
     Budget_Guard,
     Budget_Store,
@@ -1034,6 +1047,24 @@ def build_enterprise_context(
     )
 
 
+def build_webhook_subscription_store(settings: Settings) -> Webhook_Subscription_Store:
+    """Postgres when the domain stores persist, in-memory otherwise.
+
+    A subscription that vanished on restart would silently stop delivering, which is worse than
+    never having existed, so it follows the same persistence predicate as every other store.
+    """
+    if settings.persist_domain_stores():
+        return Pg_Webhook_Subscription_Store(settings.database_url)
+    return InMemory_Webhook_Subscription_Store()
+
+
+def build_webhook_delivery_store(settings: Settings) -> Webhook_Delivery_Store:
+    """Postgres when the domain stores persist, in-memory otherwise."""
+    if settings.persist_domain_stores():
+        return Pg_Webhook_Delivery_Store(settings.database_url)
+    return InMemory_Webhook_Delivery_Store()
+
+
 def build_budget_store(settings: Settings) -> Budget_Store:
     """Return the Budget_Store: Postgres when the domain stores persist, in-memory otherwise.
 
@@ -1193,6 +1224,9 @@ class ObservabilityContext:
     trace_export_service: Trace_Export_Service
     budget_store: Budget_Store
     budget_guard: Budget_Guard
+    webhook_subscription_store: Webhook_Subscription_Store
+    webhook_delivery_store: Webhook_Delivery_Store
+    webhook_emitter: Webhook_Emitter
     usage_store: Usage_Store
     cost_model: Cost_Model
     usage_recorder: Usage_Recorder
@@ -1233,7 +1267,9 @@ def build_observability_context(
     silently exporting nothing), which is only correct for the keyless NoOp exporter.
 
     Supported ``overrides`` keys (all optional): ``tracing_exporter``,
-    ``trace_export_service``, ``budget_store``, ``budget_guard``, ``usage_store``,
+    ``trace_export_service``, ``budget_store``, ``budget_guard``,
+    ``webhook_subscription_store``, ``webhook_delivery_store``, ``webhook_transport``,
+    ``webhook_emitter``, ``usage_store``,
     ``cost_model``, ``usage_recorder``, ``usage_sink``, ``analytics_service``,
     ``prompt_store``, ``prompt_registry``, ``guardrail_pipeline``, ``evaluation_store``,
     ``evaluators``, ``pipeline_runner``, and ``evaluation_framework``.
@@ -1300,12 +1336,33 @@ def build_observability_context(
         budget_store, analytics_service, cache_seconds=settings.budget_cache_seconds
     )
 
+    webhook_subscriptions: Webhook_Subscription_Store = overrides.get(
+        "webhook_subscription_store"
+    ) or build_webhook_subscription_store(settings)
+    webhook_deliveries: Webhook_Delivery_Store = overrides.get(
+        "webhook_delivery_store"
+    ) or build_webhook_delivery_store(settings)
+    webhook_transport: Webhook_Transport = overrides.get(
+        "webhook_transport"
+    ) or Httpx_Webhook_Transport(allow_loopback=settings.allow_loopback_webhooks())
+    webhook_emitter: Webhook_Emitter = overrides.get("webhook_emitter") or Webhook_Emitter(
+        webhook_subscriptions,
+        webhook_deliveries,
+        webhook_transport,
+        max_attempts=settings.webhook_max_attempts,
+        timeout_seconds=settings.webhook_timeout_seconds,
+        backoff_seconds=settings.webhook_backoff_seconds,
+    )
+
     return ObservabilityContext(
         settings=settings,
         tracing_exporter=tracing_exporter,
         trace_export_service=trace_export_service,
         budget_store=budget_store,
         budget_guard=budget_guard,
+        webhook_subscription_store=webhook_subscriptions,
+        webhook_delivery_store=webhook_deliveries,
+        webhook_emitter=webhook_emitter,
         usage_store=usage_store,
         cost_model=cost_model,
         usage_recorder=usage_recorder,

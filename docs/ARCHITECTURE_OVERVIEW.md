@@ -173,6 +173,38 @@ Every failure is swallowed (a broken exporter, an unreachable collector, a faili
 read), the export short-circuits before touching the trace store when it is off, and
 `GET /observability/status` reports which destination — if any — is active.
 
+**Post-run webhook emission.** The same attachment points carry outbound webhook delivery, for
+the same reason and with the same contract: a `Webhook_Emitter` call rides the background task
+(or the completion hook) beside the trace export, never raises, and returns after one indexed
+store read when nobody is subscribed. `webhooks/events.py` holds every payload so a shape cannot
+diverge per router.
+
+One case does not fit that pattern. A **guardrail refusal** is a reportable security event, but
+it *raises* — and FastAPI's background tasks are attached to the response an endpoint returns, so
+a raising endpoint loses them. `api/errors.py` therefore offers `defer_after_error(request, task)`:
+the router registers the emission immediately before raising, and the `AppError` handler attaches
+it to the error response. Deliberately narrow — only a *handled* domain error carries deferred
+work, because an unhandled exception means the process is in an unknown state and is no place to
+be running further side effects.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant R as Router
+    participant G as Guardrail_Pipeline
+    participant E as Webhook_Emitter
+    participant W as Endpoint (tenant's)
+    C->>R: POST /query {blocked input}
+    R->>G: evaluate
+    G-->>R: BLOCK (reason)
+    R->>R: defer_after_error(emit guardrail.blocked)
+    R-->>C: 400 guardrail_blocked
+    note over R,C: response first — always
+    R->>E: deferred task runs
+    E->>W: POST signed envelope (bounded retries)
+    E->>E: record delivery outcome
+```
+
 ## 6. Multi-agent supervisor with human approval
 
 ```mermaid
@@ -195,7 +227,7 @@ stateDiagram-v2
 
 ## 7. Data model & migrations
 
-Fourteen additive SQL migrations, one per phase area, applied in order on startup (halting and naming the failing id on error):
+Fifteen additive SQL migrations, one per phase area, applied in order on startup (halting and naming the failing id on error):
 
 ```mermaid
 flowchart LR
@@ -205,13 +237,15 @@ flowchart LR
     m7 --> m8[0008 usage records] --> m9[0009 prompt registry]
     m9 --> m10[0010 evaluations] --> m11[0011 integration connections]
     m11 --> m12[0012 document content hash] --> m13[0013 audit events]
-    m13 --> m14[0014 spend budgets]
+    m13 --> m14[0014 spend budgets] --> m15[0015 webhooks]
 ```
 
 All resources are `org_id`-scoped; cross-tenant access resolves to 404, never 403. Two tables
 carry deliberate non-cascade rules: `usage_records.user_id` and `audit_events.actor_user_id`
 are `ON DELETE SET NULL`, so deleting a user cannot erase the cost it incurred or the record
-of what it did.
+of what it did. `webhook_deliveries.subscription_id` cascades in the opposite direction and for
+the opposite reason: a delivery log for a subscription that no longer exists has no reader, and
+the audit trail independently records that the subscription was deleted and by whom.
 
 ## 8. CI/CD pipeline
 
@@ -234,7 +268,8 @@ flowchart LR
 5. **Uniform errors** — `AppError { error: {code, message, details} }`.
 6. **Additive migrations** — never rewrite existing ones.
 7. **Governance side channels never fail the work they govern** — trace export runs after the
-   response, an audit write is fail-open by default (fail-closed reports `503
-   audit_unavailable` on an *applied* change rather than pretending to roll it back), and a
-   spend check that cannot compute spend allows the run.
+   response, webhook delivery rides the same attachment points and its emitter cannot raise, an
+   audit write is fail-open by default (fail-closed reports `503 audit_unavailable` on an
+   *applied* change rather than pretending to roll it back), and a spend check that cannot
+   compute spend allows the run.
 7. **Streaming invariant** — exactly one terminal SSE event per run.

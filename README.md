@@ -32,6 +32,8 @@ hosted model or a specific integration.
 | **Guardrails** | A safety pipeline applied to every answer, with transparent flags. |
 | **Evaluations** | Curated datasets and evaluators to measure answer quality over time. |
 | **Analytics** | Per-organization token usage and cost, verbatim and provider-attributed. |
+| **Governance** | An append-only audit trail over every administrative change, and a monthly spend ceiling that warns or refuses new work. |
+| **Webhooks** | Signed, org-scoped delivery of run, ingestion and guardrail events to your own systems, with a per-endpoint delivery log and SSRF-hardened URL admission. |
 | **Enterprise auth & tenancy** | JWT + API keys, an RBAC map (owner ⊇ admin ⊇ member ⊇ viewer), and **strict per-`org_id` isolation** enforced at the data-access layer. |
 | **Operator console** | A React + TypeScript SPA (Linear/Vercel-class UX) — command palette, dark/light themes, WCAG 2.1 AA, and route-level code splitting. |
 
@@ -242,6 +244,7 @@ plus `pull` + `up -d`.
 
 - [Architecture overview](docs/ARCHITECTURE_OVERVIEW.md)
 - [Configuration reference](docs/CONFIGURATION.md)
+- [Webhooks guide](docs/WEBHOOKS.md)
 - [Feature inventory](docs/FEATURE_INVENTORY.md)
 - [Deployment guide](docs/DEPLOYMENT.md)
 - [Infrastructure & CI/CD](docs/INFRASTRUCTURE.md)

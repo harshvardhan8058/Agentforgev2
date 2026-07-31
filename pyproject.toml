@@ -30,6 +30,10 @@ dependencies = [
     "langchain-core==1.4.8",
     "pyjwt==2.10.1",
     "argon2-cffi==23.1.0",
+    # Outbound webhook delivery (webhooks/transport.py). Already pinned for the test lane;
+    # promoted to a runtime dependency because delivering a webhook is now product behaviour,
+    # not test scaffolding.
+    "httpx==0.28.1",
 ]
 
 [project.optional-dependencies]
@@ -46,7 +50,6 @@ dev = [
     "pytest==8.3.4",
     "pytest-asyncio==0.25.0",
     "hypothesis==6.123.2",
-    "httpx==0.28.1",
 ]
 
 [tool.setuptools.packages.find]

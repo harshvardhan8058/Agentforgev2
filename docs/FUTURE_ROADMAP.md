@@ -45,6 +45,12 @@ the leftovers):
 - ~~**Spend budgets:**~~ a monthly ceiling per organization that warns or blocks, enforced in
   front of every spending endpoint. Cost was measurable and unlimitable, which is the
   difference between an observability feature and a governance one.
+- ~~**Outbound webhook framework:**~~ signed, org-scoped delivery of `run.completed`,
+  `run.failed`, `document.ingested` and `guardrail.blocked`, emitted from all four run paths,
+  the ingest endpoint and every guardrail entry point, with a per-endpoint delivery log,
+  SSRF-hardened URL admission, and a test-send endpoint. This was the highest-ranked remaining
+  gap: the platform could *show* that something happened and could not *tell* anyone, and the
+  same seam is what budget notifications and future alerting will use.
 
 **Remaining:**
 
@@ -53,13 +59,21 @@ the leftovers):
   image — a design change rather than a packaging tweak.
 - **Docs & DX:** expand `DEPLOYMENT.md` rollback runbooks, add a quickstart, and document the
   integration-lane test suite (credential-free, but needs a `pgvector` database).
-- **Budget notifications (new, from the budget work):** crossing a threshold is visible on the
-  dashboard and in the API, but nothing emails, webhooks, or alerts — and an owner who has to
-  look is an owner who finds out late. A webhook/notification seam would serve budget
-  thresholds, guardrail blocks, and run completion at once, and is the natural next capability.
+- **Budget notifications (narrowed by the webhook work):** the delivery seam now exists, but
+  being over budget is a *condition that stays true*, so it cannot be an event without threshold
+  tracking — otherwise it would fire on every request that observed it. What remains is
+  precisely that: persist "we have told this org about crossing 80% / 100% this period", then
+  emit `budget.threshold_crossed` once per threshold per period. Small, and now unblocked.
 - **Audit export + retention (new, from the audit work):** a SIEM/CSV export and a retention
   policy are what an auditor asks for after "do you have a trail". Both are small next to the
   trail itself, and the keyset cursor they need already exists.
+- **Webhook follow-ups (new, from the webhook work):** the three bounds most likely to be asked
+  about, in value order — (1) **automatic disabling plus alerting after sustained failure**, so a
+  permanently broken endpoint is not just a growing pile of `failed` rows nobody looks at;
+  (2) **manual redelivery** of a recorded delivery, which the delivery log already has the data
+  for; (3) **secret rotation with an overlap window** where both the old and new secret verify,
+  which is the only way to rotate without breaking a consumer. A durable delivery queue is a
+  larger, infrastructure-shaped change and belongs in v2.0 beside real connectors.
 - **Export durability (new, from the trace-export work):** export is fire-and-forget with no
   retry or queue, so a collector that is down during a run loses that run's export (the
   recorded trace is unaffected). A bounded retry, or a "re-export a run" endpoint, is the

@@ -134,6 +134,14 @@ class Settings(BaseSettings):
     argon2_memory_cost: int = 64 * 1024  # KiB; [8 * 1024, 1_048_576]
     argon2_parallelism: int = 2  # [1, 8]
 
+    # --- outbound webhooks ---
+    # Bounds on a delivery, all applied per attempt / per event (webhooks/emitter.py). Kept
+    # small on purpose: a delivery runs in a background task holding a worker thread, so a
+    # pathological consumer must not be able to occupy one for long.
+    webhook_max_attempts: int = 3
+    webhook_timeout_seconds: float = 4.0
+    webhook_backoff_seconds: float = 0.5
+
     # --- cost governance: spend budgets ---
     # How long a computed month-to-date spend is reused before recomputing. The budget check
     # runs before every agent/RAG request, so this keeps a SUM over the tenant's month off the
@@ -318,6 +326,15 @@ class Settings(BaseSettings):
         if isinstance(value, str) and value.strip() == "":
             return None
         return value
+
+    def allow_loopback_webhooks(self) -> bool:
+        """Whether a webhook URL may target loopback (http://localhost:9000).
+
+        True outside the production profile only, so a developer can build a consumer locally
+        while production keeps the SSRF policy intact. Derived rather than configured: an
+        operator cannot switch it on for a production deployment by accident.
+        """
+        return self.profile != "production"
 
     def active_tracing_exporter(self) -> str:
         """Return the active Tracing_Exporter name based on configuration presence.

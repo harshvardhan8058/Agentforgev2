@@ -22,6 +22,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Users,
+  Webhook,
   type LucideIcon,
 } from "lucide-react";
 
@@ -158,6 +159,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: "API Keys",
     icon: KeyRound,
     permission: "manage_api_keys",
+    group: "Administration",
+  },
+  {
+    id: "nav-webhooks",
+    path: "/webhooks",
+    label: "Webhooks",
+    icon: Webhook,
+    permission: "manage_webhooks",
     group: "Administration",
   },
   {

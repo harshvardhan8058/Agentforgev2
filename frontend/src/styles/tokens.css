@@ -95,7 +95,12 @@
   --color-primary-subtle: rgba(79, 70, 229, 0.1);
   --color-primary-fg: #ffffff;
   --color-accent: #0891b2;
-  --color-success: #16a34a;
+  /* green-700/800 rather than green-600: at green-600 (#16a34a) small `text-success`
+     labels — the success Badge, the "loaded" and "created" confirmations — sat at
+     3.3:1 on white, below the 4.5:1 WCAG AA threshold for text under 18pt. This is
+     6.5:1 on white and 5.2:1 on the badge's own 15%-tinted fill, matching the contrast
+     discipline the warning/danger/info roles already had. */
+  --color-success: #136c33;
   --color-warning: #b45309;
   --color-danger: #dc2626;
   --color-info: #2563eb;

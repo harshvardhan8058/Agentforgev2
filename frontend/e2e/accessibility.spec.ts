@@ -115,6 +115,48 @@ test.describe("accessibility (axe, WCAG 2.1 AA)", () => {
     expect(results.violations).toEqual([]);
   });
 
+  test("webhooks view has no serious violations", async ({ page }) => {
+    await mockCommon(page);
+    await seedAuth(page, { role: "owner" });
+    await mockJson(page, "/webhooks", [
+      {
+        webhook_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        url: "https://hooks.example.com/agentforge",
+        events: ["run.completed", "guardrail.blocked"],
+        description: "Ops channel",
+        active: true,
+        created_at: "2026-08-01T10:00:00Z",
+        updated_at: "2026-08-01T10:00:00Z",
+      },
+    ]);
+    await mockJson(page, "/webhooks/*/deliveries**", [
+      {
+        delivery_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        webhook_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        event: "run.completed",
+        status: "failed",
+        attempts: 3,
+        response_status: 503,
+        error: "endpoint refused",
+        duration_ms: 1204,
+        created_at: "2026-08-01T10:05:00Z",
+      },
+    ]);
+
+    await page.goto("/webhooks");
+    await expect(page.getByTestId("webhooks-list")).toBeVisible();
+    // The delivery log is the part with a table, a disclosure button and a live region,
+    // so the scan is run with it open rather than only in its collapsed state.
+    await page
+      .getByTestId("toggle-deliveries-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+      .click();
+    await expect(
+      page.getByTestId("webhook-delivery-table-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+    ).toBeVisible();
+    const results = await scan(page);
+    expect(results.violations).toEqual([]);
+  });
+
   test("query view has no serious violations", async ({ page }) => {
     await mockCommon(page);
     await seedAuth(page, { role: "member" });

@@ -76,6 +76,56 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
     user today, so this is reachable only through a DBA action or a future erasure feature —
     which is exactly the case where attribution matters most.
 
+- **Outbound webhooks:** an administrator can register signed, org-scoped endpoints, test them,
+  and read a per-endpoint delivery log (`docs/WEBHOOKS.md`). The bounds, in the order a reviewer
+  will ask about them:
+  - **The signing secret is stored as-is, unlike an API key.** An API key is *verified* against
+    an argon2 hash, so the platform never needs the original; a webhook signature must be
+    *produced*, which requires the secret itself. It is therefore stored in
+    `webhook_subscriptions.secret`, returned exactly once at creation, excluded from every
+    response model, and never logged. Encrypting it at rest without a KMS would move the
+    problem to wherever the key lived, so the asymmetry is stated rather than disguised: a
+    database compromise discloses webhook signing secrets, and an operator who considers that
+    unacceptable should treat that column like any other credential store.
+  - **No secret rotation.** Rotating silently would break a consumer with no signal except
+    failing verification; doing it properly needs an overlap window where both the old and new
+    secret verify. Today the remedy for a leaked secret is delete-and-re-register.
+  - **In-process retries, no durable queue.** Up to `WEBHOOK_MAX_ATTEMPTS` attempts with
+    bounded backoff, all inside the emitting process, so a restart mid-delivery loses that
+    attempt (the delivery log still records what was attempted). A durable queue is different
+    infrastructure; pretending to have one would be worse than saying so. There is also **no
+    manual redelivery endpoint** yet.
+  - **At-least-once, unordered.** A retry after an endpoint accepted-but-timed-out delivers the
+    same event twice, which is why every delivery carries a unique `X-AgentForge-Delivery` to
+    deduplicate on. Two events emitted close together may arrive in either order.
+  - **A DNS-rebinding race remains theoretically open.** Admission resolves the host and refuses
+    any non-global address, and re-checks on every attempt — but the HTTP client resolves the
+    name again, so a name that answers publicly for the check and privately for the connection
+    is not fully excluded. Closing it means pinning the connection to the checked address.
+  - **No `budget.exceeded` event.** Being over budget is a *condition that stays true*, so an
+    event would fire on every request that observed it; a state-based notification needs
+    threshold tracking, which is a feature rather than a new enum member. Budget notifications
+    therefore remain open (see `FUTURE_ROADMAP.md`).
+  - **A run that raises emits nothing.** `run.failed` covers a run that reached a
+    non-successful *terminal state* (an iteration or round limit, a rejected or aborted plan).
+    A run whose orchestration threw returns a 5xx to the caller and has no completed run to
+    describe, so no event is sent.
+  - **A streamed run the client aborts is not reported**, for the same reason its trace is not
+    exported: the hook fires when the consumer asks for the frame after the terminal one.
+    **Re-streaming a multi-agent run emits again** under the same `run_id`, because a re-stream
+    re-executes the task.
+  - **Delivery is best-effort per event, with no dead-letter surface.** A permanently broken
+    endpoint accumulates `failed` rows and nothing pauses it automatically or alerts anybody;
+    an administrator has to look. Automatic disabling after sustained failure is the natural
+    follow-up.
+  - **No filtering beyond the event type**, and no per-team or per-project scoping — a
+    subscription is org-wide.
+  - **The Postgres stores are covered by an integration test that the fast lane cannot run.**
+    `tests/integration/test_webhook_store_integration.py` asserts migration 0015, the
+    `TEXT[]`-based emission query, the `COALESCE` partial update, the keyset page across rows
+    sharing a timestamp, both CHECK constraints and both cascades — but it needs a live
+    `pgvector` database, so it runs in the integration lane rather than locally.
+
 - **Trace export:** traces are always recorded locally; *export* is off until a destination is configured (`LANGSMITH_API_KEY` or `OTEL_EXPORTER_ENDPOINT`), which `GET /observability/status` and the console both state explicitly. Bounds worth knowing: exactly **one** destination is active (LangSmith wins if both are set — there is no fan-out to several backends); export is fire-and-forget with no retry or queue, so a collector that is down during a run loses that run's export (the trace itself is unaffected, and re-export is not implemented); only structural span attributes are exported, never the trace `detail` payload; and the OTLP path needs the optional `otel` extra, without which it logs once, reports itself unavailable (`GET /observability/status` says `enabled: false`), and exports nothing. Further bounds, all deliberate:
   - **"Enabled" means configured and importable, not reachable.** A wrong collector URL or a revoked key still reports `enabled: true`; deliverability is only discoverable by sending something, and no health probe is implemented.
   - **A streamed run that the client aborts is not exported.** The export hook fires when the consumer asks for the frame after the terminal one, so an abandoned stream skips it. The trace itself is recorded either way.
@@ -105,7 +155,7 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
 ## 4. Contract & testing gaps
 
 - **Contract freshness is enforced, not assumed:** `scripts/check_openapi.py` fails if `frontend/openapi.json` differs from the mounted routes, and `frontend/scripts/check-codegen.mjs` fails if `schema.d.ts` differs from that contract. Both run in CI, so the client cannot reference an endpoint or field the server does not serve.
-- **Deterministic test posture:** the keyless backend lane (**793** tests + Hypothesis properties), `frontend npm run ci` (**445**) and the keyless Playwright lane (**20**) are the source of truth. The live-PostgreSQL integration lane (`pytest -m integration`) is credential-free but needs a `pgvector` database, so it runs in CI rather than in the fast local lane.
+- **Deterministic test posture:** the keyless backend lane (**1042** tests + Hypothesis properties), `frontend npm run ci` (**486**) and the keyless Playwright lane (**28**) are the source of truth. The live-PostgreSQL integration lane (`pytest -m integration`) is credential-free but needs a `pgvector` database, so it runs in CI rather than in the fast local lane.
 
 ## 5. Manual sign-off items (intentionally open)
 

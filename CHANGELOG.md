@@ -11,10 +11,65 @@ with the merged-PR index in `docs/SESSION_HANDOFF.md`.
 ## [Unreleased] — v1.1 work in progress
 
 Branch `feat/v1.1-admin-crud-and-cost-defaults` ([PR #2](https://github.com/harshvardhan8058/Agentforgev2/pull/2)).
-Closes three v1.1 roadmap items. **No migration is required** — every change reuses the
-existing tables.
+Closes the v1.1 roadmap items plus the higher-ranked gaps the audit surfaced. Migrations `0013`
+(audit events), `0014` (spend budgets) and `0015` (webhooks) are new; every other change reuses
+the existing tables.
 
 ### Added
+
+- **Outbound webhook framework.** The platform could *show* that a run finished, a document was
+  ingested, or a guardrail refused an input — and could not *tell* anybody. Polling
+  `GET /agent/runs` was the only alternative, and it costs a request per interval per tenant to
+  learn nothing most of the time. New `webhooks/` package with three seams (subscription store,
+  delivery store, transport), six endpoints behind a new `manage_webhooks` permission
+  (admin-and-above), and migration `0015`:
+  - **Events:** `run.completed`, `run.failed`, `document.ingested`, `guardrail.blocked`, plus a
+    `webhook.ping` sent only by `POST /webhooks/{id}/test` and deliberately not subscribable.
+    Emitted from **all four run paths** (single sync + streamed, multi sync + streamed, and the
+    approval decision that terminates a run), the ingest endpoint, and every guardrail entry
+    point — so the seam has real callers, not just tests.
+  - **Signed deliveries.** `X-AgentForge-Signature: t=<unix>,v1=HMAC-SHA256(secret, "t.body")`,
+    Stripe-style so consumers already know it, with the timestamp inside the signed material so
+    a captured delivery cannot be replayed. `verify_signature()` ships and is tested, which
+    makes the documented verification recipe executable rather than prose.
+  - **SSRF-hardened URL admission.** A webhook URL is attacker-controlled by construction, so:
+    https-only, no credentials or fragment, default ports, and the host is resolved and refused
+    unless **every** answer is globally routable unicast. That is an allow-list, not a
+    deny-list — which is what excludes RFC 6598 CGNAT space (`100.64.0.0/10`, used internally by
+    several cloud providers) that a hand-written list of "private" ranges misses. Re-validated at
+    delivery time because DNS is mutable, redirects never followed, response bodies never read.
+  - **Bounded, recorded delivery.** Up to `WEBHOOK_MAX_ATTEMPTS` attempts with exponential
+    backoff and a per-attempt timeout; one `webhook_deliveries` row per (event, subscription)
+    carrying the attempt count, response status, a bounded diagnostic and the duration.
+    `attempts > 1` with `delivered` is how an operator spots a flaky consumer.
+  - **The emitter cannot fail the work that triggered it.** It never raises, it costs one indexed
+    read when nobody is subscribed, and it always runs off the request path. Payloads carry
+    identifiers and counts — never answer text, document text, or the blocked input, because a
+    webhook endpoint sits outside this platform's trust boundary.
+  - **The signing secret is returned exactly once**, by `POST /webhooks`. No other response model
+    has the field, so it cannot leak from a listing or a read-back. Create, update and delete are
+    audited (`webhook.created`, `webhook.updated`, `webhook.deleted`); a test send is not.
+- **Webhooks console page** (`manage_webhooks`-gated): register, pause/resume, delete, send a test
+  delivery, and expand a per-endpoint delivery log that loads only when opened. The event
+  checklist is generated from the contract's `Subscribable_Event`, so publishing a new event
+  server-side fails the frontend type check rather than silently missing a checkbox. A refused
+  test send renders as the *outcome* (status code + diagnostic), not as an application error —
+  the consumer's endpoint is what refused.
+- **`docs/WEBHOOKS.md`** — the consumer guide: event table, delivery envelope, the
+  signature-verification recipe in Python and Node, what an endpoint should do, and the URL
+  admission policy stated plainly.
+- **`defer_after_error`** in `api/errors.py` — a narrow seam for work that is owed regardless of
+  the response status. FastAPI's background tasks attach to the response an endpoint *returns*,
+  so an endpoint that raises loses them; a guardrail refusal is a real, reportable security event
+  whose subscribers must not be dropped merely because the caller received a 400. Only a handled
+  `AppError` carries deferred work — an unhandled exception means the process is in an unknown
+  state and is no place to run further side effects.
+- **`Pg_Budget_Store` integration test.** It shipped in this cycle without one: the in-memory
+  store proved the interface, and the SQL that holds a customer's spend ceiling had no test at
+  all. Now covers migration `0014`, exact `NUMERIC` money round-trips (including that a limit
+  never returns in scientific notation, which the API renders with `str()`), the `ON CONFLICT`
+  upsert preserving `created_at`, both CHECK constraints, the one-budget-per-org primary key,
+  and the org cascade.
 
 - **Enterprise audit trail.** The platform could say what a run cost and what an agent did, and
   nothing about **who changed the organization** — the first question of every compliance
@@ -104,9 +159,22 @@ existing tables.
 ### Changed
 
 - `POST /agent/stream` gained an internal completion hook on the streaming service
-  (`on_complete`), invoked with the finished run id after the terminal event. A hook failure
-  is swallowed: emitting a second terminal event because a side effect failed would break the
-  single-terminal guarantee the stream contract rests on.
+  (`on_complete`), invoked after the terminal event. A hook failure is swallowed: emitting a
+  second terminal event because a side effect failed would break the single-terminal guarantee
+  the stream contract rests on. The hook now receives a `Completed_Run` record (run id,
+  termination reason, conversation id, citation count) rather than a bare run id — post-stream
+  work grew from one consumer that needed only the id to two, and a record lets the next fact be
+  added without changing every hook's signature.
+- `apply_input_guardrail` gained an `on_block` callback, invoked with the guardrail's reason
+  immediately before the refusal is raised. It is given the *reason*, never the content, because
+  the content is exactly what a guardrail decided must not be passed on.
+- **`text-success` is darker in the light theme** (`#16a34a` → `#136c33`). At green-600 every
+  small success label — the success `Badge`, the "loaded" and "created" confirmations — sat at
+  3.3:1 on white, below the 4.5:1 WCAG AA threshold for text under 18pt; a Playwright axe scan
+  of the new Webhooks page is what surfaced it. Now 6.5:1 on white and 5.2:1 on the badge's own
+  tinted fill, matching the contrast discipline the warning/danger/info roles already had.
+- `httpx` moved from a dev dependency to a runtime one: delivering a webhook is product
+  behaviour, not test scaffolding.
 - Validation errors no longer echo the submitted value (see below), and
   `active_tracing_exporter()` now resolves three destinations instead of two.
 

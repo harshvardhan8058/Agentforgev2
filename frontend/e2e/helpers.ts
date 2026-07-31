@@ -130,6 +130,9 @@ export async function mockCommon(page: Page): Promise<void> {
   await page.route(`${API}/integrations/connections`, (route) => respond(route, []));
   // The audit log is a collection endpoint like the others; `{}` would be handed to a table.
   await page.route(`${API}/audit-events**`, (route) => respond(route, []));
+  // Webhook subscriptions and any endpoint's delivery log are both collections.
+  await page.route(`${API}/webhooks`, (route) => respond(route, []));
+  await page.route(`${API}/webhooks/*/deliveries**`, (route) => respond(route, []));
   // The analytics page reads the org's spend standing; `{}` would render as absent numbers.
   await page.route(`${API}/budget`, (route) =>
     respond(route, {
