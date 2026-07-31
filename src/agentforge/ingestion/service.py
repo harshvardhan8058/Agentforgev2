@@ -13,6 +13,7 @@ write fail after embeddings succeed, previously written vectors are rolled back.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -66,6 +67,10 @@ class IngestionResult:
     filename: str
     chunk_count: int
     status: str
+    # True when these bytes were already in the caller's corpus, in which case
+    # ``document_id`` identifies the document that was already there and nothing new was
+    # written. Defaulted so existing construction sites are unaffected.
+    duplicate: bool = False
 
 
 class Ingestion_Service:
@@ -113,20 +118,43 @@ class Ingestion_Service:
         if len(data) == 0:
             raise EmptyDocumentError("Document is empty (zero bytes)")
 
-        # 4. Extract text within the budget (Req 7.1, 7.6). ExtractionError propagates.
+        # 4. Recognise a re-upload of the same bytes and return the existing document.
+        #
+        #    Placed after the cheap validations but BEFORE extraction and embedding, which
+        #    are the expensive steps: re-uploading a PDF previously re-extracted it,
+        #    re-chunked it, and re-embedded every chunk, only to store a second identical
+        #    copy. Hashing the bytes identifies content rather than filename, so the same
+        #    file uploaded twice under different names is still one document.
+        #
+        #    A store predating this port keeps working: the lookup is optional, and its
+        #    absence simply means no duplicate is ever detected.
+        content_hash = hashlib.sha256(data).hexdigest()
+        find_duplicate = getattr(self._sink, "find_by_content_hash", None)
+        if callable(find_duplicate):
+            existing = find_duplicate(org_id, content_hash)
+            if existing is not None:
+                return IngestionResult(
+                    document_id=existing.document_id,
+                    filename=existing.filename,
+                    chunk_count=existing.chunk_count,
+                    status=existing.status,
+                    duplicate=True,
+                )
+
+        # 5. Extract text within the budget (Req 7.1, 7.6). ExtractionError propagates.
         text = self._extract_with_timeout(content_type, data)
 
-        # 5. Reject documents with no recoverable text (Req 7.4).
+        # 6. Reject documents with no recoverable text (Req 7.4).
         if not text or not text.strip():
             raise EmptyDocumentError("Document contains no extractable text")
 
         document_id = str(uuid.uuid4())
 
-        # 6. Chunk. The extractor already applied markdown normalization, so the chunker
+        # 7. Chunk. The extractor already applied markdown normalization, so the chunker
         #    runs in identity (preserve) mode to avoid double-normalization.
         chunks = self._chunker.chunk(text, document_id)
 
-        # 7. Embed BEFORE any store write so an embedding failure persists nothing
+        # 8. Embed BEFORE any store write so an embedding failure persists nothing
         #    (Req 9.4). EmbeddingError propagates to the caller.
         vectors = self._embeddings.embed_batch([c.content for c in chunks])
 
@@ -137,9 +165,10 @@ class Ingestion_Service:
             size_bytes=len(data),
             status="ingested",
             created_at=datetime.now(timezone.utc),
+            content_hash=content_hash,
         )
 
-        # 8. Commit: write vectors then persist records. Roll back vectors on failure so
+        # 9. Commit: write vectors then persist records. Roll back vectors on failure so
         #    the "persist no Chunks" guarantee holds even on a late write error.
         try:
             tenant_upsert = getattr(self._vector_store, "upsert_for_org", None)

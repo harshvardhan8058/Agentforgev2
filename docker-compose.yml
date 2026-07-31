@@ -46,12 +46,15 @@ services:
     container_name: agentforge-frontend
     environment:
       # Runtime_Config: the browser reaches the API SAME-ORIGIN through the nginx proxy,
-      # so config.js is rendered with a RELATIVE base ("/"). Relative requests always
-      # target the exact origin that served the SPA, so the app works whether it is opened
-      # via http://localhost, http://127.0.0.1, a LAN IP, or a domain — with no CORS and
-      # no dependence on the API port (:8000 is intentionally NOT published here). A bare
-      # "/" is resolved by the client to an empty base (relative fetch). Override with a
-      # full scheme://host only when the API lives on a SEPARATE origin (Req 8.4).
+      # so config.js is rendered with "/". The client resolves that marker to the page's
+      # absolute origin before openapi-fetch constructs a Request, so the app works via
+      # localhost, 127.0.0.1, a LAN IP, or a domain — with no CORS and no dependence on
+      # the API port (:8000 is intentionally NOT published in this stack). Hardcoding a
+      # single host here is the bug that surfaces as "Unable to reach the server" the
+      # moment the app is opened from any other origin. Override with a full
+      # scheme://host only when the API lives on a SEPARATE origin, which additionally
+      # requires matching gateway `connect-src` and API CORS policies (Req 8.4; see
+      # docs/DEPLOYMENT.md).
       API_BASE_URL: ${API_BASE_URL:-/}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
@@ -84,6 +87,28 @@ services:
       # DB-backed Pg_* implementations via Settings.persist_domain_stores(). Override to
       # "false" to keep the (ephemeral) in-memory stores.
       USE_DATABASE: ${USE_DATABASE:-true}
+      # Local convenience: when retrieval finds nothing, answer from the model's
+      # general knowledge instead of refusing, so the assistant is useful before the
+      # corpus is populated. Such answers are always reported as ungrounded with no
+      # citations. Set to "false" to enforce document-backed answers only.
+      ALLOW_UNGROUNDED_ANSWERS: ${ALLOW_UNGROUNDED_ANSWERS:-true}
+      # Work budgets. The code-level defaults (10 agent iterations, 6 rounds,
+      # 3 revisions) are worst-case safety ceilings, not sensible interactive values:
+      # a multi-agent run nests them, so 4 roles x up to 11 completions x several
+      # rounds is well over a hundred sequential LLM calls for ONE synchronous request.
+      # With a real provider that takes many minutes and looks like a hang. These
+      # local values keep an interactive run to a handful of calls per role; raise them
+      # for batch/offline work.
+      ITERATION_LIMIT: ${ITERATION_LIMIT:-4}
+      MAX_ROUNDS: ${MAX_ROUNDS:-2}
+      MAX_REVISIONS: ${MAX_REVISIONS:-1}
+      # Bound every hosted-LLM call so one stalled request cannot hang the run.
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+      # Free hosted tiers meter tokens per minute and one multi-role run can exhaust
+      # that on its own. The limit clears in seconds, so wait it out (bounded) instead
+      # of killing the run; raise this if you see rate-limit errors mid-run.
+      LLM_RATE_LIMIT_MAX_WAIT_SECONDS: ${LLM_RATE_LIMIT_MAX_WAIT_SECONDS:-8}
       # Per-principal rate limiting is Redis-backed; keep it OFF for the local single-user
       # keyless stack (the documented keyless default). Override to "true" to exercise it.
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-false}

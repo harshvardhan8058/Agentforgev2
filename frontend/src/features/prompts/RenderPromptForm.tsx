@@ -7,6 +7,7 @@
  * (`missingVariables`, Property 12). On success it shows the rendered string;
  * on `400 missing_variable` it surfaces `details.missing` via `ErrorBanner`.
  */
+import type { JSX } from "react";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Play } from "lucide-react";
@@ -17,6 +18,8 @@ import type { ClientError } from "../../api/errors";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
+import { ExampleChips } from "../../components/ui/ExampleChips";
+import { suggestVariableValue } from "../../lib/examples";
 import { missingVariables } from "./requiredVariables";
 
 interface RenderResult {
@@ -38,6 +41,11 @@ export function RenderPromptForm({
 
   const missing = missingVariables(variables, values);
   const blocked = missing.length > 0;
+  // Only variables a suggestion is actually known for; guessing a value for an
+  // unrecognized name would put misleading content in the render preview.
+  const suggestibleVariables = variables.filter(
+    (variable) => suggestVariableValue(variable) !== null,
+  );
 
   const render = useMutation<RenderResult, ClientError, void>({
     mutationFn: () =>
@@ -68,7 +76,32 @@ export function RenderPromptForm({
         render.mutate();
       }}
     >
-      <h3 className="text-sm font-semibold text-text">Render preview</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-text">Render preview</h3>
+        {/* Rendering is blocked until every declared variable has a value, so
+            with several variables the fastest path to seeing a result was
+            typing filler into each one. This fills only the variables a
+            suggestion is known for, leaving the rest to the Operator. */}
+        {suggestibleVariables.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-testid="render-fill-example"
+            onClick={() =>
+              setValues((prev) => {
+                const filled = { ...prev };
+                for (const variable of suggestibleVariables) {
+                  filled[variable] = suggestVariableValue(variable) as string;
+                }
+                return filled;
+              })
+            }
+          >
+            Fill example values
+          </Button>
+        )}
+      </div>
 
       {variables.length === 0 && (
         <p className="text-sm text-text-muted" data-testid="render-no-variables">
@@ -92,6 +125,21 @@ export function RenderPromptForm({
               setValues((prev) => ({ ...prev, [variable]: e.target.value }))
             }
           />
+          {suggestVariableValue(variable) !== null && (
+            <ExampleChips
+              label="Example"
+              examples={[
+                {
+                  label: "Use example",
+                  value: suggestVariableValue(variable) as string,
+                },
+              ]}
+              onPick={(value) =>
+                setValues((prev) => ({ ...prev, [variable]: value }))
+              }
+              testId={`render-var-${variable}-examples`}
+            />
+          )}
         </div>
       ))}
 

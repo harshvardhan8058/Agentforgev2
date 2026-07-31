@@ -26,15 +26,36 @@ afterEach(() => {
 });
 
 describe("resolveConfig — API base URL resolution", () => {
-  it('resolves "/" to an empty (same-origin, relative) base', () => {
+  it('resolves "/" to the absolute browser origin', () => {
     withRuntime("/", () => {
-      expect(resolveConfig({}).baseUrl).toBe("");
+      expect(resolveConfig({}).baseUrl).toBe(window.location.origin);
     });
   });
 
   it("treats a slashes-only value as same-origin", () => {
     withRuntime("///", () => {
-      expect(resolveConfig({}).baseUrl).toBe("");
+      expect(resolveConfig({}).baseUrl).toBe(window.location.origin);
+    });
+  });
+
+  /**
+   * Regression guard for the same-origin marker. `openapi-fetch` joins the base
+   * and path into `` `${baseUrl}${pathname}` `` and hands the result to
+   * `new Request(...)`, which requires an absolute URL. Resolving `"/"` to an
+   * empty (relative) base therefore throws `Failed to parse URL from /query`
+   * under Node/undici and jsdom — it only appears to work in a real document.
+   * The resolved same-origin base must stay absolute and directly usable.
+   */
+  it("resolves same-origin to an absolute, request-constructible base", () => {
+    withRuntime("/", () => {
+      const { baseUrl } = resolveConfig({});
+      expect(baseUrl.length).toBeGreaterThan(0);
+      expect(baseUrl.startsWith("/")).toBe(false);
+      expect(() => new URL(baseUrl)).not.toThrow();
+      // The exact join openapi-fetch performs before constructing the Request.
+      expect(() => new Request(`${baseUrl}/query`)).not.toThrow();
+      // Still same-origin, so no CORS preflight and no cross-origin exposure.
+      expect(new URL(`${baseUrl}/query`).origin).toBe(window.location.origin);
     });
   });
 
@@ -48,7 +69,7 @@ describe("resolveConfig — API base URL resolution", () => {
     withRuntime("/", () => {
       expect(
         resolveConfig({ VITE_API_BASE_URL: "http://build-time:9999" }).baseUrl,
-      ).toBe("");
+      ).toBe(window.location.origin);
     });
   });
 

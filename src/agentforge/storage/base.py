@@ -62,6 +62,21 @@ class DocumentStore(Protocol):
         """Return ``org_id``'s document by id, or ``None`` (incl. cross-tenant) (Req 4.3)."""
         ...
 
+    def find_by_content_hash(
+        self, org_id: UUID, content_hash: str
+    ) -> DocumentListing | None:
+        """Return ``org_id``'s already-ingested document with this content hash, if any.
+
+        Lets the Ingestion_Service recognise a re-upload of the same file and return the
+        existing document instead of producing a second copy of it. Returns a
+        :class:`DocumentListing` rather than a :class:`Document` because the caller needs
+        the chunk count to answer without re-chunking.
+
+        Tenant-scoped like every other method: an identical file in another org is not a
+        duplicate here, so each tenant's corpus is independent.
+        """
+        ...
+
     def delete_document(self, org_id: UUID, document_id: str) -> None:
         """Delete the document iff it belongs to ``org_id`` (else a no-op) (Req 4.3)."""
         ...

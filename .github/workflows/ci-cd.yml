@@ -1,27 +1,65 @@
 # AgentForge CI/CD pipeline (Phase 9, Req 14.x, 15.x, 18.x).
 #
-# Four jobs chained strictly with `needs:` so each stage only runs after the prior
-# stage is green:
+#     preflight ─┬─ backend ──────────────────┐
+#                ├─ frontend ─────────────────┼─ image ─ deploy
+#                └─ e2e ──────────────────────┘     │
+#                                                   └─ ci (aggregate gate)
 #
-#     test  ->  build  ->  publish  ->  deploy
+#   preflight    Always runs, and does the two things that must never be skipped or
+#                conditional: the credential-shaped-value scan over sources,
+#                *.env.example and rendered config (Property 1, Req 14.1-14.3, 21.x),
+#                and resolving which areas a pull request touched so unaffected lanes
+#                below can be skipped. On `push` (main / v* tags) and manual dispatch
+#                every lane is forced on, so anything published is fully validated.
+#                Both halves live in ONE job on purpose: each are seconds long, and
+#                GitHub bills every job rounded UP to a whole minute, so splitting them
+#                would cost an extra billed minute per run for no benefit.
+#   backend      Keyless `pytest -m 'not integration' -q` + the server-side OpenAPI
+#                contract drift check.
+#   frontend     Keyless `npm run ci` (codegen check, lint, typecheck, unit tests, build,
+#                bundle-secret scan).
+#   e2e          Keyless Playwright run: the REAL production build in headless Chromium
+#                with the Backend_API mocked at the network layer (page.route) — no live
+#                backend, database or credential. Covers the auth gate, routing, RAG,
+#                documents, the responsive shell, and full-page axe WCAG 2.1 AA scans.
+#   image        Builds all three images ONCE, asserts the backend image budget, runs the
+#                image-layer secret scan, and only then pushes to GHCR — and only on the
+#                publish trigger. Verification therefore always precedes publication
+#                (Req 14.4, 15.1-15.4, 10.2).
+#   deploy       Gated on the `production` GitHub Environment (required reviewers).
+#                Documented rollback-capable promotion (Req 15.4, 18.1, 18.2).
+#   ci           Aggregate status gate. Always reports, so branch protection can require
+#                a single stable check name regardless of which lanes were skipped.
 #
-#   test     Keyless, credential-free gate. Runs BOTH keyless lanes — the backend
-#            `pytest -m 'not integration' -q` and the frontend `npm run ci` — plus the
-#            repo-wide secret scan (Property 1, source/env/config render). NO secrets
-#            are configured in this job (Req 14.1-14.3, 21.x).
-#   build    needs: test. Builds ALL THREE images (backend, frontend, proxy) with
-#            push:false to verify they build, then runs the image-layer secret scan on
-#            the built images (Req 15.1, 14.4, 10.2). Runs on every trigger.
-#   publish  needs: build. GUARDED to run only on the publish trigger (push to `main`
-#            and `v*` tags). Logs in to GHCR and pushes all three images with the
-#            three-tag strategy: `latest` (moving) + `<git-sha>` (immutable, always) +
-#            `<semver>` (only on a `v*` tag) (Req 15.2-15.4).
-#   deploy   needs: publish. GUARDED + gated on the `production` GitHub Environment
-#            (manual approval / required reviewers). Documented rollback-capable
-#            `compose pull && up -d` promotion step (Req 15.4, 18.1, 18.2).
-#
-# A failure at any stage stops all later stages, so no image is built/published/
+# A failure at any stage stops all later stages, so no image is built, published or
 # deployed for a run whose tests failed (Req 14.4, 15.4).
+#
+# ---------------------------------------------------------------------------------
+# COST NOTES (why this pipeline is shaped the way it is)
+#
+# Billing is the SUM of every job's minutes, not wall-clock, so a 3-way matrix costs
+# 3x. The deliberate savings, all of which preserve the checks themselves:
+#
+#  * Documentation-only changes do not start the pipeline at all (paths-ignore).
+#  * Superseded pull-request pushes are cancelled (concurrency). Publish/deploy runs on
+#    main and tags are NEVER cancelled, so a promotion can never be interrupted midway.
+#  * `pip` and `npm` dependency caches, plus a Playwright browser cache.
+#  * The backend lane installs the CPU-only `torch` wheel first, exactly as the Dockerfile
+#    does. Resolving `sentence-transformers` against plain PyPI otherwise drags in the
+#    multi-GB `nvidia-cu*` CUDA payload that the runtime never uses.
+#  * Images are built once per run and pushed from that same build, instead of being
+#    built to verify and then rebuilt to publish.
+#  * Image builds are skipped on pull requests that cannot affect an image (see the
+#    `docker` filter). Every merge to main still builds, scans and verifies all three.
+#  * Draft pull requests skip the browser and image lanes.
+#  * Job count is kept deliberately low. GitHub rounds EVERY job up to a whole billed
+#    minute, so a 15-second job still costs a minute — adding "cheap" jobs is not free.
+#
+# Every action used here is either `actions/*` (GitHub) or `docker/*` (a verified
+# creator). No unverified third-party action runs in this pipeline, so it stays
+# compatible with a restrictive Actions allow-list policy and has a smaller supply-chain
+# surface. Change detection is a plain `git diff` for exactly that reason.
+# ---------------------------------------------------------------------------------
 
 name: ci-cd
 
@@ -29,7 +67,27 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    # Prose-only commits cannot affect any check below, so they must not start a run.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".gitattributes"
+      - ".dockerignore"
   pull_request:
+    # `ready_for_review` is required so that marking a draft ready triggers the heavy
+    # lanes that drafts deliberately skip.
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".gitattributes"
+      - ".dockerignore"
+  # Escape hatch: run every lane on demand, ignoring the path filters.
+  workflow_dispatch:
 
 # Least privilege by default; individual jobs widen only what they need.
 permissions:
@@ -37,48 +95,171 @@ permissions:
 
 concurrency:
   group: ci-cd-${{ github.ref }}
-  cancel-in-progress: false
+  # Cancel superseded pull-request runs only. A publish/deploy run on main or a tag must
+  # always complete, so it is never cancelled by a subsequent push.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Full commit SHA is the canonical immutable tag applied on every publish.
   IMAGE_REGISTRY: ghcr.io
+  # Mirrors the Dockerfile: the CPU-only wheel index, so `sentence-transformers` reuses
+  # an already-satisfied torch instead of resolving the CUDA build from PyPI.
+  TORCH_CPU_INDEX: https://download.pytorch.org/whl/cpu
+  TORCH_VERSION: "2.5.1"
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1) test — keyless, credential-free gate (Req 14.1-14.3, 21.1-21.3).
-  #    NO secrets are referenced anywhere in this job.
+  # 0) changes — which lanes does this run actually need?
   # ---------------------------------------------------------------------------
-  test:
-    name: test (keyless)
+  preflight:
+    name: preflight (secret scan + change detection)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      backend: ${{ steps.changed.outputs.backend }}
+      frontend: ${{ steps.changed.outputs.frontend }}
+      docker: ${{ steps.changed.outputs.docker }}
+    steps:
+      # Full history so a pull request can be diffed against its merge base.
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The scanner is standard-library only, so no dependency install is needed.
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Always runs. This is the one lane that must never be skipped, so it lives in
+      # the unconditional preflight job.
+      - name: Repo-wide secret scan (sources, *.env.example, config.js renders)
+        run: python scripts/scan_secrets.py
+
+      # Change detection is a plain `git diff` rather than a third-party action: it is
+      # a handful of greps, so it needs no external dependency in the pipeline.
+      #
+      # On anything other than a pull request (push to main, a v* tag, or a manual
+      # dispatch) every lane is forced on, so whatever gets published is fully
+      # validated regardless of what changed.
+      - name: Resolve changed areas
+        id: changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "${EVENT}" != "pull_request" ]; then
+            echo "Event '${EVENT}' is not a pull request — running every lane."
+            {
+              echo "backend=true"
+              echo "frontend=true"
+              echo "docker=true"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          FILES=$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          echo "Changed files:"
+          printf '%s\n' "${FILES}" | sed 's/^/  /'
+
+          # `if` blocks (not `cmd && var=true`) so a non-match cannot trip `set -e`.
+          matches() { printf '%s\n' "${FILES}" | grep -qE "$1"; }
+
+          backend=false
+          frontend=false
+          docker=false
+
+          # The drift check compares the committed contract to the live app schema, so
+          # a contract edit must re-run the backend lane.
+          if matches '^(src/|tests/|migrations/|scripts/|pyproject\.toml|constraints\.txt|frontend/openapi\.json|\.github/workflows/)'; then
+            backend=true
+          fi
+
+          if matches '^(frontend/|\.github/workflows/)'; then
+            frontend=true
+          fi
+
+          # Inputs that can change how an image BUILDS. Application source is
+          # deliberately excluded: the Dockerfiles only COPY it, so a source edit cannot
+          # break the build, and secrets in source are already caught by the secret scan
+          # above. Every merge to main rebuilds and rescans all three images regardless,
+          # so nothing reaches GHCR unverified.
+          if matches '^(Dockerfile|\.dockerignore|constraints\.txt|pyproject\.toml|docker-compose[^/]*\.yml|nginx/|frontend/Dockerfile|frontend/\.dockerignore|frontend/docker/|frontend/package\.json|frontend/package-lock\.json|\.github/workflows/)'; then
+            docker=true
+          fi
+
+          echo "Lanes -> backend=${backend} frontend=${frontend} docker=${docker}"
+          {
+            echo "backend=${backend}"
+            echo "frontend=${frontend}"
+            echo "docker=${docker}"
+          } >> "${GITHUB_OUTPUT}"
+
+  # ---------------------------------------------------------------------------
+  # 2) backend — keyless test lane + OpenAPI contract drift check.
+  # ---------------------------------------------------------------------------
+  backend:
+    name: backend (keyless)
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: needs.preflight.outputs.backend == 'true'
     permissions:
       contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # --- backend keyless lane ---
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          # Caches the pip HTTP/wheel cache keyed on the dependency manifests, so the
+          # heavy scientific stack is downloaded once rather than on every run.
+          cache: "pip"
+          cache-dependency-path: |
+            pyproject.toml
+            constraints.txt
+
+      # Install the CPU-only torch build FIRST, exactly as the Dockerfile builder does.
+      # `sentence-transformers` then reuses it instead of resolving the CUDA wheel from
+      # PyPI, which would otherwise download the multi-GB `nvidia-cu*` payload the
+      # application never loads. This makes CI match the shipped image more closely.
+      - name: Install CPU-only torch (matches the Dockerfile resolve)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --retries 5 --timeout 120 \
+            --index-url "${TORCH_CPU_INDEX}" \
+            "torch==${TORCH_VERSION}"
 
       - name: Install backend runtime + test dependencies
-        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+        run: pip install --retries 5 --timeout 120 -e ".[dev]" -c constraints.txt
 
       - name: Backend keyless test lane
         run: pytest -m 'not integration' -q
 
-      # --- server-side OpenAPI contract drift check (B6, Req 6.3, 6.5) ---
       # Keyless and deterministic: asserts frontend/openapi.json matches app.openapi().
       - name: OpenAPI contract drift check
         run: python scripts/check_openapi.py
 
-      # --- repo-wide secret scan (Property 1 — source / env / config render) ---
-      - name: Repo-wide secret scan (sources, *.env.example, config.js renders)
-        run: python scripts/scan_secrets.py
+  # ---------------------------------------------------------------------------
+  # 3) frontend — keyless CI lane.
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: frontend (keyless)
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: needs.preflight.outputs.frontend == 'true'
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-      # --- frontend keyless lane ---
       - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
@@ -95,15 +276,15 @@ jobs:
         run: npm run ci
 
   # ---------------------------------------------------------------------------
-  # 1b) e2e — keyless, credential-free browser end-to-end gate.
-  #     Runs the REAL production build in headless Chromium with the Backend_API
-  #     mocked at the network layer (page.route) — no live backend, database, or
-  #     credential. Covers the auth gate, navigation/routing, RAG, documents, the
-  #     responsive shell, and full-page axe accessibility scans (WCAG 2.1 AA).
+  # 4) e2e — keyless browser end-to-end gate. Skipped for draft pull requests.
   # ---------------------------------------------------------------------------
   e2e:
     name: e2e (keyless, Playwright)
     runs-on: ubuntu-latest
+    needs: preflight
+    if: >-
+      needs.preflight.outputs.frontend == 'true' &&
+      github.event.pull_request.draft != true
     permissions:
       contents: read
     steps:
@@ -120,6 +301,15 @@ jobs:
       - name: Install frontend dependencies
         working-directory: ./frontend
         run: npm ci
+
+      # Cache the browser binary (~110 MB) keyed on the lockfile, so only the OS
+      # package step runs on a hit. `install --with-deps` stays the single source of
+      # truth and simply skips the download when the binary is already present.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Install Playwright browser (chromium) + OS deps
         working-directory: ./frontend
@@ -138,15 +328,107 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
-  # 2) build — build all three images to verify they build (no push).
-  #    Also runs the image-layer secret scan on the built images (Req 10.2).
+  # 4b) integration — the live-PostgreSQL lane.
+  #
+  #     These suites were previously opt-in only (`pytest -m integration`) and so had
+  #     never run automatically. They cover what the keyless unit lane structurally
+  #     cannot: the migrations applied to a real database, pgvector similarity search,
+  #     tenant isolation enforced in SQL, and durability across a fresh connection.
+  #
+  #     Still credential-free — the database is an ephemeral service container, so no
+  #     secret is involved and nothing outside the runner is touched.
   # ---------------------------------------------------------------------------
-  build:
-    name: build (${{ matrix.image }})
+  integration:
+    name: integration (live PostgreSQL)
     runs-on: ubuntu-latest
-    needs: [test, e2e]
+    needs: preflight
+    if: >-
+      needs.preflight.outputs.backend == 'true' &&
+      github.event.pull_request.draft != true
     permissions:
       contents: read
+    services:
+      # pgvector is required: migration 0001 enables the extension.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: agentforge
+          POSTGRES_PASSWORD: agentforge
+          POSTGRES_DB: agentforge
+        ports:
+          - 5432:5432
+        # Gate the job on readiness rather than sleeping and hoping.
+        options: >-
+          --health-cmd "pg_isready -U agentforge -d agentforge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Async DSN, matching the default the suites fall back to.
+      DATABASE_URL: postgresql+asyncpg://agentforge:agentforge@localhost:5432/agentforge
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            pyproject.toml
+            constraints.txt
+
+      # Same CPU-only torch ordering as the backend lane, for the same reason.
+      - name: Install CPU-only torch (matches the Dockerfile resolve)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --retries 5 --timeout 120 \
+            --index-url "${TORCH_CPU_INDEX}" \
+            "torch==${TORCH_VERSION}"
+
+      - name: Install backend runtime + test dependencies
+        run: pip install --retries 5 --timeout 120 -e ".[dev]" -c constraints.txt
+
+      # The four excluded modules need the full Docker Compose stack (nginx + frontend +
+      # api reachable over HTTP), not just a database — they drive the proxy, SPA and
+      # container restarts. `scripts/compose_smoke.sh` covers that separately; running
+      # them here would fail for want of a stack rather than a real defect.
+      - name: Integration lane (live PostgreSQL + pgvector)
+        run: |
+          pytest -m integration -q \
+            --ignore=tests/integration/test_compose_integration.py \
+            --ignore=tests/integration/test_keyless_stack_property.py \
+            --ignore=tests/integration/test_local_persistence_smoke_integration.py \
+            --ignore=tests/integration/test_sse_proxy_property.py
+
+  # ---------------------------------------------------------------------------
+  # 5) image — build ONCE, verify, scan, then publish (Req 15.1-15.4, 14.4, 10.2).
+  #
+  #    Previously this was two jobs that each built all three images: one to verify
+  #    with push:false and another to build again and push. The images are now built a
+  #    single time; the push step re-tags that verified build. Verification therefore
+  #    still strictly precedes publication, at half the build cost.
+  # ---------------------------------------------------------------------------
+  image:
+    name: image (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: [preflight, backend, frontend, e2e, integration]
+    # `!cancelled() && !failure()` is required because backend/frontend/e2e/integration
+    # are conditional: a SKIPPED dependency would otherwise skip this job too, whereas a
+    # FAILED one must still block it. Publishing therefore cannot happen if the live
+    # database lane failed.
+    if: >-
+      !cancelled() && !failure() &&
+      (
+        (github.event_name == 'push' &&
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
+        (needs.preflight.outputs.docker == 'true' && github.event.pull_request.draft != true)
+      )
+    permissions:
+      contents: read
+      # Only exercised by the conditional push step below.
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -164,36 +446,52 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # The backend image installs the PyPI Linux `torch`, which pulls the full CUDA 13
-      # NVIDIA payload (multi-GB `nvidia-cu13-*` wheels). Docker's default build storage
-      # lives on the runner's small ~14GB root filesystem, which overflows ("no space
-      # left on device") while extracting the CUDA libraries. We therefore (1) aggressively
-      # reclaim space on `/` and (2) relocate Docker's data-root to the runner's large
-      # ~65GB `/mnt` scratch volume BEFORE buildx is set up, so buildkit/buildx has room
-      # for the CUDA-sized layers.
-      - name: Free up runner disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          swap-storage: true
-          docker-images: true
-
+      # The backend image is multi-GB while it builds. Docker's default storage lives on
+      # the runner's small root filesystem, which overflows ("no space left on device")
+      # part-way through. Relocating the data-root to the large /mnt scratch volume gives
+      # buildkit the room it needs. This takes seconds, and replaces the previous
+      # multi-minute `free-disk-space` sweep of the root filesystem — that sweep was
+      # reclaiming space on a volume the build no longer writes to, on all three images
+      # including the two small ones. (If "no space left on device" ever returns for the
+      # backend build, re-add a disk-reclaim step for that image only.)
       - name: Relocate Docker data-root to the large /mnt scratch volume
         run: |
+          set -euo pipefail
           sudo systemctl stop docker || true
           sudo mkdir -p /mnt/docker /etc/docker
           echo '{ "data-root": "/mnt/docker" }' | sudo tee /etc/docker/daemon.json
           sudo systemctl start docker || sudo service docker start || true
+
+          # Scratch space for the `docker save` archive further down. /mnt is root-owned,
+          # and `docker save -o` writes as the unprivileged runner user (it is the CLI
+          # that creates the file, not the daemon), so this directory must be owned by
+          # that user or the write fails with "permission denied".
+          sudo install -d -o "$(id -u)" -g "$(id -g)" -m 700 /mnt/tmp
+
           df -h /mnt /
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image (verify only, no push)
+      # Tags/labels are derived up front so the labels are baked into the single build,
+      # and are therefore preserved by the re-tag + push below.
+      #
+      # Three-tag strategy (Req 15.3):
+      #   * latest    — moving, applied on every publish.
+      #   * <git-sha> — immutable full commit SHA, applied on EVERY publish.
+      #   * <semver>  — only when a v* tag triggers the run.
+      - name: Derive image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=,format=long
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build image (single build; verified before any push)
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
@@ -201,12 +499,13 @@ jobs:
           push: false
           load: true
           tags: ${{ matrix.image }}:ci
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
       # Backend image budget (Req 4.1, 4.2): assert the built (uncompressed) image is
-      # <= 4 GB and that the CPU-only torch install left no NVIDIA/CUDA runtime libraries
-      # in the venv. Applies to the backend image only.
+      # <= 4 GB and that the CPU-only torch install left no NVIDIA/CUDA runtime
+      # libraries in the venv. Applies to the backend image only.
       - name: Assert backend image size <= 4 GB and no CUDA libraries
         if: matrix.image == 'agentforge-backend'
         run: |
@@ -228,8 +527,9 @@ jobs:
           fi
           echo "No NVIDIA/CUDA runtime libraries present — image is CPU-only."
 
-      # Image-layer secret scan: export the built image filesystem and scan every
-      # layer for credential-shaped values (Property 1 image-scan step, Req 10.2).
+      # Image-layer secret scan: export the built image filesystem and scan every layer
+      # for credential-shaped values (Property 1 image-scan step, Req 10.2). The archive
+      # is written to /mnt, which has room for a multi-GB export.
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -237,118 +537,51 @@ jobs:
 
       - name: Image-layer secret scan
         run: |
-          docker save "${{ matrix.image }}:ci" -o /tmp/${{ matrix.image }}.tar
-          python scripts/scan_secrets.py --image-tar /tmp/${{ matrix.image }}.tar
+          set -euo pipefail
+          docker save "${{ matrix.image }}:ci" -o "/mnt/tmp/${{ matrix.image }}.tar"
+          python scripts/scan_secrets.py --image-tar "/mnt/tmp/${{ matrix.image }}.tar"
+          rm -f "/mnt/tmp/${{ matrix.image }}.tar"
 
-  # ---------------------------------------------------------------------------
-  # 3) publish — push all three images to GHCR with the three-tag strategy.
-  #    Runs ONLY on the publish trigger (push to main or a v* tag) (Req 15.2-15.4).
-  # ---------------------------------------------------------------------------
-  publish:
-    name: publish (${{ matrix.image }})
-    runs-on: ubuntu-latest
-    needs: build
-    if: >-
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: agentforge-backend
-            context: .
-            dockerfile: ./Dockerfile
-          - image: agentforge-frontend
-            context: ./frontend
-            dockerfile: ./frontend/Dockerfile
-          - image: agentforge-proxy
-            context: ./nginx
-            dockerfile: ./nginx/Dockerfile
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      # Same disk provisioning as the build job — publish also builds all three images
-      # (the backend being the large CUDA-sized one) on the runner before pushing.
-      # The backend image installs the PyPI Linux `torch`, which pulls the full CUDA 13
-      # NVIDIA payload (multi-GB `nvidia-cu13-*` wheels). Docker's default build storage
-      # lives on the runner's small ~14GB root filesystem, which overflows ("no space
-      # left on device") while extracting the CUDA libraries. We therefore (1) aggressively
-      # reclaim space on `/` and (2) relocate Docker's data-root to the runner's large
-      # ~65GB `/mnt` scratch volume BEFORE buildx is set up, so buildkit/buildx has room
-      # for the CUDA-sized layers.
-      - name: Free up runner disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          swap-storage: true
-          docker-images: true
-
-      - name: Relocate Docker data-root to the large /mnt scratch volume
-        run: |
-          sudo systemctl stop docker || true
-          sudo mkdir -p /mnt/docker /etc/docker
-          echo '{ "data-root": "/mnt/docker" }' | sudo tee /etc/docker/daemon.json
-          sudo systemctl start docker || sudo service docker start || true
-          df -h /mnt /
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
+      # --- publish: only after the build above passed verification + the scan ---
       - name: Log in to GHCR
+        if: >-
+          github.event_name == 'push' &&
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Three-tag strategy (Req 15.3, design "Image tags"):
-      #   * latest              — moving, applied on every publish.
-      #   * <git-sha>           — immutable full commit SHA, applied on EVERY publish.
-      #   * <semver>            — applied ONLY when a v* tag triggers the run; derived
-      #                           from github.ref_name (refs/tags/ stripped). Omitted on
-      #                           plain branch pushes.
-      - name: Derive image tags and labels
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
-          tags: |
-            type=raw,value=latest
-            type=sha,prefix=,format=long
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-
-      - name: Build and push to GHCR
-        uses: docker/build-push-action@v6
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+      - name: Push the verified image to GHCR
+        if: >-
+          github.event_name == 'push' &&
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          # Passed through the environment rather than interpolated into the script, so
+          # the tag list can never be treated as shell.
+          TAGS: ${{ steps.meta.outputs.tags }}
+          LOCAL_TAG: ${{ matrix.image }}:ci
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${TAGS}" | while IFS= read -r tag; do
+            [ -z "${tag}" ] && continue
+            echo "Pushing ${tag}"
+            docker tag "${LOCAL_TAG}" "${tag}"
+            docker push "${tag}"
+          done
 
   # ---------------------------------------------------------------------------
-  # 4) deploy — controlled, manual-approval promotion (Req 15.4, 18.1, 18.2).
-  #    Gated on the `production` GitHub Environment (required reviewers). Runs only
-  #    on the publish trigger, after images are published. Documents the
-  #    rollback-capable compose promotion command shape; no live infra credentials
-  #    are stored in this repository.
+  # 6) deploy — controlled, manual-approval promotion (Req 15.4, 18.1, 18.2).
+  #    Gated on the `production` GitHub Environment (required reviewers) and on the
+  #    publish trigger, so a deployment can only ever originate from main or a v* tag.
   # ---------------------------------------------------------------------------
   deploy:
     name: deploy (production)
     runs-on: ubuntu-latest
-    needs: publish
+    needs: image
     if: >-
+      !cancelled() && !failure() &&
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     environment:
@@ -375,3 +608,40 @@ jobs:
           echo ""
           echo "Rollback: re-point AGENTFORGE_IMAGE_TAG to a PRIOR immutable <git-sha>/<semver>"
           echo "then re-run pull + up -d. Migrations are additive, so no DB rollback is needed."
+
+  # ---------------------------------------------------------------------------
+  # 7) ci — aggregate status gate.
+  #    Always reports, so branch protection can require ONE stable check name while the
+  #    lanes beneath it are conditional. Fails if any lane that ran did not succeed.
+  # ---------------------------------------------------------------------------
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    needs: [preflight, backend, frontend, e2e, integration, image]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Verify no lane failed or was cancelled
+        env:
+          # `preflight` is included deliberately: without it, a failed secret scan or
+          # change-resolution step would skip every lane below and still report green.
+          RESULTS: >-
+            preflight=${{ needs.preflight.result }}
+            backend=${{ needs.backend.result }}
+            frontend=${{ needs.frontend.result }}
+            e2e=${{ needs.e2e.result }}
+            integration=${{ needs.integration.result }}
+            image=${{ needs.image.result }}
+        run: |
+          set -euo pipefail
+          echo "Lane results: ${RESULTS}"
+          # `skipped` is a valid outcome for a lane this change could not affect.
+          for entry in ${RESULTS}; do
+            result="${entry#*=}"
+            case "${result}" in
+              success|skipped) ;;
+              *) echo "::error::lane ${entry%%=*} reported '${result}'"; exit 1 ;;
+            esac
+          done
+          echo "All lanes that ran succeeded."

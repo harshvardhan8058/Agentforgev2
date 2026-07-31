@@ -12,7 +12,7 @@ blocking the event loop.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.concurrency import run_in_threadpool
 
 from agentforge.api.deps import get_conversation_store, require_permission
@@ -20,6 +20,7 @@ from agentforge.api.errors import AppError
 from agentforge.api.schemas import (
     AppendMessageRequest,
     ConversationHistoryResponse,
+    ConversationSummaryResponse,
     CreateConversationResponse,
     MessageModel,
 )
@@ -42,6 +43,32 @@ async def create_conversation(
     """Create a conversation owned by the caller's org (Req 8.1, 4.4)."""
     conversation_id = await run_in_threadpool(store.create, principal.org_id)
     return CreateConversationResponse(conversation_id=conversation_id)
+
+
+@router.get("/conversations", response_model=list[ConversationSummaryResponse])
+async def list_conversations(
+    limit: int = Query(default=50, ge=1, le=200),
+    store: Conversation_Store = Depends(get_conversation_store),
+    principal: Principal = Depends(require_permission(Permission.READ)),
+) -> list[ConversationSummaryResponse]:
+    """Return the caller org's conversations, most recent first (Req 8.1, 4.2).
+
+    Creation returned an id once and there was no way to enumerate threads afterwards, so
+    a conversation became unreachable as soon as its id was lost. Scoped to
+    ``principal.org_id`` at the data-access layer, so no other tenant's thread can appear.
+    """
+    summaries = await run_in_threadpool(
+        lambda: store.list_conversations(principal.org_id, limit=limit)
+    )
+    return [
+        ConversationSummaryResponse(
+            conversation_id=summary.id,
+            created_at=summary.created_at,
+            message_count=summary.message_count,
+            preview=summary.preview,
+        )
+        for summary in summaries
+    ]
 
 
 @router.post(

@@ -15,7 +15,12 @@ import { __resetTokenStoreForTests } from "../../auth/tokenStore";
 import type { Role } from "../../auth/token";
 
 const BASE = "http://localhost:8000";
-const server = setupServer();
+// The run page now also lists past runs, so every render calls `GET /agent/runs`.
+// Registered as a default handler (which `resetHandlers` restores) so the strict
+// `onUnhandledRequest` guard stays satisfied without every test opting in.
+const server = setupServer(
+  http.get(`${BASE}/agent/runs`, () => HttpResponse.json([])),
+);
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {

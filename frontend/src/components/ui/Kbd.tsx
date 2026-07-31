@@ -3,6 +3,7 @@
  * Uses the mono token family and a subtle raised surface so shortcut hints read
  * as physical keys.
  */
+import type { JSX } from "react";
 import { type HTMLAttributes } from "react";
 
 import { cn } from "../../lib/cn";

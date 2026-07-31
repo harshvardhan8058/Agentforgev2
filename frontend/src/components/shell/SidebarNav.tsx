@@ -8,7 +8,9 @@
  * active entry carries a left accent bar and raised surface. Used by both the
  * persistent desktop sidebar and the mobile drawer.
  */
-import { NavLink } from "react-router-dom";
+import type { JSX } from "react";
+import { useEffect, useRef } from "react";
+import { NavLink } from "react-router";
 
 import { Can } from "../Can";
 import { useSession } from "../../auth/useSession";
@@ -26,8 +28,41 @@ function NavEntry({
   onNavigate?: () => void;
 }): JSX.Element {
   const Icon = item.icon;
+  const ref = useRef<HTMLAnchorElement>(null);
+
+  /*
+   * Twelve destinations in four groups do not fit a short viewport however tight
+   * the spacing, so the list scrolls — and the entry for the page you are on was
+   * as likely as not to be the one scrolled out of sight, leaving the nav with no
+   * indication of where you were.
+   *
+   * The container's `scrollTop` is adjusted directly rather than by calling
+   * `scrollIntoView`, which in Chromium also moves the *sequential focus
+   * navigation starting point* to the scrolled element. That silently broke the
+   * skip link: the first Tab landed on the nav entry after the active one instead
+   * of on the skip link, defeating WCAG 2.4.1. Setting `scrollTop` scrolls
+   * without touching focus.
+   */
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || node.getAttribute("aria-current") !== "page") return;
+    const container = node.closest<HTMLElement>("[data-nav-scroll]");
+    if (!container) return;
+
+    const entry = node.getBoundingClientRect();
+    const view = container.getBoundingClientRect();
+    // Only move when the entry is actually outside the visible band, so
+    // navigating between two visible entries never jumps the list.
+    if (entry.top < view.top) {
+      container.scrollTop -= view.top - entry.top;
+    } else if (entry.bottom > view.bottom) {
+      container.scrollTop += entry.bottom - view.bottom;
+    }
+  });
+
   return (
     <NavLink
+      ref={ref}
       to={item.path}
       end={item.path === "/"}
       onClick={onNavigate}
@@ -35,7 +70,9 @@ function NavEntry({
       title={collapsed ? item.label : undefined}
       className={({ isActive }) =>
         cn(
-          "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
+          // py-1.5 rather than py-2: four rows' worth of height across the list,
+          // which is the difference between fitting a laptop viewport and not.
+          "group relative flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-fast",
           "text-text-muted hover:bg-surface-hover hover:text-text",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring",
           isActive && "bg-surface-raised text-text",
@@ -86,7 +123,7 @@ export function SidebarNav({
     <nav
       aria-label="Primary"
       data-testid="sidebar-nav"
-      className="flex flex-col gap-4"
+      className="flex flex-col gap-3"
     >
       {sections.map(({ group, items }) => (
         <NavSection

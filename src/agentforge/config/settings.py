@@ -70,6 +70,18 @@ class Settings(BaseSettings):
     top_k_min: int = 1
     top_k_max: int = 10
 
+    # When retrieval finds nothing, `/query` returns a fixed "no grounding" answer and
+    # never calls the LLM (Req 12.5) — the safe default that keeps every answer
+    # document-backed and verifiable.
+    #
+    # Enabling this lets that specific case fall through to a general-knowledge answer
+    # instead, so the assistant can also field questions the corpus does not cover.
+    # Such answers are ALWAYS returned with ``grounded=False`` and zero citations, and
+    # are built from a separate template, so a model-knowledge answer can never be
+    # mistaken for a document-backed one. Defaults to ``False``: opting in is a
+    # deliberate deployment decision, not an accident.
+    allow_ungrounded_answers: bool = False
+
     # --- ingestion limits ---
     max_document_bytes: int = 50 * 1024 * 1024  # 50 MB
     extraction_timeout_seconds: int = 30
@@ -145,6 +157,19 @@ class Settings(BaseSettings):
     # static blocklist of terms (Req 5.7, 10.2).
     guardrail_max_input_chars: int = 8000
     guardrail_blocklist_json: str | None = None
+
+    # Per-completion budget for the hosted LLM provider. Every call is bounded because a
+    # single agent run issues many completions in sequence and a multi-agent run
+    # multiplies that by its roles and rounds — one unbounded call is enough to make the
+    # whole synchronous request appear to hang.
+    llm_timeout_seconds: float = 30.0
+    llm_max_retries: int = 2
+
+    # Total time one completion may spend waiting out an upstream rate limit (HTTP 429)
+    # before failing with an actionable message. Free hosted tiers meter tokens per
+    # minute and a multi-role run can exhaust that on its own; the limit clears in
+    # seconds, so a short bounded wait turns a dead run into a slightly slower one.
+    llm_rate_limit_max_wait_seconds: float = 8.0
 
     # --- credentials (ALL optional) ---
     groq_api_key: SecretStr | None = None

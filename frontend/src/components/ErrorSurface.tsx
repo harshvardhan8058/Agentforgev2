@@ -17,6 +17,7 @@
  * `429`, `502`, and `guardrail_blocked` retries need no re-entry (Req 5.4, 6.5,
  * 7.5).
  */
+import type { JSX } from "react";
 import type { ClientError } from "../api/errors";
 import { ErrorBanner } from "./ErrorBanner";
 import { RetryNotice } from "./RetryNotice";

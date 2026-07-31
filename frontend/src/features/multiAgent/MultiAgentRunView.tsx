@@ -22,6 +22,7 @@
  * ordered event log, and rich empty/streaming/success/error states. Motion is
  * reduced-motion aware and instant under test.
  */
+import type { JSX } from "react";
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ListTree, PlayCircle, Radio, Sparkles, StopCircle } from "lucide-react";
@@ -37,6 +38,7 @@ import {
   type MultiAgentStreamState,
 } from "../../api/sse/multiAgentReducer";
 import { can } from "../../auth/rbac";
+import { stripDecisionEnvelope } from "../../lib/agentText";
 import { useSession } from "../../auth/useSession";
 import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
@@ -46,11 +48,15 @@ import { StreamingCursor } from "../../components/motion/StreamingCursor";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
+import { CopyableId } from "../../components/ui/CopyableId";
 import { Input } from "../../components/ui/Input";
+import { ExampleChips } from "../../components/ui/ExampleChips";
+import { MULTI_AGENT_EXAMPLES } from "../../lib/examples";
 import { useSseRun } from "../agent/useSseRun";
 import { useConversation } from "../conversations/ConversationContext";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { MultiAgentRunResult } from "./MultiAgentRunResult";
+import { RecentMultiAgentRuns } from "./RecentMultiAgentRuns";
 import { WorkflowVisualizer } from "./WorkflowVisualizer";
 
 interface StartRunResponse {
@@ -65,14 +71,28 @@ function roleOf(frame: SseFrame): string | null {
   return typeof frame.data.role_id === "string" ? frame.data.role_id : null;
 }
 
-/** A short summary of an event for the ordered log. */
+/**
+ * A short summary of an event for the ordered log.
+ *
+ * Event text originates from the model, so it passes through
+ * `stripDecisionEnvelope` for the same reason `Markdown` does: the log is plain
+ * text, not markdown, so it would otherwise be the one surface where a leaked
+ * decision envelope could still be displayed verbatim. The transform is
+ * identity for anything that is not envelope-shaped.
+ */
 function summarize(frame: SseFrame): string {
   const d = frame.data;
-  if (typeof d.content === "string" && d.content.length > 0) return d.content;
-  if (typeof d.comments === "string" && d.comments.length > 0) return d.comments;
+  if (typeof d.content === "string" && d.content.length > 0) {
+    return stripDecisionEnvelope(d.content);
+  }
+  if (typeof d.comments === "string" && d.comments.length > 0) {
+    return stripDecisionEnvelope(d.comments);
+  }
   if (typeof d.checkpoint === "string" && d.checkpoint.length > 0) return d.checkpoint;
   if (Array.isArray(d.steps) && d.steps.length > 0) {
-    return d.steps.filter((s) => typeof s === "string").join(", ");
+    return stripDecisionEnvelope(
+      d.steps.filter((s) => typeof s === "string").join(", "),
+    );
   }
   return "";
 }
@@ -138,6 +158,20 @@ export function MultiAgentRunView(): JSX.Element {
         description="Launch a Planner → Researcher → Writer → Critic collaboration, watch each role stream, and act on approval checkpoints."
       />
 
+      {!permitted && (
+        <EmptyState
+          title="Multi-agent runs unavailable"
+          message="Your role does not permit running agents in this organization."
+          icon={<Sparkles className="h-8 w-8" />}
+        />
+      )}
+
+      {/* Form beside its output: stacked, the form was a single short card in an
+          otherwise empty viewport, and it scrolled out of reach as soon as a run
+          produced anything. */}
+      {permitted && (
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)]">
+      <div className="flex flex-col gap-4 lg:sticky lg:top-4">
       <Can permission="run_agents">
         <Card data-testid="multi-form-card">
           <CardHeader>
@@ -154,6 +188,11 @@ export function MultiAgentRunView(): JSX.Element {
                 value={task}
                 onChange={(e) => setTask(e.target.value)}
                 placeholder="Draft a briefing on the Q3 incident with sources…"
+              />
+              <ExampleChips
+                testId="multi-examples"
+                examples={MULTI_AGENT_EXAMPLES}
+                onPick={setTask}
               />
             </div>
             {conversationId && (
@@ -183,12 +222,72 @@ export function MultiAgentRunView(): JSX.Element {
         </Card>
       </Can>
 
-      {!permitted && (
-        <EmptyState
-          title="Multi-agent runs unavailable"
-          message="Your role does not permit running agents in this organization."
-          icon={<Sparkles className="h-8 w-8" />}
-        />
+      {/* Past runs sit under the form. Selecting one shows its persisted result in the
+          output column, so a finished collaboration can be reopened rather than re-run. */}
+      <RecentMultiAgentRuns
+        selectedRunId={run?.run_id ?? null}
+        onSelect={(runId) => {
+          setRun({ run_id: runId, conversation_id: "", status: "terminated" });
+          setShowResult(true);
+          setResultRefresh((n) => n + 1);
+        }}
+      />
+      </div>
+
+      <div className="flex min-w-0 flex-col gap-4" data-testid="multi-output">
+      {/* Before a run exists, describe the collaboration the four roles perform.
+          The page header names them but says nothing about what each contributes,
+          and the column would otherwise be empty. */}
+      {!run && (
+        <Card data-testid="multi-idle">
+          <CardHeader>
+            <CardTitle className="text-base">No run yet</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <ol className="flex flex-col gap-2.5">
+              {[
+                {
+                  role: "Planner",
+                  does: "breaks the task into ordered steps.",
+                  colour: "var(--color-role-planner)",
+                },
+                {
+                  role: "Researcher",
+                  does: "gathers findings from your documents, keeping each citation.",
+                  colour: "var(--color-role-researcher)",
+                },
+                {
+                  role: "Writer",
+                  does: "drafts the answer from the plan and those findings.",
+                  colour: "var(--color-role-writer)",
+                },
+                {
+                  role: "Critic",
+                  does: "checks the draft is supported and can send it back for revision.",
+                  colour: "var(--color-role-critic)",
+                },
+              ].map((step, index) => (
+                <li key={step.role} className="flex items-start gap-2.5 text-sm">
+                  <span
+                    className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-text-inverted"
+                    style={{ background: step.colour }}
+                    aria-hidden="true"
+                  >
+                    {index + 1}
+                  </span>
+                  <span className="text-text-muted">
+                    <span className="font-medium text-text">{step.role}</span>{" "}
+                    {step.does}
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <p className="text-sm leading-relaxed text-text-muted">
+              A run may pause at an approval checkpoint and wait for you to
+              approve, reject, or edit the draft.
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {/* Run summary (Req 10.1). */}
@@ -201,19 +300,22 @@ export function MultiAgentRunView(): JSX.Element {
             <dl className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <div className="flex flex-col gap-0.5">
                 <dt className="text-xs uppercase tracking-wide text-text-muted">Run ID</dt>
-                <dd className="font-mono text-sm text-text" data-testid="multi-run-id">
-                  {run.run_id}
+                <dd data-testid="multi-run-id">
+                  {/* Needed to look the run up later, so it has to be copyable
+                      rather than a 36-character string to select by hand. */}
+                  <CopyableId value={run.run_id} label="run id" testId="multi-run-id-copy" />
                 </dd>
               </div>
               <div className="flex flex-col gap-0.5">
                 <dt className="text-xs uppercase tracking-wide text-text-muted">
                   Conversation ID
                 </dt>
-                <dd
-                  className="font-mono text-sm text-text"
-                  data-testid="multi-conversation-id"
-                >
-                  {run.conversation_id}
+                <dd data-testid="multi-conversation-id">
+                  <CopyableId
+                    value={run.conversation_id}
+                    label="conversation id"
+                    testId="multi-conversation-id-copy"
+                  />
                 </dd>
               </div>
               <div className="flex flex-col gap-0.5">
@@ -376,6 +478,9 @@ export function MultiAgentRunView(): JSX.Element {
             <MultiAgentRunResult runId={run.run_id} refreshToken={resultRefresh} />
           </CardContent>
         </Card>
+      )}
+      </div>
+      </div>
       )}
     </div>
   );

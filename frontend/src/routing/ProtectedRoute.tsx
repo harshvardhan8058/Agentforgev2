@@ -6,8 +6,9 @@
  * unauthenticated views (Req 2.5, 3.2). Otherwise it renders the nested route
  * via `<Outlet />`.
  */
+import type { JSX } from "react";
 import { Suspense } from "react";
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet } from "react-router";
 
 import { useSession } from "../auth/useSession";
 import { AppShell } from "../components/shell/AppShell";

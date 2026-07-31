@@ -3,6 +3,7 @@
  * 5.6). Used when a request fails at the network layer before any HTTP
  * response is received.
  */
+import type { JSX } from "react";
 import { WifiOff } from "lucide-react";
 
 import { Button } from "./ui/Button";

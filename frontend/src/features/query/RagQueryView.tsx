@@ -15,26 +15,37 @@
  * `aria-live="polite"` region. An explicit empty state is shown before the
  * first query. Responsive from mobile → ultrawide.
  */
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { Search, Sparkles } from "lucide-react";
+import type { JSX } from "react";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { ChevronDown, FilePlus2, FileText, Search, Sparkles } from "lucide-react";
 import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
 import type { ClientError } from "../../api/errors";
 import type { Citation } from "../../api/domain";
+import { orgScopedKey } from "../../api/queryKeys";
 import { can } from "../../auth/rbac";
 import { useSession } from "../../auth/useSession";
 import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorSurface } from "../../components/ErrorSurface";
-import { Markdown } from "../../components/markdown/Markdown";
+import { FallbackNotice } from "../../components/FallbackNotice";
+import {
+  GeneralKnowledgeNotice,
+  isGeneralKnowledgeAnswer,
+} from "../../components/GeneralKnowledgeNotice";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Badge } from "../../components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
+import { ExampleChips } from "../../components/ui/ExampleChips";
+import { QUERY_EXAMPLES } from "../../lib/examples";
 import { Skeleton } from "../../components/ui/Skeleton";
+import { UploadControl } from "../documents/UploadControl";
+import { StreamingAnswer } from "./StreamingAnswer";
+import { cn } from "../../lib/cn";
 
 /** The shape `POST /query` resolves to (mirrors the generated `QueryResponse`). */
 interface QueryResult {
@@ -45,14 +56,53 @@ interface QueryResult {
   flags: string[];
 }
 
+/** Minimal document shape used to resolve citation filenames. */
+interface DocumentSummary {
+  document_id: string;
+  filename: string;
+}
+
 const DEFAULT_TOP_K = 5;
 
+/**
+ * The inclusive range `POST /query` accepts for `top_k`. Mirrored here so the
+ * control cannot emit a value the API would reject with a 422.
+ */
+const TOP_K_MIN = 1;
+const TOP_K_MAX = 10;
+
+/** Coerce arbitrary input into a valid `top_k`, falling back to the default. */
+function clampTopK(raw: string): number {
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed)) return DEFAULT_TOP_K;
+  return Math.min(TOP_K_MAX, Math.max(TOP_K_MIN, parsed));
+}
+
 export function RagQueryView(): JSX.Element {
-  const { role } = useSession();
+  const { role, orgId } = useSession();
   const permitted = role !== null && can(role, "run_agents");
 
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState<number>(DEFAULT_TOP_K);
+  const [showUpload, setShowUpload] = useState(false);
+
+  // Resolve citation document ids to human-readable filenames (best-effort).
+  const documents = useQuery<DocumentSummary[], ClientError>({
+    enabled: permitted,
+    queryKey: orgScopedKey(orgId, "documents"),
+    queryFn: () => runRequest(() => apiClient.GET("/documents")),
+    retry: false,
+    staleTime: 30_000,
+  });
+
+  const filenameById = useMemo(() => {
+    const map = new Map<string, string>();
+    // Defensive: the endpoint (or a mock) may return a non-array; never iterate
+    // a non-iterable, which would throw during render.
+    const docs = Array.isArray(documents.data) ? documents.data : [];
+    for (const doc of docs) map.set(doc.document_id, doc.filename);
+    return map;
+  }, [documents.data]);
 
   const submit = useMutation<QueryResult, ClientError, void>({
     mutationFn: async () => {
@@ -106,28 +156,52 @@ export function RagQueryView(): JSX.Element {
                 <Input
                   id="query-input"
                   data-testid="query-input"
+                  // Focusing the primary input on this single-purpose task page
+                  // is an expected, modern affordance (matches the auth pages).
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                  autoFocus
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="What does our onboarding policy say about…"
                 />
+                <ExampleChips
+                  testId="query-examples"
+                  examples={QUERY_EXAMPLES}
+                  onPick={setQuery}
+                />
               </div>
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="query-top-k" className="text-sm font-medium text-text">
-                    Top K
-                  </label>
-                  <Input
+              <div className="flex flex-wrap items-end gap-4">
+                {/* Retrieval breadth. Presented in plain language rather than as
+                    "Top K", and constrained to the range the API accepts so an
+                    out-of-range value can never produce a 422. */}
+                <div className="flex min-w-[15rem] flex-1 flex-col gap-1.5 sm:max-w-xs">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <label htmlFor="query-top-k" className="text-sm font-medium text-text">
+                      Sources to search
+                    </label>
+                    <span
+                      className="text-sm font-medium tabular-nums text-text-muted"
+                      data-testid="query-top-k-value"
+                    >
+                      {topK} of {TOP_K_MAX}
+                    </span>
+                  </div>
+                  <input
                     id="query-top-k"
                     data-testid="query-top-k"
-                    type="number"
-                    min={1}
-                    className="w-24"
+                    type="range"
+                    min={TOP_K_MIN}
+                    max={TOP_K_MAX}
+                    step={1}
                     value={topK}
-                    onChange={(e) => {
-                      const next = Number.parseInt(e.target.value, 10);
-                      setTopK(Number.isNaN(next) ? DEFAULT_TOP_K : next);
-                    }}
+                    aria-describedby="query-top-k-hint"
+                    onChange={(e) => setTopK(clampTopK(e.target.value))}
+                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-bg-subtle accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
                   />
+                  <p id="query-top-k-hint" className="text-xs text-text-muted">
+                    How many excerpts from your documents are used as context. Fewer
+                    keeps the answer tightly focused; more covers longer documents.
+                  </p>
                 </div>
                 <Button
                   type="submit"
@@ -140,6 +214,41 @@ export function RagQueryView(): JSX.Element {
                 </Button>
               </div>
             </form>
+
+            {/* Inline corpus ingestion: add a document without leaving the
+                query flow. Collapsed by default and gated behind the same
+                `ingest_documents` permission as the Documents page. */}
+            <Can permission="ingest_documents">
+              <div className="mt-4 border-t border-border pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowUpload((v) => !v)}
+                  aria-expanded={showUpload}
+                  aria-controls="query-upload-panel"
+                  data-testid="query-upload-toggle"
+                  className="inline-flex items-center gap-2 rounded-md text-sm font-medium text-text-muted transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                >
+                  <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+                  Add a document to your corpus
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 transition-transform duration-base",
+                      showUpload && "rotate-180",
+                    )}
+                    aria-hidden="true"
+                  />
+                </button>
+                {showUpload && (
+                  <div id="query-upload-panel" className="mt-3" data-testid="query-upload-panel">
+                    <UploadControl />
+                    <p className="mt-2 text-xs text-text-subtle">
+                      Newly ingested documents are searchable immediately — ask your
+                      question above once ingestion completes.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </Can>
           </CardContent>
         </Card>
       </Can>
@@ -205,12 +314,16 @@ export function RagQueryView(): JSX.Element {
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
+            {result.provider === "fallback" && <FallbackNotice />}
+            {isGeneralKnowledgeAnswer(result.grounded, result.answer) && (
+              <GeneralKnowledgeNotice />
+            )}
             <div
               aria-live="polite"
               data-testid="answer-body"
               className="min-w-0"
             >
-              <Markdown content={result.answer} citations={result.citations} />
+              <StreamingAnswer text={result.answer} citations={result.citations} />
             </div>
 
             {result.flags.length > 0 && (
@@ -234,23 +347,42 @@ export function RagQueryView(): JSX.Element {
                   Citations
                 </span>
                 <ul className="flex flex-col gap-1">
-                  {result.citations.map((c, i) => (
-                    <li
-                      key={`${c.document_id}-${c.chunk_id}-${i}`}
-                      id={`citation-${i + 1}`}
-                      data-testid={`citation-source-${i + 1}`}
-                      className="flex flex-wrap items-center gap-2 text-sm text-text-muted"
-                    >
-                      <Badge tone="primary">[{i + 1}]</Badge>
-                      <span className="font-mono text-xs" data-testid={`citation-doc-${i + 1}`}>
-                        {c.document_id}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span className="font-mono text-xs" data-testid={`citation-chunk-${i + 1}`}>
-                        {c.chunk_id}
-                      </span>
-                    </li>
-                  ))}
+                  {result.citations.map((c, i) => {
+                    const filename = filenameById.get(c.document_id);
+                    return (
+                      <li
+                        key={`${c.document_id}-${c.chunk_id}-${i}`}
+                        id={`citation-${i + 1}`}
+                        data-testid={`citation-source-${i + 1}`}
+                        className="flex flex-wrap items-center gap-2 text-sm text-text-muted"
+                      >
+                        <Badge tone="primary">[{i + 1}]</Badge>
+                        <FileText
+                          className="h-3.5 w-3.5 shrink-0 text-text-subtle"
+                          aria-hidden="true"
+                        />
+                        {/* Prefer the human-readable filename; the raw document
+                            id is preserved in the title for reference. */}
+                        <span
+                          className={cn(
+                            "text-xs",
+                            filename ? "font-medium text-text" : "font-mono",
+                          )}
+                          data-testid={`citation-doc-${i + 1}`}
+                          title={c.document_id}
+                        >
+                          {filename ?? c.document_id}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span
+                          className="font-mono text-xs"
+                          data-testid={`citation-chunk-${i + 1}`}
+                        >
+                          {c.chunk_id}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}

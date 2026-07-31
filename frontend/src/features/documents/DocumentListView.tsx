@@ -11,6 +11,7 @@
  * state is shown for zero documents; metadata reflows into stacked cards on
  * mobile and a token-spaced table on larger breakpoints.
  */
+import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Trash2 } from "lucide-react";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -30,6 +31,7 @@ import { Button } from "../../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { UploadControl } from "./UploadControl";
+import { SampleCorpusControl } from "./SampleCorpusControl";
 
 interface DocumentSummary {
   chunk_count: number;
@@ -110,6 +112,12 @@ export function DocumentListView(): JSX.Element {
 
       <Can permission="ingest_documents">
         <UploadControl />
+        {/* Offered only while the corpus is empty: that is when "I have no file
+            to hand" actually blocks someone, and once documents exist the
+            suggestion is just noise. */}
+        {!list.isLoading && !list.isError && documents.length === 0 && (
+          <SampleCorpusControl />
+        )}
       </Can>
 
       {list.isError && (
@@ -131,7 +139,7 @@ export function DocumentListView(): JSX.Element {
           title="No documents yet"
           message={
             canIngest
-              ? "Upload a document above to start building your corpus."
+              ? "Upload a document above, or load the sample corpus, to start building your corpus."
               : "This organization has no documents yet."
           }
           icon={<FileText className="h-8 w-8" />}

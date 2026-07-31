@@ -14,8 +14,8 @@ export default defineConfig({
     // Split large third-party libraries into separate, long-term-cacheable
     // vendor chunks so the app entry stays lean and a dependency bump only
     // invalidates its own chunk. Route code is additionally split via
-    // React.lazy in the router; the editor (Monaco) and charts (Recharts) are
-    // dynamically imported at their use sites.
+    // React.lazy in the router; the charts (Recharts) are dynamically imported
+    // at their use site.
     chunkSizeWarningLimit: 700,
     rollupOptions: {
       output: {
@@ -25,7 +25,7 @@ export default defineConfig({
           // transitive deps so no other vendor chunk forms a circular import
           // edge back into this one (Rollup rejects circular manual chunks).
           if (
-            /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler|@remix-run[\\/]router|loose-envify|js-tokens|object-assign|use-sync-external-store)[\\/]/.test(
+            /[\\/]node_modules[\\/](react|react-dom|react-router|scheduler|loose-envify|js-tokens|object-assign|use-sync-external-store)[\\/]/.test(
               id,
             )
           ) {

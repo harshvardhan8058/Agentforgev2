@@ -35,9 +35,29 @@ class Critic_Agent(Agent_Role_Interface):
 
     @property
     def instructions(self) -> str:
+        # NOTE ON WORDING: the literal directive phrase (see ``_REVISE_DIRECTIVE``) must
+        # never appear contiguously in these instructions. The keyless Fallback_Provider
+        # answers by echoing the prompt, so embedding the phrase here would make the
+        # default Critic request a revision of every draft and destroy the reproducible
+        # keyless termination guarantee (Req 3.7). The label and the verdict words are
+        # therefore described separately rather than shown as one string.
         return (
-            "You are the Critic. Review the draft against the task and plan. Approve it, "
-            "or request a revision describing the specific changes required."
+            "You are the Critic. Review the draft against the task, the plan, and the "
+            "research findings supplied below.\n"
+            "\n"
+            "Check, in this order:\n"
+            "1. Grounding — every factual claim, figure and attribution in the draft must "
+            "be supported by the research findings. Treat any source, citation, book, "
+            "author or URL that does not appear in the findings as FABRICATED, and require "
+            "a revision that removes it. Plausible-looking references are the most "
+            "important defect to catch, not a sign of quality.\n"
+            "2. Completeness — does the draft actually fulfil the task and the plan?\n"
+            "3. Clarity — is it well organised and unambiguous?\n"
+            "\n"
+            "Then end your reply with a final line consisting of the label 'Decision:' "
+            "followed by exactly one verdict word: APPROVE when the draft is fully "
+            "grounded and complete, or the word REVISE when it is not. When asking for "
+            "changes, list them specifically."
         )
 
     def act(self, state: Blackboard_State) -> Blackboard_State:
@@ -56,6 +76,30 @@ class Critic_Agent(Agent_Role_Interface):
 
 
 def _critic_context(state: Blackboard_State) -> str:
-    """Build the Critic's role-scoped context from the task and the current Draft."""
+    """Build the Critic's role-scoped context: task, plan, findings, and the Draft.
+
+    The plan and the Research_Findings are included because the Critic's first duty is to
+    verify the draft's claims against the evidence actually retrieved. Reviewing a draft
+    without the findings alongside it makes grounding unverifiable, which is how a draft
+    carrying invented references can be approved as well sourced.
+    """
+    lines = [f"Task:\n{state.task}"]
+
+    if state.plan and state.plan.steps:
+        joined = "\n".join(f"- {step}" for step in state.plan.steps)
+        lines.append(f"Plan steps:\n{joined}")
+
+    if state.research_findings and state.research_findings.findings:
+        joined = "\n".join(f"- {f.content}" for f in state.research_findings.findings)
+        lines.append(f"Research findings (the ONLY admissible evidence):\n{joined}")
+    else:
+        lines.append(
+            "Research findings (the ONLY admissible evidence):\n"
+            "(none were retrieved — any specific source cited in the draft is therefore "
+            "unsupported)"
+        )
+
     draft_content = state.draft.content if state.draft else "(no draft produced)"
-    return f"Task:\n{state.task}\n\nDraft under review:\n{draft_content}"
+    lines.append(f"Draft under review:\n{draft_content}")
+
+    return "\n\n".join(lines)

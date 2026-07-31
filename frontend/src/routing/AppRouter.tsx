@@ -19,8 +19,9 @@
  * hook (fired by the auth middleware on a terminal 401 / refresh failure) to a
  * router navigation to `/login` (Req 3.3, 3.6).
  */
+import type { JSX } from "react";
 import { lazy, useEffect } from "react";
-import { Route, Routes, useNavigate } from "react-router-dom";
+import { Route, Routes, useNavigate } from "react-router";
 
 import { setUnauthenticatedHandler } from "../auth/tokenStore";
 import { ProtectedRoute } from "./ProtectedRoute";
@@ -78,6 +79,11 @@ const MembersView = lazy(() =>
 const ApiKeysView = lazy(() =>
   import("../features/orgs/ApiKeysView").then((m) => ({ default: m.ApiKeysView })),
 );
+const IntegrationsView = lazy(() =>
+  import("../features/integrations/IntegrationsView").then((m) => ({
+    default: m.IntegrationsView,
+  })),
+);
 const NotFoundView = lazy(() =>
   import("../features/misc/NotFoundView").then((m) => ({ default: m.NotFoundView })),
 );
@@ -110,6 +116,7 @@ export function AppRouter(): JSX.Element {
           <Route path="/prompts" element={<PromptRegistryView />} />
           <Route path="/guardrails" element={<GuardrailsView />} />
           <Route path="/evaluations" element={<EvaluationsView />} />
+          <Route path="/integrations" element={<IntegrationsView />} />
           <Route path="/members" element={<MembersView />} />
           <Route path="/api-keys" element={<ApiKeysView />} />
           <Route path="*" element={<NotFoundView />} />

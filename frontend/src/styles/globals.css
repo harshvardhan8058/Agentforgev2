@@ -168,4 +168,90 @@
       display: none;
     }
   }
+
+  /*
+   * Scroll-edge fade for an independently scrolling panel (the sidebar nav).
+   * `scroll-timeline`-free and purely visual: the mask softens the top and
+   * bottom few pixels so a clipped list is visibly clipped rather than looking
+   * like it simply ends. Applied to the scroll container, not its content, so it
+   * does not affect layout or hit-testing.
+   */
+  .af-scroll-fade {
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 0.75rem,
+      #000 calc(100% - 0.75rem),
+      transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 0.75rem,
+      #000 calc(100% - 0.75rem),
+      transparent 100%
+    );
+  }
+
+  /*
+   * Aurora field: slow-drifting brand-tinted blobs used as the decorative
+   * backdrop of the auth brand panel. Purely presentational (the elements are
+   * aria-hidden) and heavily blurred, so it never competes with foreground
+   * text contrast. Drift stops entirely under reduced motion, leaving a static
+   * gradient wash.
+   */
+  .af-aurora-blob {
+    position: absolute;
+    border-radius: var(--radius-full);
+    filter: blur(72px);
+    opacity: 0.55;
+    will-change: transform;
+    animation: af-aurora-drift 22s var(--ease-standard) infinite alternate;
+  }
+
+  .af-aurora-blob:nth-child(2) {
+    animation-duration: 28s;
+    animation-delay: -6s;
+  }
+
+  .af-aurora-blob:nth-child(3) {
+    animation-duration: 34s;
+    animation-delay: -13s;
+  }
+
+  @keyframes af-aurora-drift {
+    from {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    to {
+      transform: translate3d(6%, -8%, 0) scale(1.18);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .af-aurora-blob {
+      animation: none;
+    }
+  }
+
+  /*
+   * Hairline grid overlay for the auth brand panel. Masked to fade out toward
+   * the edges so it reads as texture rather than a table.
+   */
+  .af-grid-overlay {
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklab, var(--color-text) 7%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--color-text) 7%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 44px 44px;
+    mask-image: radial-gradient(70% 60% at 50% 40%, #000 0%, transparent 100%);
+    -webkit-mask-image: radial-gradient(70% 60% at 50% 40%, #000 0%, transparent 100%);
+  }
 }

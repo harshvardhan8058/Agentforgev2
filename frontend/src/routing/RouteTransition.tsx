@@ -7,8 +7,9 @@
  * instant, no-op render under `prefers-reduced-motion` and in tests, so this
  * never hides content or races assertions.
  */
+import type { JSX } from "react";
 import { type ReactNode } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "react-router";
 
 import { MotionFade } from "../components/motion/MotionFade";
 

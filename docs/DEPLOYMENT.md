@@ -193,9 +193,15 @@ window.__AGENTFORGE_CONFIG__ = { apiBaseUrl: "${API_BASE_URL}" };
 - When `API_BASE_URL` is **unset**, the entrypoint writes an empty config object and the
   SPA falls back to its documented default (suitable for `local`, where the API is reached
   same-origin through the proxy).
-- Set `API_BASE_URL` in production (e.g. a same-origin path `/` or an absolute
-  `https://<host>`); the same image serves **byte-identical hashed assets** in every
-  environment and differs only in the generated `/config.js`.
+- Set `API_BASE_URL=/` for the bundled same-origin gateway (the Compose default). The
+  client resolves `/` to the page's absolute origin before constructing API requests,
+  so the same image works through `localhost`, an IP address, or a deployment domain.
+- A separate-origin absolute URL such as `https://api.example.com` additionally requires
+  the gateway's `connect-src` directive in `nginx/snippets/security_headers.conf` to allow
+  that origin and the API to return an appropriate CORS policy. The shipped strict policy
+  is `connect-src 'self'`, so separate-origin requests are blocked unless operators make
+  both trust-boundary changes deliberately. The image's hashed assets remain identical;
+  only the generated `/config.js` differs.
 - `/config.js` carries the non-secret base URL only — **no credential** is ever embedded in
   the image or the served assets, and `/config.js` is served with `Cache-Control: no-store`
   so a new environment's value is picked up promptly.

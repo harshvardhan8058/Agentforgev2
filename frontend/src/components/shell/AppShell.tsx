@@ -10,9 +10,11 @@
  *  - `md–xl`: a persistent collapsible sidebar + content area;
  *  - `≥ 2xl`: reading surfaces honor a max-width while the shell uses the width.
  */
+import type { JSX } from "react";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { LogOut, Menu, Moon, PanelLeft, Search, Sun } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router";
 
 import { useSession } from "../../auth/useSession";
 import { useTheme } from "../../hooks/useTheme";
@@ -25,8 +27,26 @@ import { SidebarNav } from "./SidebarNav";
 import { OrgSwitcher } from "./OrgSwitcher";
 import { BrandLogo } from "./BrandLogo";
 
-function BrandMark({ compact = false }: { compact?: boolean }): JSX.Element {
-  return <BrandLogo compact={compact} />;
+function BrandMark({
+  compact = false,
+  onNavigate,
+}: {
+  compact?: boolean;
+  onNavigate?: () => void;
+}): JSX.Element {
+  // The brand mark doubles as a "home" affordance — clicking it returns to the
+  // Dashboard (like every modern app shell).
+  return (
+    <Link
+      to="/"
+      onClick={onNavigate}
+      data-testid="brand-home-link"
+      aria-label="AgentForge — go to dashboard"
+      className="inline-flex items-center rounded-md transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+    >
+      <BrandLogo compact={compact} />
+    </Link>
+  );
 }
 
 function ThemeToggle(): JSX.Element {
@@ -114,7 +134,16 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
           >
             <BrandMark compact={collapsed} />
           </div>
-          <div className="flex-1 overflow-y-auto px-3 py-4">
+          {/*
+            The nav scrolls independently of the brand and footer. On a short
+            viewport twelve destinations overflow, and a hidden overflow with no
+            visible edge reads as "that is all there is" — hence the masked
+            fade, which makes a clipped list look clipped.
+          */}
+          <div
+            data-nav-scroll
+            className="af-scroll-fade min-h-0 flex-1 overflow-y-auto px-3 py-4"
+          >
             <SidebarNav collapsed={collapsed} />
           </div>
           <div
@@ -206,8 +235,8 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
               <RadixDialog.Description className="sr-only">
                 Primary navigation
               </RadixDialog.Description>
-              <BrandMark />
-              <div className="-mx-1 flex-1 overflow-y-auto">
+              <BrandMark onNavigate={() => setDrawerOpen(false)} />
+              <div data-nav-scroll className="-mx-1 min-h-0 flex-1 overflow-y-auto">
                 <SidebarNav onNavigate={() => setDrawerOpen(false)} />
               </div>
             </RadixDialog.Content>

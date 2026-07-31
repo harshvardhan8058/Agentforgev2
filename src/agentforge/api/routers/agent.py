@@ -15,7 +15,7 @@ blocking the event loop.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
@@ -32,6 +32,7 @@ from agentforge.api.errors import AppError
 from agentforge.api.schemas import (
     AgentRunRequest,
     AgentRunResponse,
+    AgentRunSummaryResponse,
     CitationModel,
     TraceEntryModel,
     TraceResponse,
@@ -145,6 +146,32 @@ async def stream_agent(
         streaming.iter_sse_frames(run_input),
         media_type="text/event-stream",
     )
+
+
+@router.get("/agent/runs", response_model=list[AgentRunSummaryResponse])
+async def list_agent_runs(
+    limit: int = Query(default=50, ge=1, le=200),
+    recorder: Trace_Recorder = Depends(get_trace_recorder),
+    principal: Principal = Depends(require_permission(Permission.READ)),
+) -> list[AgentRunSummaryResponse]:
+    """Return the caller org's agent runs, most recent first (Req 10.3, 4.2).
+
+    A trace could only be fetched by a run id the caller already held, so a finished run
+    was unreachable once its id left the screen. Scoped to ``principal.org_id`` at the
+    data-access layer, so no other tenant's run can appear.
+    """
+    summaries = await run_in_threadpool(
+        lambda: recorder.list_runs(principal.org_id, limit=limit)
+    )
+    return [
+        AgentRunSummaryResponse(
+            run_id=summary.run_id,
+            created_at=summary.created_at,
+            step_count=summary.step_count,
+            tool_call_count=summary.tool_call_count,
+        )
+        for summary in summaries
+    ]
 
 
 @router.get("/agent/runs/{run_id}/trace", response_model=TraceResponse)

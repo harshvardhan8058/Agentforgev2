@@ -19,6 +19,7 @@
  *
  * Premium UX: cards, toasts, confirm feedback, responsive layout, WCAG AA.
  */
+import type { JSX } from "react";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Plus, UserPlus, Users } from "lucide-react";
@@ -37,11 +38,13 @@ import { ErrorBanner } from "../../components/ErrorBanner";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Input } from "../../components/ui/Input";
+import { ExampleChips } from "../../components/ui/ExampleChips";
+import { MEMBER_EMAIL_EXAMPLES, TEAM_NAME_EXAMPLES } from "../../lib/examples";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenuSelectTrigger,
 } from "../../components/ui/DropdownMenu";
 
 const MANAGE_MEMBERS: Permission = "manage_members";
@@ -164,19 +167,23 @@ export function MembersView(): JSX.Element {
                   onChange={(e) => setMemberEmail(e.target.value)}
                   placeholder="teammate@company.com"
                 />
+                <ExampleChips
+                  examples={MEMBER_EMAIL_EXAMPLES}
+                  onPick={setMemberEmail}
+                  testId="member-email-examples"
+                />
               </div>
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="member-role" className="text-sm font-medium text-text">
                   Role
                 </label>
                 <DropdownMenu>
-                  <DropdownMenuTrigger
+                  <DropdownMenuSelectTrigger
                     id="member-role"
                     data-testid="member-role-trigger"
-                    className="inline-flex h-10 w-40 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-sm capitalize text-text hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                  >
-                    {memberRole}
-                  </DropdownMenuTrigger>
+                    className="w-40 capitalize"
+                    value={memberRole}
+                  />
                   <DropdownMenuContent>
                     {ASSIGNABLE_ROLES.map((r) => (
                       <DropdownMenuItem
@@ -220,6 +227,11 @@ export function MembersView(): JSX.Element {
                   onChange={(e) => setTeamName(e.target.value)}
                   placeholder="Platform"
                 />
+                <ExampleChips
+                  examples={TEAM_NAME_EXAMPLES}
+                  onPick={setTeamName}
+                  testId="team-name-examples"
+                />
               </div>
               <Button
                 type="button"
@@ -255,13 +267,13 @@ export function MembersView(): JSX.Element {
                       Team
                     </label>
                     <DropdownMenu>
-                      <DropdownMenuTrigger
+                      <DropdownMenuSelectTrigger
                         id="team-select"
                         data-testid="team-select-trigger"
-                        className="inline-flex h-10 min-w-[10rem] items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-sm text-text hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                      >
-                        {selectedTeam ? selectedTeam.name : "Select a team"}
-                      </DropdownMenuTrigger>
+                        className="min-w-[10rem]"
+                        value={selectedTeam?.name}
+                        placeholder="Select a team"
+                      />
                       <DropdownMenuContent>
                         {teams.map((t) => (
                           <DropdownMenuItem
@@ -288,6 +300,11 @@ export function MembersView(): JSX.Element {
                       value={teamMemberEmail}
                       onChange={(e) => setTeamMemberEmail(e.target.value)}
                       placeholder="teammate@company.com"
+                    />
+                    <ExampleChips
+                      examples={MEMBER_EMAIL_EXAMPLES}
+                      onPick={setTeamMemberEmail}
+                      testId="team-member-email-examples"
                     />
                   </div>
                   <Button

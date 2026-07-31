@@ -6,6 +6,7 @@
  * surface with an `aria-live` region inherited from Radix, so transient
  * outcomes are announced without blocking (Req 5.4, 6.5, 7.5).
  */
+import type { JSX } from "react";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {

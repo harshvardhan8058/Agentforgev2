@@ -5,6 +5,7 @@
  * each normalized chord as a sequence of `<kbd>` keys. Focus trapping, Escape
  * to close, and focus restoration are inherited from the Radix Dialog.
  */
+import type { JSX } from "react";
 import { Dialog, DialogContent } from "../ui/Dialog";
 import { useCommandPalette } from "../../hooks/useCommandPalette";
 import type { ResolvedShortcut } from "../../hooks/useKeyboardShortcuts";

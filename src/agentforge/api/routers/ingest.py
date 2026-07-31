@@ -113,4 +113,8 @@ async def ingest_document(
         filename=result.filename,
         chunk_count=result.chunk_count,
         status="ingested",
+        # True when these bytes were already in the corpus: ``document_id`` is the
+        # existing document and nothing was written. Reported so a client can say so
+        # rather than implying a second copy was created.
+        duplicate=result.duplicate,
     )

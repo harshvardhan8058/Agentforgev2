@@ -31,14 +31,22 @@ const DEFAULT_BASE_URL = "http://localhost:8000";
 /**
  * Resolve the effective Backend_API base:
  *
- *  - `"/"` (or any value that is only slashes) → **same-origin**: an empty base
- *    so the API_Client issues **relative** requests against the exact origin
- *    that served the SPA. This is the correct mode behind a same-origin reverse
- *    proxy (the bundled nginx) and works from ANY host — `localhost`,
- *    `127.0.0.1`, a LAN IP, or a domain, over http or https — with no CORS. It
- *    is the compose default, and is what prevents the "Unable to reach the
- *    server" failure that a hardcoded `http://localhost` causes when the app is
- *    opened from a different origin.
+ *  - `"/"` (or any value that is only slashes) → **same-origin**, resolved to the
+ *    browser's absolute `window.location.origin`. This is the correct mode behind
+ *    a same-origin reverse proxy (the bundled nginx) and is the compose default:
+ *    it works from ANY host — `localhost`, `127.0.0.1`, a LAN IP, or a domain,
+ *    over http or https — with no CORS, and it is what prevents the "Unable to
+ *    reach the server" failure that a hardcoded `http://localhost` causes when
+ *    the app is opened from a different origin.
+ *
+ *    The marker resolves to an **absolute** origin rather than to an empty
+ *    (relative) base because `openapi-fetch` joins the base and path into
+ *    `` `${baseUrl}${pathname}` `` and constructs a `Request` from the result. A
+ *    relative value such as `/query` is rejected by that constructor outside a
+ *    document context (Node/undici and jsdom both throw `Failed to parse URL`),
+ *    so an empty base breaks the test environment and any non-browser fetch while
+ *    appearing to work in the browser. Using the serving origin satisfies the
+ *    constructor *and* keeps the request same-origin.
  *  - a non-empty absolute URL → used verbatim (trailing slash trimmed), for
  *    deployments where the API lives on a separate origin (CORS then applies).
  *  - unset/empty → the documented dev default (`http://localhost:8000`), so
@@ -47,8 +55,17 @@ const DEFAULT_BASE_URL = "http://localhost:8000";
 function normalizeBaseUrl(raw: string | undefined): string {
   const value = (raw ?? "").trim();
   if (value.length === 0) return DEFAULT_BASE_URL;
-  // Same-origin: a bare "/" (or "///") means "relative to the serving origin".
-  if (/^\/+$/.test(value)) return "";
+  // Same-origin: openapi-fetch passes `${baseUrl}${pathname}` to `new Request(...)`,
+  // which requires an absolute URL. Resolve the serving origin instead of returning
+  // an empty/relative base (which throws before fetch can issue the request).
+  if (/^\/+$/.test(value)) {
+    // An opaque origin (`file://`, a sandboxed iframe) stringifies to "null" and
+    // cannot be used as a base, so fall back to the documented default.
+    if (typeof window !== "undefined" && window.location.origin !== "null") {
+      return window.location.origin;
+    }
+    return DEFAULT_BASE_URL;
+  }
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 

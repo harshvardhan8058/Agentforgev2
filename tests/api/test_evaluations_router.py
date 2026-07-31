@@ -162,3 +162,48 @@ def test_cross_org_run_get_is_404(wired):
     resp = client.get(f"/evaluations/runs/{run['run_id']}", headers=other_headers)
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "not_found"
+
+
+
+def test_list_datasets_reports_the_item_count(wired):
+    """The list carries each dataset's item count (an additive response field).
+
+    A run scores every item in the dataset, so a dataset with no items produces
+    no results and an aggregate of exactly 0. Without a count, that dataset is
+    indistinguishable from a usable one until a run has already been wasted on
+    it, so the count is surfaced in the listing.
+    """
+    client, headers, _org_id, _ctx = wired
+    _create_dataset(
+        client,
+        headers,
+        "two-items",
+        [{"input": "a", "expected": "a"}, {"input": "b", "expected": "b"}],
+    )
+    _create_dataset(client, headers, "no-items", [])
+
+    resp = client.get("/evaluations/datasets", headers=headers)
+
+    assert resp.status_code == 200
+    counts = {d["name"]: d["item_count"] for d in resp.json()}
+    assert counts == {"two-items": 2, "no-items": 0}
+
+
+def test_item_count_is_scoped_to_the_callers_org(wired):
+    """Another org's items never contribute to this org's counts (Req 6.8)."""
+    client, headers, _org_id, ctx = wired
+    _create_dataset(client, headers, "mine", [{"input": "a", "expected": "a"}])
+
+    other_headers, _other_org = issue_principal_headers(
+        ctx, role=Role.OWNER, org_name="Counting Org", email="counting@ex.com"
+    )
+    _create_dataset(
+        client,
+        other_headers,
+        "theirs",
+        [{"input": "b", "expected": "b"}, {"input": "c", "expected": "c"}],
+    )
+
+    resp = client.get("/evaluations/datasets", headers=headers)
+
+    assert [(d["name"], d["item_count"]) for d in resp.json()] == [("mine", 1)]

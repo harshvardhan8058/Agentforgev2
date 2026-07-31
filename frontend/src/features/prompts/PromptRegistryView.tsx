@@ -9,33 +9,38 @@
  * `RenderPromptForm` renders a resolved version with required-variable blocking
  * (Property 12).
  *
- * Premium UX: the body editor and version diffing use **Monaco** via
- * `PromptStudio`, **lazy-loaded** (`React.lazy` + dynamic import, kept out of
- * the initial bundle) and **mocked in tests** so Monaco never loads under
- * Vitest.
+ * The body editor and version diff come from `PromptStudio`, imported directly.
+ * It used to be lazy-loaded because it wrapped Monaco, which is fetched from a
+ * CDN at runtime: with no route to that CDN the Suspense fallback never
+ * resolved, so the page showed a permanent "Loading…" block where the editor
+ * belonged. `PromptStudio` is now a plain textarea plus a pure diff, small
+ * enough that code-splitting it would cost a request rather than save one.
  */
-import { Suspense, lazy, useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GitCompare, SlidersHorizontal } from "lucide-react";
+import type { JSX } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { GitCompare, Plus, SlidersHorizontal } from "lucide-react";
 import { PageHeader } from "../../components/ui/PageHeader";
 
 import { apiClient } from "../../api/client";
 import { runRequest } from "../../api/request";
 import type { ClientError } from "../../api/errors";
 import { orgScopedKey } from "../../api/queryKeys";
+import { can } from "../../auth/rbac";
 import { useSession } from "../../auth/useSession";
 import { Can } from "../../components/Can";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { Button } from "../../components/ui/Button";
-import { Input } from "../../components/ui/Input";
 import { Badge } from "../../components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { RenderPromptForm } from "./RenderPromptForm";
-import type { PromptStudioProps } from "./PromptStudio";
+import { PromptComparison } from "./PromptComparison";
+import { NewVersionForm } from "./NewVersionForm";
+import PromptStudio from "./PromptStudio";
 
-const PromptStudio = lazy(() => import("./PromptStudio"));
+
 
 interface PromptVersion {
   id: string;
@@ -46,30 +51,16 @@ interface PromptVersion {
   created_at: string;
 }
 
-function StudioFallback(): JSX.Element {
-  return <Skeleton className="h-72 w-full" data-testid="studio-skeleton" />;
-}
 
-function LazyStudio(props: PromptStudioProps): JSX.Element {
-  return (
-    <Suspense fallback={<StudioFallback />}>
-      <PromptStudio {...props} />
-    </Suspense>
-  );
-}
 
 export function PromptRegistryView(): JSX.Element {
-  const { orgId } = useSession();
-  const queryClient = useQueryClient();
+  const { orgId, role } = useSession();
+  const canCreate = role !== null && can(role, "ingest_documents");
+  const promptNameRef = useRef<HTMLInputElement>(null);
 
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [diffAgainst, setDiffAgainst] = useState<number | null>(null);
-
-  // Create-version form state.
-  const [newName, setNewName] = useState("");
-  const [newBody, setNewBody] = useState("");
-  const [newVariables, setNewVariables] = useState("");
 
   const names = useQuery<string[], ClientError>({
     queryKey: orgScopedKey(orgId, "prompts"),
@@ -126,30 +117,6 @@ export function PromptRegistryView(): JSX.Element {
     },
   });
 
-  const create = useMutation<PromptVersion, ClientError, void>({
-    mutationFn: async () => {
-      const data = await runRequest(() =>
-        apiClient.POST("/prompts", {
-          body: {
-            name: newName.trim(),
-            body: newBody,
-            variables: newVariables
-              .split(",")
-              .map((v) => v.trim())
-              .filter((v) => v.length > 0),
-          },
-        }),
-      );
-      return { ...data, variables: data.variables ?? [] };
-    },
-    onSuccess: (created) => {
-      void queryClient.invalidateQueries({ queryKey: orgScopedKey(orgId, "prompts") });
-      void queryClient.invalidateQueries({
-        queryKey: orgScopedKey(orgId, "prompt-versions", created.name),
-      });
-    },
-  });
-
   const selectName = (name: string): void => {
     setSelectedName(name);
     setSelectedVersion(null);
@@ -178,7 +145,22 @@ export function PromptRegistryView(): JSX.Element {
               {names.isLoading && <Skeleton className="h-24 w-full" data-testid="templates-skeleton" />}
               {names.isError && <ErrorBanner error={names.error} onRetry={() => void names.refetch()} />}
               {names.data && names.data.length === 0 && (
-                <EmptyState title="No prompts yet" message="Create a version to get started." />
+                <EmptyState
+                  title="No prompts yet"
+                  message="Create your first versioned prompt template to get started."
+                  action={
+                    canCreate ? (
+                      <Button
+                        type="button"
+                        data-testid="prompts-empty-cta"
+                        onClick={() => promptNameRef.current?.focus()}
+                      >
+                        <Plus className="h-4 w-4" aria-hidden="true" />
+                        New version
+                      </Button>
+                    ) : undefined
+                  }
+                />
               )}
               {names.data && names.data.length > 0 && (
                 <ul className="flex flex-col gap-1" data-testid="template-list">
@@ -205,75 +187,16 @@ export function PromptRegistryView(): JSX.Element {
             </CardContent>
           </Card>
 
-          <Can permission="ingest_documents">
-            <Card data-testid="create-version-card">
-              <CardHeader>
-                <CardTitle className="text-base">New version</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <form
-                  className="flex flex-col gap-3"
-                  data-testid="create-version-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (newName.trim().length === 0) return;
-                    create.mutate();
-                  }}
-                >
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="prompt-name" className="text-sm font-medium text-text">
-                      Name
-                    </label>
-                    <Input
-                      id="prompt-name"
-                      data-testid="prompt-name"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-sm font-medium text-text">Body</span>
-                    <LazyStudio
-                      value={newBody}
-                      onChange={setNewBody}
-                      data-testid="prompt-body-editor"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="prompt-variables" className="text-sm font-medium text-text">
-                      Variables (comma-separated)
-                    </label>
-                    <Input
-                      id="prompt-variables"
-                      data-testid="prompt-variables"
-                      value={newVariables}
-                      onChange={(e) => setNewVariables(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Button type="submit" data-testid="create-version-submit" loading={create.isPending}>
-                      Create version
-                    </Button>
-                  </div>
-                  {create.isError && (
-                    <div data-testid="create-version-error">
-                      <ErrorBanner error={create.error} />
-                    </div>
-                  )}
-                  {create.data && (
-                    <p className="text-sm text-success" data-testid="create-version-result">
-                      Created version {create.data.version}
-                    </p>
-                  )}
-                </form>
-              </CardContent>
-            </Card>
-          </Can>
         </div>
 
-        {/* Right: version detail + studio + render form. */}
-        <div className="flex flex-col gap-4">
-          {selectedName === null && (
+        {/* Right: version detail, then the create form. The form lives here, not
+            in the narrow template column, because the body editor is the field
+            that most needs width. */}
+        <div className="flex min-w-0 flex-col gap-4">
+          {/* Only prompt for a selection when there is something to select —
+              with an empty registry this sat next to "No prompts yet", so the
+              page showed two empty states and no way forward. */}
+          {selectedName === null && (names.data?.length ?? 0) > 0 && (
             <EmptyState
               title="Select a template"
               message="Choose a template on the left to view its versions."
@@ -343,14 +266,14 @@ export function PromptRegistryView(): JSX.Element {
 
                 {/* Body / diff studio. */}
                 {diffAgainst !== null && diffDetail.data ? (
-                  <LazyStudio
+                  <PromptStudio
                     mode="diff"
                     original={diffDetail.data.body}
                     value={version.body}
                     data-testid="version-diff-editor"
                   />
                 ) : (
-                  <LazyStudio
+                  <PromptStudio
                     value={version.body}
                     readOnly
                     data-testid="version-body-editor"
@@ -381,6 +304,17 @@ export function PromptRegistryView(): JSX.Element {
               </CardContent>
             </Card>
           )}
+
+          {/* Comparing rendered *results* rather than bodies: a body diff shows what
+              changed in the prompt, this shows what it changes in the output. Renders
+              nothing until the template has two versions to compare. */}
+          {selectedName !== null && versions.data && (
+            <PromptComparison name={selectedName} versions={versions.data} />
+          )}
+
+          <Can permission="ingest_documents">
+            <NewVersionForm nameRef={promptNameRef} />
+          </Can>
         </div>
       </div>
     </div>

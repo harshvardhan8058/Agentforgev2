@@ -8,6 +8,7 @@
  * selection is stored, the provider honors the system preference and reacts to
  * live changes to it.
  */
+import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { ThemeName } from "../styles/theme";

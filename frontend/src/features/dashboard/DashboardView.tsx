@@ -6,34 +6,36 @@
  * quick actions into the primary workflows, and surfaces the platform
  * capabilities they can reach — every destination gated by the same
  * `can(role, permission)` decision used by the sidebar and command palette, so
- * nothing unreachable is ever shown. Presentational only; it makes no network
- * calls and fabricates no metrics.
+ * nothing unreachable is ever shown.
+ *
+ * The layout itself is presentational; the two data-backed sections it composes
+ * (`WorkspaceStats` and `GettingStarted`) fetch their own signals through the
+ * shared definitions in `workspaceQueries`, so they never fabricate a metric and
+ * never issue duplicate requests for the same endpoint.
  */
-import { Link } from "react-router-dom";
+import type { JSX } from "react";
+import { Link } from "react-router";
 import {
   ArrowRight,
-  BarChart3,
   Bot,
-  ClipboardCheck,
   FileText,
-  KeyRound,
-  MessagesSquare,
   Search,
-  ShieldCheck,
-  SlidersHorizontal,
   Sparkles,
-  Users,
   type LucideIcon,
 } from "lucide-react";
 
 import { can, type Permission } from "../../auth/rbac";
 import { useSession } from "../../auth/useSession";
+import { orgLabel } from "../../auth/orgNameStore";
 import { useCommandPalette } from "../../hooks/useCommandPalette";
 import { orgMonogram, orgMonogramStyle } from "../../lib/orgIdentity";
 import { cn } from "../../lib/cn";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Badge } from "../../components/ui/Badge";
+import { CopyableId } from "../../components/ui/CopyableId";
 import { Kbd } from "../../components/ui/Kbd";
+import { WorkspaceStats } from "./WorkspaceStats";
+import { GettingStarted } from "./GettingStarted";
 
 interface Destination {
   label: string;
@@ -71,58 +73,6 @@ const QUICK_ACTIONS: readonly Destination[] = [
     to: "/multi-agent",
     icon: Sparkles,
     permission: "run_agents",
-  },
-];
-
-const CAPABILITIES: readonly Destination[] = [
-  {
-    label: "Conversations",
-    description: "Continue threaded, context-aware sessions.",
-    to: "/conversations",
-    icon: MessagesSquare,
-    permission: "read",
-  },
-  {
-    label: "Prompts",
-    description: "Browse and diff the immutable prompt registry.",
-    to: "/prompts",
-    icon: SlidersHorizontal,
-    permission: "read",
-  },
-  {
-    label: "Analytics",
-    description: "Track token usage and cost across providers.",
-    to: "/analytics",
-    icon: BarChart3,
-    permission: "read",
-  },
-  {
-    label: "Guardrails",
-    description: "Review the policies applied to every answer.",
-    to: "/guardrails",
-    icon: ShieldCheck,
-    permission: "read",
-  },
-  {
-    label: "Evaluations",
-    description: "Measure quality against curated datasets.",
-    to: "/evaluations",
-    icon: ClipboardCheck,
-    permission: "read",
-  },
-  {
-    label: "Members & Teams",
-    description: "Manage who can access this organization.",
-    to: "/members",
-    icon: Users,
-    permission: "manage_members",
-  },
-  {
-    label: "API Keys",
-    description: "Issue and revoke programmatic access keys.",
-    to: "/api-keys",
-    icon: KeyRound,
-    permission: "manage_api_keys",
   },
 ];
 
@@ -174,7 +124,6 @@ export function DashboardView(): JSX.Element {
     item.permission === null || (role !== null && can(role, item.permission));
 
   const quickActions = QUICK_ACTIONS.filter(permitted);
-  const capabilities = CAPABILITIES.filter(permitted);
 
   return (
     <div className="flex flex-col gap-8" data-testid="home-view">
@@ -205,10 +154,22 @@ export function DashboardView(): JSX.Element {
             </span>
             <span
               className="truncate text-lg font-semibold tracking-tight text-text"
+              data-testid="workspace-org-label"
               title={orgId ?? undefined}
             >
-              {orgId ?? "—"}
+              {orgId ? orgLabel(orgId) : "—"}
             </span>
+            {/* The id is needed for API calls and support requests, but a full
+                UUID printed in the header spent a line on something unreadable
+                and unselectable. Shortened, with the full value on the copy
+                button. */}
+            {orgId && orgLabel(orgId) !== orgId && (
+              <CopyableId
+                value={orgId}
+                label="organization id"
+                testId="workspace-org-id"
+              />
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -218,6 +179,12 @@ export function DashboardView(): JSX.Element {
           </Badge>
         </div>
       </section>
+
+      {/* Live workspace metrics. */}
+      <WorkspaceStats />
+
+      {/* Guided activation path, derived from real workspace data. */}
+      <GettingStarted />
 
       {/* Quick actions. */}
       {quickActions.length > 0 && (
@@ -236,22 +203,16 @@ export function DashboardView(): JSX.Element {
         </section>
       )}
 
-      {/* Capability grid. */}
-      {capabilities.length > 0 && (
-        <section className="flex flex-col gap-3" aria-labelledby="explore-heading">
-          <h2
-            id="explore-heading"
-            className="text-sm font-semibold uppercase tracking-wide text-text-subtle"
-          >
-            Explore
-          </h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {capabilities.map((item) => (
-              <DestinationCard key={item.to} item={item} />
-            ))}
-          </div>
-        </section>
-      )}
+      {/*
+        An "Explore" grid used to follow, holding a card for every remaining
+        destination: Conversations, Prompts, Analytics, Guardrails, Evaluations,
+        Members and API Keys. All seven are permanent entries in the sidebar two
+        pixels to the left, so the section restated the navigation as eleven
+        near-identical cards and pushed the workspace's actual state — documents,
+        tokens, cost, the checklist — off the first screen. Quick actions are kept
+        because they are task-framed entry points rather than a copy of the nav;
+        everything else is reachable from the sidebar or ⌘K.
+      */}
 
       {/* Keyboard hint. */}
       <p className="flex flex-wrap items-center gap-2 text-sm text-text-muted">

@@ -12,6 +12,7 @@
  * above the router in `App` gives the whole authenticated app a single shared
  * retained id.
  */
+import type { JSX } from "react";
 import {
   createContext,
   useCallback,

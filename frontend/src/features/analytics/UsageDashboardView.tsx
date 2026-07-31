@@ -15,6 +15,7 @@
  * is isolated while totals and the others still render (Req 11.6). Gated behind
  * `read`.
  */
+import type { JSX } from "react";
 import { Suspense, lazy, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart3 } from "lucide-react";
@@ -33,6 +34,7 @@ import { Input } from "../../components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { BREAKDOWN_GROUPS, type UsageReport } from "./types";
+import { RANGE_PRESETS } from "./rangePresets";
 import { UsageTotals } from "./UsageTotals";
 import { UsageBreakdownTable } from "./UsageBreakdownTable";
 import { BreakdownBoundary } from "./BreakdownBoundary";
@@ -83,6 +85,9 @@ export function UsageDashboardView(): JSX.Element {
         by_provider: data.by_provider ?? [],
         by_model: data.by_model ?? [],
         by_user: data.by_user ?? [],
+        // Defaulted true so an older API that omits the field is not accused of
+        // being unpriced; the flag only ever downgrades a confident figure.
+        cost_rates_configured: data.cost_rates_configured ?? true,
       };
     },
   });
@@ -150,6 +155,36 @@ export function UsageDashboardView(): JSX.Element {
                   Apply range
                 </Button>
               </form>
+
+              {/* Quick ranges. These apply immediately rather than only filling
+                  the inputs: a preset is an expressed intent ("last 7 days"),
+                  so making the Operator then press Apply would be a pointless
+                  second step. */}
+              <div
+                className="mt-3 flex flex-wrap items-center gap-1.5"
+                data-testid="range-presets"
+              >
+                <span className="text-xs font-medium text-text-subtle">Quick:</span>
+                {RANGE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    data-testid={`range-preset-${preset.label
+                      .toLowerCase()
+                      .replace(/\s+/g, "-")}`}
+                    onClick={() => {
+                      const [nextStart, nextEnd] = preset.resolve(new Date());
+                      setDraftStart(nextStart);
+                      setDraftEnd(nextEnd);
+                      setStart(nextStart);
+                      setEnd(nextEnd);
+                    }}
+                    className="rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-text-muted transition-colors hover:border-primary/60 hover:bg-primary-subtle hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
             </CardContent>
           </Card>
 
@@ -172,8 +207,8 @@ export function UsageDashboardView(): JSX.Element {
           {report && !usage.isLoading && isEmptyReport(report) && (
             <div data-testid="analytics-empty">
               <EmptyState
-                title="No usage recorded"
-                message="There are no usage records for the selected range."
+                title="No usage recorded yet"
+                message="Usage and cost accrue here as you run grounded queries and agent runs. Try a query, then widen the time range to see the breakdown by provider, model, and user."
                 icon={<BarChart3 className="h-8 w-8" />}
               />
             </div>
@@ -184,6 +219,7 @@ export function UsageDashboardView(): JSX.Element {
               <UsageTotals
                 totalTokens={report.total_tokens}
                 totalCost={report.total_cost}
+                ratesConfigured={report.cost_rates_configured}
               />
 
               <Suspense

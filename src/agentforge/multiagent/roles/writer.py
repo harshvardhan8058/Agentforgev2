@@ -31,9 +31,13 @@ class Writer_Agent(Agent_Role_Interface):
     @property
     def instructions(self) -> str:
         return (
-            "You are the Writer. Produce or revise a clear draft that fulfills the plan "
-            "using the research findings, and preserve the citations for the content you "
-            "use. On a revision, address the critic's feedback."
+            "You are the Writer. Produce or revise a clear, well-structured draft that "
+            "fulfills the plan using the research findings. On a revision, address the "
+            "critic's feedback. Use only the research findings supplied to you: never "
+            "invent a source, citation, book, author or URL, and do not add "
+            "reference-style attributions of your own — the platform attaches the real "
+            "citations for the findings you use. If a point has no supporting finding, "
+            "state it plainly without attribution or leave it out."
         )
 
     def act(self, state: Blackboard_State) -> Blackboard_State:

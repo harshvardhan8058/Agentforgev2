@@ -27,6 +27,8 @@ import copy
 import threading
 import uuid
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from uuid import UUID
 
 from agentforge.models.domain import Citation
@@ -37,6 +39,22 @@ from agentforge.multiagent.models import (
     Multi_Agent_Run,
     Termination_Reason,
 )
+
+
+@dataclass
+class Multi_Agent_Run_Summary:
+    """A row in the org's multi-agent run list.
+
+    Carries the ``task`` because it is what identifies a run to a person; the run id is a
+    generated UUID that says nothing about what was asked.
+    """
+
+    run_id: str
+    conversation_id: str
+    task: str
+    status: str
+    termination_reason: str | None
+    created_at: datetime
 
 
 class Multi_Agent_Run_Store(ABC):
@@ -84,6 +102,18 @@ class Multi_Agent_Run_Store(ABC):
     def get(self, org_id: UUID, run_id: str) -> Multi_Agent_Run | None:
         """Return ``org_id``'s Multi_Agent_Run, or ``None`` if unknown/cross-tenant."""
 
+    @abstractmethod
+    def list_runs(
+        self, org_id: UUID, *, limit: int = 50
+    ) -> list[Multi_Agent_Run_Summary]:
+        """Return ``org_id``'s runs, most recent first.
+
+        A run could previously only be fetched by an id the caller already held, so a
+        finished collaboration was unreachable once its id left the screen. ``limit``
+        bounds the response because runs accumulate without end.
+        """
+        raise NotImplementedError
+
 
 # --------------------------------------------------------------------------- InMemory
 
@@ -104,6 +134,10 @@ class InMemory_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
         self._messages: dict[tuple[UUID, str], list[tuple[str, str, int]]] = {}
         self._decisions: dict[tuple[UUID, str], list[Approval_Decision]] = {}
         self._checkpoints: dict[tuple[UUID, str], list[tuple[str, dict]]] = {}
+        # Creation times, so listing orders newest-first like the Postgres store (whose
+        # `multi_agent_runs.created_at` column provides the same ordering).
+        # `Multi_Agent_Run` itself carries no timestamp, so it is tracked alongside.
+        self._created_at: dict[tuple[UUID, str], datetime] = {}
         self._lock = threading.Lock()
 
     def create(self, org_id: UUID, conversation_id: str, task: str) -> Multi_Agent_Run:
@@ -119,6 +153,7 @@ class InMemory_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
             self._messages[(org_id, run.id)] = []
             self._decisions[(org_id, run.id)] = []
             self._checkpoints[(org_id, run.id)] = []
+            self._created_at[(org_id, run.id)] = datetime.now(timezone.utc)
         return run
 
     def append_message(self, org_id: UUID, run_id: str, role_id: str, content: str) -> int:
@@ -173,6 +208,32 @@ class InMemory_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
         """Return ``org_id``'s Multi_Agent_Run, or ``None`` if unknown/cross-tenant."""
         with self._lock:
             return self._runs.get((org_id, run_id))
+
+    def list_runs(
+        self, org_id: UUID, *, limit: int = 50
+    ) -> list[Multi_Agent_Run_Summary]:
+        """Return this org's runs, most recent first."""
+        with self._lock:
+            summaries = [
+                Multi_Agent_Run_Summary(
+                    run_id=run.id,
+                    conversation_id=run.conversation_id,
+                    task=run.task,
+                    status=run.status,
+                    termination_reason=(
+                        run.termination_reason.value
+                        if run.termination_reason is not None
+                        else None
+                    ),
+                    created_at=self._created_at.get(
+                        (owner, run.id), datetime.now(timezone.utc)
+                    ),
+                )
+                for (owner, _run_id), run in self._runs.items()
+                if owner == org_id
+            ]
+        summaries.sort(key=lambda s: s.created_at, reverse=True)
+        return summaries[:limit]
 
     # ------------------------------------------------------------------ read helpers
 
@@ -497,6 +558,38 @@ class Pg_Multi_Agent_Run_Store(Multi_Agent_Run_Store):
                 type=ApprovalDecisionType(r[0]),
                 feedback=r[1],
                 edited_content=r[2],
+            )
+            for r in rows
+        ]
+
+    def list_runs(
+        self, org_id: UUID, *, limit: int = 50
+    ) -> list[Multi_Agent_Run_Summary]:
+        """Return this org's runs, most recent first."""
+        from sqlalchemy import text
+
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, conversation_id, task, status, termination_reason,
+                           created_at
+                    FROM multi_agent_runs
+                    WHERE org_id = :org_id
+                    ORDER BY created_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"org_id": str(org_id), "limit": limit},
+            ).fetchall()
+        return [
+            Multi_Agent_Run_Summary(
+                run_id=str(r[0]),
+                conversation_id=str(r[1]) if r[1] is not None else "",
+                task=r[2],
+                status=r[3],
+                termination_reason=r[4],
+                created_at=r[5],
             )
             for r in rows
         ]

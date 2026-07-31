@@ -15,6 +15,24 @@ export function orgMonogram(orgId: string): string {
 }
 
 /**
+ * A short, human-scannable form of an opaque org id. Long/opaque identifiers
+ * (e.g. UUIDs) collapse to their first segment (`5fa9d420-…` → `5fa9d420`) so
+ * the workspace chrome never shows a full 36-char UUID; already-short, readable
+ * ids are returned unchanged. The full id is always preserved by callers as the
+ * element `title`.
+ */
+export function shortOrgId(orgId: string): string {
+  const trimmed = orgId.trim();
+  if (trimmed.length === 0) return "org";
+  const firstSegment = trimmed.split("-")[0];
+  // Only shorten clearly long/opaque ids; keep readable short ids (e.g. slugs).
+  if (trimmed.length > 12 && firstSegment.length >= 4) {
+    return firstSegment;
+  }
+  return trimmed;
+}
+
+/**
  * A stable hue (0–359) derived from the id via a small FNV-style hash, so a
  * given org always renders the same accent across sessions and reloads.
  */

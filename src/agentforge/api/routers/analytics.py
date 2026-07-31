@@ -15,12 +15,19 @@ to avoid blocking the event loop.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.concurrency import run_in_threadpool
 
-from agentforge.api.deps import get_analytics_service, require_permission
+from agentforge.api.deps import (
+    get_analytics_service,
+    get_settings,
+    require_permission,
+)
 from agentforge.api.schemas import UsageBreakdownEntry, UsageReportResponse
+from agentforge.config.settings import Settings
+from agentforge.observability.cost import parse_rate_table
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.rbac import Permission
 from agentforge.observability.analytics import Analytics_Service
@@ -56,7 +63,23 @@ def _to_entries(entries: list[Breakdown_Entry]) -> list[UsageBreakdownEntry]:
     ]
 
 
-def _to_response(report: Usage_Report) -> UsageReportResponse:
+def _rates_configured(settings: Settings) -> bool:
+    """Return True iff this deployment can produce a non-zero cost.
+
+    True when a per-model rate table is supplied, or when either default per-1K rate is
+    non-zero. Parsed rather than merely checked for presence so an empty or all-zero
+    table is reported honestly as "not priced".
+    """
+    for rate in parse_rate_table(settings.cost_rate_table_json).values():
+        if rate.prompt_per_1k != 0 or rate.completion_per_1k != 0:
+            return True
+    return (
+        Decimal(str(settings.cost_default_prompt_per_1k)) != 0
+        or Decimal(str(settings.cost_default_completion_per_1k)) != 0
+    )
+
+
+def _to_response(report: Usage_Report, *, rates_configured: bool) -> UsageReportResponse:
     """Render a :class:`Usage_Report` as its API response envelope."""
     return UsageReportResponse(
         org_id=report.org_id,
@@ -67,6 +90,7 @@ def _to_response(report: Usage_Report) -> UsageReportResponse:
         by_provider=_to_entries(report.by_provider),
         by_model=_to_entries(report.by_model),
         by_user=_to_entries(report.by_user),
+        cost_rates_configured=rates_configured,
     )
 
 
@@ -75,6 +99,7 @@ async def get_usage(
     start: datetime | None = Query(default=None),
     end: datetime | None = Query(default=None),
     service: Analytics_Service = Depends(get_analytics_service),
+    settings: Settings = Depends(get_settings),
     principal: Principal = Depends(require_permission(Permission.READ)),
 ) -> UsageReportResponse:
     """Return the usage report for the caller's org over ``[start, end]`` (Req 3.1, 3.4).
@@ -82,6 +107,10 @@ async def get_usage(
     ``start`` defaults to the epoch and ``end`` to now, so an unbounded query returns the
     org's entire history. The report is scoped to ``principal.org_id`` at the data-access
     layer, so no other tenant's usage can contribute (Req 3.3, 10.5).
+
+    ``cost_rates_configured`` reports whether this deployment prices tokens at all, so a
+    client can distinguish "nothing spent" from "nothing priced" — both of which render
+    as a zero total.
     """
     resolved_start = _ensure_aware(start) if start is not None else _EPOCH
     resolved_end = _ensure_aware(end) if end is not None else datetime.now(timezone.utc)
@@ -90,4 +119,4 @@ async def get_usage(
             principal.org_id, start=resolved_start, end=resolved_end
         )
     )
-    return _to_response(report)
+    return _to_response(report, rates_configured=_rates_configured(settings))

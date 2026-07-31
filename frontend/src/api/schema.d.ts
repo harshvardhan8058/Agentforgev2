@@ -29,6 +29,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agent Runs
+         * @description Return the caller org's agent runs, most recent first (Req 10.3, 4.2).
+         *
+         *     A trace could only be fetched by a run id the caller already held, so a finished run
+         *     was unreachable once its id left the screen. Scoped to ``principal.org_id`` at the
+         *     data-access layer, so no other tenant's run can appear.
+         */
+        get: operations["list_agent_runs_agent_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/runs/{run_id}/trace": {
         parameters: {
             query?: never;
@@ -83,6 +107,10 @@ export interface paths {
          *     ``start`` defaults to the epoch and ``end`` to now, so an unbounded query returns the
          *     org's entire history. The report is scoped to ``principal.org_id`` at the data-access
          *     layer, so no other tenant's usage can contribute (Req 3.3, 10.5).
+         *
+         *     ``cost_rates_configured`` reports whether this deployment prices tokens at all, so a
+         *     client can distinguish "nothing spent" from "nothing priced" — both of which render
+         *     as a zero total.
          */
         get: operations["get_usage_analytics_usage_get"];
         put?: never;
@@ -168,7 +196,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Conversations
+         * @description Return the caller org's conversations, most recent first (Req 8.1, 4.2).
+         *
+         *     Creation returned an id once and there was no way to enumerate threads afterwards, so
+         *     a conversation became unreachable as soon as its id was lost. Scoped to
+         *     ``principal.org_id`` at the data-access layer, so no other tenant's thread can appear.
+         */
+        get: operations["list_conversations_conversations_get"];
         put?: never;
         /**
          * Create Conversation
@@ -453,7 +489,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Multi Agent Runs
+         * @description Return the caller org's multi-agent runs, most recent first (Req 9.4, 4.2).
+         *
+         *     A run could only be fetched by an id the caller already held, so a finished
+         *     collaboration was unreachable once its id left the screen. Scoped to
+         *     ``principal.org_id`` at the data-access layer, so no other tenant's run can appear.
+         */
+        get: operations["list_multi_agent_runs_multi_agent_runs_get"];
         put?: never;
         /**
          * Start Multi Agent Run
@@ -874,6 +918,27 @@ export interface components {
             termination_reason: "final-answer" | "iteration-limit-reached";
         };
         /**
+         * AgentRunSummaryResponse
+         * @description One row of ``GET /agent/runs``.
+         *
+         *     Limited to what the trace records: ``agent_runs.termination_reason`` exists as a
+         *     column but nothing writes it, so it is not reported rather than surfacing a
+         *     permanent ``null`` dressed as data.
+         */
+        AgentRunSummaryResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Run Id */
+            run_id: string;
+            /** Step Count */
+            step_count: number;
+            /** Tool Call Count */
+            tool_call_count: number;
+        };
+        /**
          * ApiKeyMetadata
          * @description Safe API-key metadata — never the ``key_hash`` or the plaintext secret (Req 5.4).
          */
@@ -962,6 +1027,27 @@ export interface components {
             conversation_id: string;
             /** Messages */
             messages?: components["schemas"]["MessageModel"][];
+        };
+        /**
+         * ConversationSummaryResponse
+         * @description One row of ``GET /conversations`` — enough to recognise and reopen a thread.
+         *
+         *     ``preview`` is the opening of the first message: a conversation is otherwise
+         *     identified only by a generated UUID, which tells an operator nothing about which
+         *     thread it is. Message bodies are excluded so listing stays cheap.
+         */
+        ConversationSummaryResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Message Count */
+            message_count: number;
+            /** Preview */
+            preview?: string | null;
         };
         /**
          * CreateApiKeyRequest
@@ -1081,6 +1167,11 @@ export interface components {
              * Format: uuid
              */
             dataset_id: string;
+            /**
+             * Item Count
+             * @default 0
+             */
+            item_count: number;
             /** Name */
             name: string;
         };
@@ -1224,6 +1315,11 @@ export interface components {
             chunk_count: number;
             /** Document Id */
             document_id: string;
+            /**
+             * Duplicate
+             * @default false
+             */
+            duplicate: boolean;
             /** Filename */
             filename: string;
             /**
@@ -1300,6 +1396,27 @@ export interface components {
             termination_reason?: ("completed" | "max-rounds-reached" | "max-revisions-reached" | "rejected" | "aborted") | null;
             /** Trace */
             trace?: components["schemas"]["TraceEntryModel"][];
+        };
+        /**
+         * MultiAgentRunSummaryResponse
+         * @description One row of ``GET /multi-agent/runs`` — the task, status, and how it ended.
+         */
+        MultiAgentRunSummaryResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Run Id */
+            run_id: string;
+            /** Status */
+            status: string;
+            /** Task */
+            task: string;
+            /** Termination Reason */
+            termination_reason?: string | null;
         };
         /**
          * PromptVersionResponse
@@ -1484,6 +1601,11 @@ export interface components {
             /** By User */
             by_user?: components["schemas"]["UsageBreakdownEntry"][];
             /**
+             * Cost Rates Configured
+             * @default false
+             */
+            cost_rates_configured: boolean;
+            /**
              * End
              * Format: date-time
              */
@@ -1541,6 +1663,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_agent_runs_agent_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunSummaryResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -1723,6 +1876,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_conversations_conversations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSummaryResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -2139,6 +2323,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntegrationStatusResponse"];
+                };
+            };
+        };
+    };
+    list_multi_agent_runs_multi_agent_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MultiAgentRunSummaryResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

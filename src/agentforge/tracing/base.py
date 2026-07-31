@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from uuid import UUID
 
 
@@ -31,6 +32,22 @@ class Trace:
 
     run_id: str
     entries: list[Trace_Entry] = field(default_factory=list)  # ordered by ordinal
+
+
+@dataclass
+class Agent_Run_Summary:
+    """A row in the org's agent-run list.
+
+    Deliberately limited to what the trace actually records. ``agent_runs`` carries a
+    ``termination_reason`` column, but nothing ever writes it — the recorder inserts only
+    the run's id and org on first use — so exposing it would surface a permanent ``null``
+    dressed as data. Step and tool-call counts are derived from entries that do exist.
+    """
+
+    run_id: str
+    created_at: datetime
+    step_count: int
+    tool_call_count: int
 
 
 class Trace_Recorder(ABC):
@@ -57,4 +74,14 @@ class Trace_Recorder(ABC):
     @abstractmethod
     def get_trace(self, org_id: UUID, run_id: str) -> Trace:
         """Return ``org_id``'s Trace for the run; empty when unknown/cross-tenant (Req 10.3)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_runs(self, org_id: UUID, *, limit: int = 50) -> list[Agent_Run_Summary]:
+        """Return ``org_id``'s agent runs, most recent first.
+
+        A trace could previously only be fetched by a run id the caller already held, so
+        a finished run became unreachable the moment its id left the screen. ``limit``
+        bounds the response because runs accumulate without end.
+        """
         raise NotImplementedError

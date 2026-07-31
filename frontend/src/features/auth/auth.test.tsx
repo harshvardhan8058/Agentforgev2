@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -21,7 +21,29 @@ import { __resetOrgTokenStoreForTests } from "../../auth/orgTokenStore";
 import type { Role } from "../../auth/token";
 
 const BASE = "http://localhost:8000";
-const server = setupServer();
+// The authenticated Dashboard (home-view) renders live WorkspaceStats and the
+// GettingStarted checklist, which read GET /documents, /analytics/usage,
+// /prompts, /evaluations/datasets and /orgs/:orgId/api-keys. Default empty
+// handlers keep these auth-flow tests green under the strict
+// onUnhandledRequest guard without asserting anything about the dashboard.
+const server = setupServer(
+  http.get(`${BASE}/documents`, () => HttpResponse.json([])),
+  http.get(`${BASE}/prompts`, () => HttpResponse.json([])),
+  http.get(`${BASE}/evaluations/datasets`, () => HttpResponse.json([])),
+  http.get(`${BASE}/orgs/:orgId/api-keys`, () => HttpResponse.json([])),
+  http.get(`${BASE}/analytics/usage`, () =>
+    HttpResponse.json({
+      org_id: "org-1",
+      start: null,
+      end: null,
+      total_tokens: 0,
+      total_cost: "0",
+      by_provider: [],
+      by_model: [],
+      by_user: [],
+    }),
+  ),
+);
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {

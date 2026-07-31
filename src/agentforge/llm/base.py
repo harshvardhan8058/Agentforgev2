@@ -25,6 +25,12 @@ class GenerationResult:
 
     text: str
     provider: str
+    # The concrete model that served the call, when the provider knows it.
+    # Optional and defaulted so implementations that cannot report a model — and
+    # every existing caller constructing this by position — are unaffected.
+    # Usage analytics groups by this, and without it the "by model" breakdown
+    # could only repeat the provider name.
+    model: str | None = None
 
 
 class LLM_Provider(ABC):

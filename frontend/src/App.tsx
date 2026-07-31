@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { SessionProvider } from "./auth/SessionProvider";
 import { AppRouter } from "./routing/AppRouter";
 import { CommandLayer } from "./components/command/CommandLayer";

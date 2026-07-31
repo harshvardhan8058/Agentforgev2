@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 /**
  * `ScoreBars`: a lightweight aggregate + per-item score visualization for
  * evaluation runs (Req 14.3, 14.4).

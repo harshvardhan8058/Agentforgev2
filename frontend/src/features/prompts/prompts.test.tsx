@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -11,29 +11,10 @@ import { makeSession } from "../../test/renderWithSession";
 import { ToastProvider } from "../../providers/ToastProvider";
 import type { Role } from "../../auth/token";
 
-// Mock the lazy Monaco Prompt Studio with a textarea-like stub — Monaco is
-// never loaded under Vitest, keeping the suite keyless and deterministic.
-vi.mock("./PromptStudio", () => ({
-  default: ({
-    value,
-    onChange,
-    mode = "edit",
-    "data-testid": testId = "prompt-studio",
-  }: {
-    value: string;
-    onChange?: (n: string) => void;
-    mode?: string;
-    "data-testid"?: string;
-  }) => (
-    <textarea
-      data-testid={testId}
-      data-mode={mode}
-      value={value}
-      onChange={(e) => onChange?.(e.target.value)}
-    />
-  ),
-}));
-
+// `PromptStudio` used to be mocked here because it wrapped Monaco, which is
+// fetched from a CDN and must never be loaded under Vitest. It is now a plain
+// textarea plus a pure diff, so the real component renders in these tests —
+// the editor was previously stubbed out of every assertion.
 import { PromptRegistryView } from "./PromptRegistryView";
 
 const BASE = "http://localhost:8000";

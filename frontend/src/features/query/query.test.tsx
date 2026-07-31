@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setupServer } from "msw/node";
@@ -13,7 +13,12 @@ import { ToastProvider } from "../../providers/ToastProvider";
 import type { Role } from "../../auth/token";
 
 const BASE = "http://localhost:8000";
-const server = setupServer();
+// The Query view resolves citation filenames from GET /documents; a default
+// empty-corpus handler keeps unrelated tests green (citations fall back to the
+// raw document id). Individual tests override it to exercise filename mapping.
+const server = setupServer(
+  http.get(`${BASE}/documents`, () => HttpResponse.json([])),
+);
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
@@ -72,6 +77,40 @@ describe("RagQueryView (MSW)", () => {
     expect(typeof sentTopK).toBe("number");
   });
 
+  it("constrains the sources control to the range the API accepts", async () => {
+    let sentTopK: number | null | undefined;
+    server.use(
+      http.post(`${BASE}/query`, async ({ request }) => {
+        const body = (await request.json()) as { top_k?: number | null };
+        sentTopK = body.top_k;
+        return HttpResponse.json({
+          answer: "ok",
+          grounded: true,
+          provider: "openai",
+          citations: [],
+          flags: [],
+        });
+      }),
+    );
+
+    renderView("member");
+    const user = userEvent.setup();
+    const slider = screen.getByTestId("query-top-k");
+
+    // `POST /query` rejects top_k outside 1..10, so an out-of-range value must be
+    // clamped client-side rather than sent and 422'd.
+    fireEvent.change(slider, { target: { value: "50" } });
+    expect(screen.getByTestId("query-top-k-value")).toHaveTextContent("10 of 10");
+
+    fireEvent.change(slider, { target: { value: "0" } });
+    expect(screen.getByTestId("query-top-k-value")).toHaveTextContent("1 of 10");
+
+    await user.type(screen.getByTestId("query-input"), "anything");
+    await user.click(screen.getByTestId("query-submit"));
+
+    await waitFor(() => expect(sentTopK).toBe(1));
+  });
+
   it("citations render with document_id and chunk_id (7.2)", async () => {
     server.use(
       http.post(`${BASE}/query`, () =>
@@ -102,6 +141,74 @@ describe("RagQueryView (MSW)", () => {
     expect(screen.getByTestId("citation-chunk-2")).toHaveTextContent("chunk-2");
     // Inline [1] marker became a citation link.
     expect(screen.getByTestId("citation-1")).toBeInTheDocument();
+  });
+
+  it("resolves citation document ids to human-readable filenames", async () => {
+    server.use(
+      http.get(`${BASE}/documents`, () =>
+        HttpResponse.json([
+          {
+            document_id: "doc-a",
+            filename: "Onboarding Policy.pdf",
+            content_type: "application/pdf",
+            size_bytes: 1024,
+            chunk_count: 3,
+            status: "ingested",
+            created_at: "2024-01-01T00:00:00Z",
+          },
+        ]),
+      ),
+      http.post(`${BASE}/query`, () =>
+        HttpResponse.json({
+          answer: "See [1].",
+          grounded: true,
+          provider: "openai",
+          citations: [{ document_id: "doc-a", chunk_id: "chunk-1" }],
+          flags: [],
+        }),
+      ),
+    );
+
+    renderView("member");
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("query-input"), "hello");
+    await user.click(screen.getByTestId("query-submit"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("citation-doc-1")).toHaveTextContent(
+        "Onboarding Policy.pdf",
+      ),
+    );
+    // The raw id remains available for reference via the title attribute.
+    expect(screen.getByTestId("citation-doc-1")).toHaveAttribute("title", "doc-a");
+  });
+
+  it("renders without crashing when GET /documents returns a non-array body", async () => {
+    // A catch-all mock (or an unexpected payload) may return `{}` instead of a
+    // list; the view must never try to iterate a non-array (regression guard).
+    server.use(
+      http.get(`${BASE}/documents`, () => HttpResponse.json({})),
+      http.post(`${BASE}/query`, () =>
+        HttpResponse.json({
+          answer: "Answer [1].",
+          grounded: true,
+          provider: "openai",
+          citations: [{ document_id: "doc-x", chunk_id: "chunk-1" }],
+          flags: [],
+        }),
+      ),
+    );
+
+    renderView("member");
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("query-input"), "hello");
+    await user.click(screen.getByTestId("query-submit"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("query-answer-card")).toBeInTheDocument(),
+    );
+    // Falls back to the raw document id when no filename map is available.
+    expect(screen.getByTestId("citation-doc-1")).toHaveTextContent("doc-x");
   });
 
   it("indicates ungrounded when grounded=false with empty citations (7.3)", async () => {

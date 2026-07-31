@@ -152,6 +152,36 @@
         "title": "AgentRunResponse",
         "type": "object"
       },
+      "AgentRunSummaryResponse": {
+        "description": "One row of ``GET /agent/runs``.\n\nLimited to what the trace records: ``agent_runs.termination_reason`` exists as a\ncolumn but nothing writes it, so it is not reported rather than surfacing a\npermanent ``null`` dressed as data.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "step_count": {
+            "title": "Step Count",
+            "type": "integer"
+          },
+          "tool_call_count": {
+            "title": "Tool Call Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "created_at",
+          "step_count",
+          "tool_call_count"
+        ],
+        "title": "AgentRunSummaryResponse",
+        "type": "object"
+      },
       "ApiKeyMetadata": {
         "description": "Safe API-key metadata \u2014 never the ``key_hash`` or the plaintext secret (Req 5.4).",
         "properties": {
@@ -371,6 +401,42 @@
         "title": "ConversationHistoryResponse",
         "type": "object"
       },
+      "ConversationSummaryResponse": {
+        "description": "One row of ``GET /conversations`` \u2014 enough to recognise and reopen a thread.\n\n``preview`` is the opening of the first message: a conversation is otherwise\nidentified only by a generated UUID, which tells an operator nothing about which\nthread it is. Message bodies are excluded so listing stays cheap.",
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "message_count": {
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "created_at",
+          "message_count"
+        ],
+        "title": "ConversationSummaryResponse",
+        "type": "object"
+      },
       "CreateApiKeyRequest": {
         "description": "Body for ``POST /orgs/{id}/api-keys`` \u2014 issue a key granting ``role`` (Req 5.1).",
         "properties": {
@@ -573,6 +639,11 @@
             "format": "uuid",
             "title": "Dataset Id",
             "type": "string"
+          },
+          "item_count": {
+            "default": 0,
+            "title": "Item Count",
+            "type": "integer"
           },
           "name": {
             "title": "Name",
@@ -864,6 +935,11 @@
             "title": "Document Id",
             "type": "string"
           },
+          "duplicate": {
+            "default": false,
+            "title": "Duplicate",
+            "type": "boolean"
+          },
           "filename": {
             "title": "Filename",
             "type": "string"
@@ -1029,6 +1105,52 @@
           "status"
         ],
         "title": "MultiAgentRunResult",
+        "type": "object"
+      },
+      "MultiAgentRunSummaryResponse": {
+        "description": "One row of ``GET /multi-agent/runs`` \u2014 the task, status, and how it ended.",
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "task": {
+            "title": "Task",
+            "type": "string"
+          },
+          "termination_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Termination Reason"
+          }
+        },
+        "required": [
+          "run_id",
+          "conversation_id",
+          "task",
+          "status",
+          "created_at"
+        ],
+        "title": "MultiAgentRunSummaryResponse",
         "type": "object"
       },
       "PromptVersionResponse": {
@@ -1455,6 +1577,11 @@
             "title": "By User",
             "type": "array"
           },
+          "cost_rates_configured": {
+            "default": false,
+            "title": "Cost Rates Configured",
+            "type": "boolean"
+          },
           "end": {
             "format": "date-time",
             "title": "End",
@@ -1572,6 +1699,56 @@
         ]
       }
     },
+    "/agent/runs": {
+      "get": {
+        "description": "Return the caller org's agent runs, most recent first (Req 10.3, 4.2).\n\nA trace could only be fetched by a run id the caller already held, so a finished run\nwas unreachable once its id left the screen. Scoped to ``principal.org_id`` at the\ndata-access layer, so no other tenant's run can appear.",
+        "operationId": "list_agent_runs_agent_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AgentRunSummaryResponse"
+                  },
+                  "title": "Response List Agent Runs Agent Runs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Agent Runs",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
     "/agent/runs/{run_id}/trace": {
       "get": {
         "description": "Return the ordered trace for the caller's org run; 404 when unknown/cross-tenant (Req 10.3, 4.3).",
@@ -1657,7 +1834,7 @@
     },
     "/analytics/usage": {
       "get": {
-        "description": "Return the usage report for the caller's org over ``[start, end]`` (Req 3.1, 3.4).\n\n``start`` defaults to the epoch and ``end`` to now, so an unbounded query returns the\norg's entire history. The report is scoped to ``principal.org_id`` at the data-access\nlayer, so no other tenant's usage can contribute (Req 3.3, 10.5).",
+        "description": "Return the usage report for the caller's org over ``[start, end]`` (Req 3.1, 3.4).\n\n``start`` defaults to the epoch and ``end`` to now, so an unbounded query returns the\norg's entire history. The report is scoped to ``principal.org_id`` at the data-access\nlayer, so no other tenant's usage can contribute (Req 3.3, 10.5).\n\n``cost_rates_configured`` reports whether this deployment prices tokens at all, so a\nclient can distinguish \"nothing spent\" from \"nothing priced\" \u2014 both of which render\nas a zero total.",
         "operationId": "get_usage_analytics_usage_get",
         "parameters": [
           {
@@ -1830,6 +2007,54 @@
       }
     },
     "/conversations": {
+      "get": {
+        "description": "Return the caller org's conversations, most recent first (Req 8.1, 4.2).\n\nCreation returned an id once and there was no way to enumerate threads afterwards, so\na conversation became unreachable as soon as its id was lost. Scoped to\n``principal.org_id`` at the data-access layer, so no other tenant's thread can appear.",
+        "operationId": "list_conversations_conversations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConversationSummaryResponse"
+                  },
+                  "title": "Response List Conversations Conversations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Conversations",
+        "tags": [
+          "conversations"
+        ]
+      },
       "post": {
         "description": "Create a conversation owned by the caller's org (Req 8.1, 4.4).",
         "operationId": "create_conversation_conversations_post",
@@ -2342,6 +2567,54 @@
       }
     },
     "/multi-agent/runs": {
+      "get": {
+        "description": "Return the caller org's multi-agent runs, most recent first (Req 9.4, 4.2).\n\nA run could only be fetched by an id the caller already held, so a finished\ncollaboration was unreachable once its id left the screen. Scoped to\n``principal.org_id`` at the data-access layer, so no other tenant's run can appear.",
+        "operationId": "list_multi_agent_runs_multi_agent_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MultiAgentRunSummaryResponse"
+                  },
+                  "title": "Response List Multi Agent Runs Multi Agent Runs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Multi Agent Runs",
+        "tags": [
+          "multi-agent"
+        ]
+      },
       "post": {
         "description": "Start a Multi_Agent_Run, persist it, and run it synchronously to completion.\n\nUnder the keyless auto-approve default the orchestrator terminates on the same\nrequest; streaming is exposed separately by :func:`stream_multi_agent_run`. The run\nis persisted before the orchestrator runs (Req 10.1), the terminal ``Final_Output``\nand ``Termination_Reason`` are persisted on completion (Req 10.5), and a start-time\nfailure surfaces through the existing uniform error envelope (Req 9.1).\n\nThe input guardrail pipeline runs **before** the run is created and the orchestrator\nis invoked: a blocking guardrail raises ``AppError(\"guardrail_blocked\", 400)`` and the\ndownstream multi-agent orchestrator is never reached (Req 5.4). The output pipeline\nruns on the terminal output and its flags are attached to the response (Req 5.5, 5.6).",
         "operationId": "start_multi_agent_run_multi_agent_runs_post",

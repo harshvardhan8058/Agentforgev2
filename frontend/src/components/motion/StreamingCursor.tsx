@@ -5,6 +5,7 @@
  * static, non-blinking cursor — reduced motion never hides information, it just
  * stops the blink.
  */
+import type { JSX } from "react";
 import { motion } from "framer-motion";
 
 import { cn } from "../../lib/cn";
