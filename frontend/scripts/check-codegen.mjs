@@ -11,48 +11,18 @@
  * Usage:
  *   node scripts/check-codegen.mjs      # exits 1 on drift
  */
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import { runPackageBin } from "./node-bin.mjs";
+
 const frontendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/**
- * Resolve the generator from the installed devDependency and run it with the
- * current Node binary.
- *
- * This deliberately does NOT shell out to `npx`:
- *  - On Windows the executable is `npx.cmd`. `execFileSync` performs a direct
- *    CreateProcess with no shell, which cannot launch a `.cmd`, so the call dies
- *    with `spawnSync npx ENOENT`. The old form therefore only ever worked on
- *    Linux/macOS — which is exactly why CI stayed green while local Windows runs
- *    failed on the very first step of `npm run ci`.
- *  - Passing `shell: true` would "fix" that by handing the command line to
- *    cmd.exe, trading a portability bug for a quoting/injection surface.
- *  - `npx` can also fetch a *different* version of the generator than the pinned
- *    devDependency when local resolution misses, which would silently compare the
- *    committed schema against the output of the wrong generator.
- *
- * Resolving the real CLI path and invoking it via `process.execPath` avoids all
- * three: no shell, no PATH lookup, no `.cmd` shim, and the version is always the
- * one in the lockfile. `createRequire().resolve` (rather than a hardcoded
- * `node_modules/...` path) keeps this correct under hoisting.
- */
-const require = createRequire(import.meta.url);
-const generatorPkgPath = require.resolve("openapi-typescript/package.json");
-const generatorPkg = JSON.parse(readFileSync(generatorPkgPath, "utf-8"));
-const generatorBin =
-  typeof generatorPkg.bin === "string"
-    ? generatorPkg.bin
-    : generatorPkg.bin["openapi-typescript"];
-const generatorCli = resolve(dirname(generatorPkgPath), generatorBin);
-
-const regenerated = execFileSync(process.execPath, [generatorCli, "./openapi.json"], {
+// Runs the pinned generator directly with the current Node binary — see
+// `node-bin.mjs` for why this must not shell out to `npx`.
+const regenerated = runPackageBin("openapi-typescript", ["./openapi.json"], {
   cwd: frontendRoot,
-  encoding: "utf-8",
-  stdio: ["ignore", "pipe", "inherit"],
 });
 
 const committed = readFileSync(

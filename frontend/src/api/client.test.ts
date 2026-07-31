@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+
+import { runPackageBin } from "../../scripts/node-bin.mjs";
 
 import { apiClient } from "./client";
 import type { paths } from "./schema";
@@ -43,12 +44,13 @@ describe("API_Client contract fidelity", () => {
   });
 
   it("regenerates schema.d.ts deterministically from openapi.json (Req 1.3)", () => {
+    // Invokes the pinned generator with the current Node binary rather than via
+    // `npx`, which cannot be spawned on Windows (see scripts/node-bin.mjs).
     const runCodegen = (): string =>
-      execFileSync(
-        "npx",
-        ["openapi-typescript", "./openapi.json"],
-        { cwd: frontendRoot, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
-      );
+      runPackageBin("openapi-typescript", ["./openapi.json"], {
+        cwd: frontendRoot,
+        stderr: "ignore",
+      });
 
     const first = runCodegen();
     const second = runCodegen();

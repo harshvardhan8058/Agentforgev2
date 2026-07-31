@@ -16,41 +16,22 @@ const BASE = "http://localhost:8000";
 const server = setupServer();
 
 /**
- * Under jsdom, `Blob`/`FormData` are jsdom's implementations, which are not
- * compatible with the undici `fetch` MSW uses (a multipart body built from them
- * cannot be serialized). Recover undici's `Blob`/`FormData` (the same realm as
- * `fetch`) so a multipart upload round-trips exactly as it does in the browser.
+ * The `Blob`/`File`/`FormData` globals are aligned with `fetch`'s realm centrally
+ * in `src/test/setup.ts` (jsdom's own classes are rejected by undici's multipart
+ * parser). A real `File` can therefore be constructed here, and the filename it
+ * carries survives the round trip — which the previous Blob-with-a-`name`-property
+ * stand-in did not: undici renamed such an entry to "blob".
  */
-const originalBlob = globalThis.Blob;
-const originalFormData = globalThis.FormData;
-
-async function recoverUndiciMultipartGlobals(): Promise<void> {
-  const UBlob = (await new Response("x").blob()).constructor as typeof Blob;
-  const boundary = "----afprobe";
-  const body = `--${boundary}\r\nContent-Disposition: form-data; name="f"\r\n\r\nv\r\n--${boundary}--\r\n`;
-  const ufd = await new Response(body, {
-    headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
-  }).formData();
-  globalThis.Blob = UBlob;
-  globalThis.FormData = ufd.constructor as typeof FormData;
-}
-
-/** A browser-`File`-like value (undici Blob + a `name`) for the drop-zone. */
 function makeUploadFile(content: string, name: string, type: string): File {
-  const blob = new Blob([content], { type });
-  Object.defineProperty(blob, "name", { value: name });
-  return blob as unknown as File;
+  return new File([content], name, { type });
 }
 
-beforeAll(async () => {
+beforeAll(() => {
   server.listen({ onUnhandledRequest: "error" });
-  await recoverUndiciMultipartGlobals();
 });
 afterEach(() => server.resetHandlers());
 afterAll(() => {
   server.close();
-  globalThis.Blob = originalBlob;
-  globalThis.FormData = originalFormData;
 });
 
 function renderView(role: Role = "member"): void {

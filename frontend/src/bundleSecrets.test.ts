@@ -11,12 +11,12 @@
  * _Requirements: 1.5_
  */
 import { describe, it, expect, beforeAll } from "vitest";
-import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 import { scanText, scanDist } from "../scripts/scan-bundle-secrets.mjs";
+import { runPackageBin } from "../scripts/node-bin.mjs";
 
 const frontendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const distDir = resolve(frontendRoot, "dist");
@@ -28,9 +28,17 @@ beforeAll(() => {
     // bundle whose benign DOM attribute table (e.g. `accessKey:"accessKey"`) trips
     // the `access[_-]?key = "…"` secret pattern. Pinning NODE_ENV=production makes
     // this self-build match the artifact CI ships and `scan:bundle` validates.
-    execFileSync("npm", ["run", "build"], {
+    //
+    // Invokes Vite directly instead of `npm run build`, because `npm` cannot be
+    // spawned without a shell on Windows (see scripts/node-bin.mjs). `npm run
+    // build` is `tsc --noEmit && vite build`; only the Vite step writes anything,
+    // so the artifact scanned here is byte-for-byte the one that script produces.
+    // The `tsc --noEmit` half is a type gate with no output and is covered by the
+    // dedicated `typecheck` stage of `npm run ci`.
+    runPackageBin("vite", ["build"], {
       cwd: frontendRoot,
-      stdio: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
       env: { ...process.env, NODE_ENV: "production" },
     });
   }

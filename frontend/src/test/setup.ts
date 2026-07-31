@@ -1,6 +1,53 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeAll } from "vitest";
 import { cleanup } from "@testing-library/react";
+import { Blob as NodeBlob, File as NodeFile } from "node:buffer";
+
+/**
+ * Align the file/multipart globals with the `fetch` implementation.
+ *
+ * jsdom installs its own `Blob`, `File` and `FormData` over Node's. `fetch`
+ * (undici) is NOT jsdom's, so a multipart upload built from jsdom classes and
+ * sent through `fetch` crosses two incompatible realms. Undici's multipart
+ * parser constructs each entry with the *global* `File` and then brand-checks
+ * the result against its own class, so with jsdom's `File` installed it rejects
+ * the very object it just built:
+ *
+ *     assert(typeof value === "string" && webidl.is.USVString(value)
+ *            || webidl.is.File(value))
+ *       at multipartFormDataParser (node:internal/deps/undici/undici)
+ *
+ * On Node 22 this was masked: `new Response(...).blob()` returned a Node `Blob`,
+ * so a per-test-file "recover the classes from a Response" trick happened to
+ * work. On Node 24 that same call returns *jsdom's* `Blob`, so the trick
+ * silently recovers the wrong class and uploads fail with a bare network error.
+ * The repair therefore has to be explicit rather than derived.
+ *
+ * `Blob` and `File` come straight from `node:buffer` (the classes backing the
+ * globals in a plain Node process). `FormData` has no core-module export, so it
+ * is recovered by parsing a multipart body — which is only safe *after* `File`
+ * is correct, hence the ordering below.
+ *
+ * Applied only under jsdom; test files using the `node` environment already have
+ * the right globals and must not be touched.
+ */
+if (typeof window !== "undefined") {
+  const g = globalThis as unknown as Record<string, unknown>;
+  g.Blob = NodeBlob;
+  g.File = NodeFile;
+
+  const boundary = "----agentforge-formdata-probe";
+  const probeBody =
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="f"; filename="probe.txt"\r\n` +
+    `Content-Type: text/plain\r\n\r\n` +
+    `probe\r\n` +
+    `--${boundary}--\r\n`;
+  const probe = await new Response(probeBody, {
+    headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+  }).formData();
+  g.FormData = probe.constructor;
+}
 
 // Ensure the DOM is reset between component tests.
 afterEach(() => {
