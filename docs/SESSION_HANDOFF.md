@@ -2,16 +2,39 @@
 
 **Repo:** `harshvardhan8058/Agentforgev2` · **Branch of record:** `main` ·
 **Work in flight:** `feat/v1.1-admin-crud-and-cost-defaults` ([PR #2](https://github.com/harshvardhan8058/Agentforgev2/pull/2)) ·
-**Last updated:** 2026-08-01
+**Last updated:** 2026-08-01 (session 2)
 
 > Self-contained: a new session can continue from this file alone. Treat git/PR history as
 > truth over prose. `docs/PROJECT_STATE.md` holds the same state in machine-readable form;
 > `CHANGELOG.md` lists the v1.1 changes individually.
 
+## 0. What the last session added (read this first)
+
+Session 2 audited the repo against its own docs and found the same class of defect as
+session 1, one level worse: **a seam with no caller at all.**
+`grep -rn "\.export(" src` returned zero hits — the `Tracing_Exporter` had a NoOp
+implementation, a LangSmith implementation, a factory, a DI accessor, unit tests and two
+property tests, and nothing invoked it. `LANGSMITH_API_KEY` changed a log line and exported
+nothing, while README/FEATURE_INVENTORY described trace export as working.
+
+That is now real (§2e), reported (`GET /observability/status` + a notice under every trace),
+and vendor-neutral (an OTLP exporter behind the same seam). A behavioural review of that work
+found ten issues; six were fixed with tests — including a status surface that claimed
+`enabled: true` for an OTLP endpoint with the optional extra missing, i.e. the same
+"configured but does nothing" defect being recreated inside its own fix — and four are
+documented bounds in `docs/KNOWN_LIMITATIONS.md`.
+
+**The audit technique is worth repeating**: for each seam/store/service, ask *who calls it*.
+`for f in $(grep -oP '^def \K(get_\w+)' src/agentforge/api/deps.py); do echo "$(grep -rl "$f" src/agentforge/api/routers/ | wc -l) $f"; done | sort -n`
+lists DI accessors with no router caller. As of now the remaining zero-caller accessors are
+all legitimate (`get_agent_context`, `get_app_context`, `get_observability_context`,
+`get_org_id`, `get_rate_limiter`, `get_rbac_policy` are helpers or middleware-level), and
+`get_tracing_exporter` is now consumed indirectly through the export service.
+
 ## 1. Current state
 
 - `main` is v1.0: Phases 1–9 plus the production-hardening pass, all merged.
-- **PR #2 is open** with three v1.1 roadmap items complete (head `43093b2`, four commits).
+- **PR #2 is open** with four v1.1 roadmap items complete (head `60705b0`, seven commits).
   It requires **no migration**. All local gates are green:
   backend **793**, frontend **445**, Playwright **20**, `check_openapi.py`, `scan_secrets.py`.
 - The **live-PostgreSQL lane was not run locally** (see §4). PR #2's CI run is its first
@@ -148,7 +171,9 @@ embedding model once, so its first run downloads ~90 MB.
 
 1. **Land PR #2.** Watch the `integration` lane specifically (§4.1). If a store method fails
    there, it will be a SQL/type detail, not a design problem — the in-memory equivalents are
-   covered by 793 passing tests.
+   covered by 793 passing tests. The PR is now seven commits and touches four roadmap items;
+   splitting it is possible but the commits are independently reviewable and the branch is
+   green as a whole.
 2. **Export durability** (new, and the natural follow-up to the trace-export work). Export is
    fire-and-forget: a collector that is down during a run loses that run's export, and only
    one destination can be active. A bounded retry, a "re-export this run" endpoint, or a

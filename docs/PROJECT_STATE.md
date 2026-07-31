@@ -11,12 +11,13 @@ open_prs:
   - number: 2
     title: "v1.1: complete member/team administration + named cost-rate presets"
     branch: feat/v1.1-admin-crud-and-cost-defaults
-    head_sha: 43093b2
+    head_sha: 60705b0
     state: open
     contains:
       - "member/team admin CRUD (store + 7 endpoints + MembersView) incl. a cross-tenant write fix"
       - "named cost-rate presets + GET /analytics/cost-rates + CostRatesPanel"
       - "self-review fixes (8 findings, each with a regression test)"
+      - "trace-export self-review fixes (6 fixed with tests, 4 documented as bounds)"
       - "integration connection config API + UI + manage_integrations permission"
       - "trace export made real (the Tracing_Exporter seam had no caller), GET /observability/status, OTLP exporter"
     migrations_required: none
