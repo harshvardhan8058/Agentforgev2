@@ -43,7 +43,7 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
 ## 4. Contract & testing gaps
 
 - **Contract freshness is enforced, not assumed:** `scripts/check_openapi.py` fails if `frontend/openapi.json` differs from the mounted routes, and `frontend/scripts/check-codegen.mjs` fails if `schema.d.ts` differs from that contract. Both run in CI, so the client cannot reference an endpoint or field the server does not serve.
-- **Deterministic test posture:** the keyless backend lane (**711** tests + Hypothesis properties), `frontend npm run ci` (**439**) and the keyless Playwright lane (**20**) are the source of truth. The live-PostgreSQL integration lane (`pytest -m integration`) is credential-free but needs a `pgvector` database, so it runs in CI rather than in the fast local lane.
+- **Deterministic test posture:** the keyless backend lane (**741** tests + Hypothesis properties), `frontend npm run ci` (**440**) and the keyless Playwright lane (**20**) are the source of truth. The live-PostgreSQL integration lane (`pytest -m integration`) is credential-free but needs a `pgvector` database, so it runs in CI rather than in the fast local lane.
 
 ## 5. Manual sign-off items (intentionally open)
 

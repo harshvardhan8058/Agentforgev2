@@ -102,10 +102,41 @@ existing tables.
   OpenAPI contract is drift-checked in CI rather than "slightly stale", and the integrations
   management UI exists.
 
+- **Credential shapes the connection-config policy missed.** It matched key names by
+  substring and values by case-sensitive vendor prefix, so a Slack incoming-webhook URL, a
+  DSN with an embedded password, a bare JWT, a lowercase `bearer …` value, an uppercase
+  `XOXB-…` and keys named `pat`/`cookie`/`ssh_key` were all accepted — and, because listing
+  needs only `read`, then readable by every member of the org. Values are now matched by
+  shape (case-folded prefixes, JWTs, PEM blocks, URLs with userinfo, known webhook hosts) and
+  key markers are matched per segment, so `folder_path` and `keyboard_shortcut` still pass.
+- **Validation failures echoed the submitted value.** The 422 handler returned pydantic's
+  error entries verbatim, including the offending `input`, so a credential in a field that
+  failed type validation came back in the response body. The handler now allow-lists
+  `type`/`loc`/`msg`.
+- **`PATCH /integrations/connections/{id}` with no `config` erased every setting** and
+  returned 200; `config` is now required, and clearing is done by sending `{}` explicitly.
+- **A non-scalar config value would have 500'd the whole list.** The store rejected only
+  `SecretStr` while the response model declares scalars, so one unrepresentable row would
+  have failed response validation for the entire organization's list. The store now refuses
+  non-scalar values.
+- **The connection editor rewrote value types.** Rendering with `String(value)` and
+  submitting strings turned an untouched `notify: true` into `"true"`; untouched values now
+  round-trip with the type they arrived with.
+
+### Known bounds of the new integration-config surface
+
+Documented rather than fixed, and recorded in `docs/KNOWN_LIMITATIONS.md`: the credential
+policy is a heuristic (a credential with no recognisable shape under an innocent key name
+would be accepted, and the field is org-readable); nothing enforces one connection per
+`(org_id, integration)` and there is no per-org row cap; and config replacement is
+last-writer-wins with no version or ETag. `manage_integrations` is granted to the `admin`
+role, and permissions derive from the role at authentication, so **already-issued API keys
+with `role=admin` gain the capability on deploy**.
+
 ### Verification
 
-Every gate below was run on the branch: backend `pytest -m 'not integration' -q` → **711
-passed**; `cd frontend && npm run ci` → **439 passed**; `cd frontend && npm run e2e` →
+Every gate below was run on the branch: backend `pytest -m 'not integration' -q` → **741
+passed**; `cd frontend && npm run ci` → **440 passed**; `cd frontend && npm run e2e` →
 **20 passed**; `python scripts/check_openapi.py` and `python scripts/scan_secrets.py` clean.
 
 The live-PostgreSQL lane (`pytest -m integration`) was **not** run: no database could be

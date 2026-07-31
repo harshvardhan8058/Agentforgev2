@@ -48,13 +48,13 @@ v1_1_roadmap_status:
 test_status:
   backend:
     command: "pytest -m 'not integration' -q"
-    tests_passing: 711
+    tests_passing: 741
     result: pass
     note: "Deterministic + credential-free. ~2 min. Loads the real embedding model once (test_embedding_dimension), so the first run downloads ~90 MB."
   frontend:
     command: "cd frontend && npm run ci"
     stages: [codegen:check, lint, typecheck, test, build, scan:bundle]
-    tests_passing: 439
+    tests_passing: 440
     result: pass
   e2e:
     command: "cd frontend && npm run e2e"
@@ -114,7 +114,7 @@ not_yet_verified_on_a_real_docker_host:
   - "Production overlay boot with real secrets."
 
 resume_checkpoint:
-  state: "v1.0 on main; v1.1 work complete and pushed on feat/v1.1-admin-crud-and-cost-defaults (PR #2). All local gates green: backend 711, frontend 439, e2e 20, contract + secret scans clean. No migration needed."
+  state: "v1.0 on main; v1.1 work complete and pushed on feat/v1.1-admin-crud-and-cost-defaults (PR #2). All local gates green: backend 741, frontend 440, e2e 20, contract + secret scans clean. No migration needed."
   next: "1) Land PR #2 (watch the integration lane in CI — it is the first execution of the two new Pg suites). 2) Then pick from v1_1_roadmap_status.not_started; trace-export polish is the cheapest real feature, DEPLOYMENT rollback runbooks the cheapest docs win. 3) The Docker-host validation checklist in docs/SESSION_HANDOFF.md is still the gate on calling the stack runtime-verified."
   see_also: docs/SESSION_HANDOFF.md
 ---
@@ -150,8 +150,8 @@ required by that work.
 
 | Lane | Command | Result |
 |---|---|---|
-| Backend (keyless) | `pytest -m 'not integration' -q` | **711 passed** |
-| Frontend | `cd frontend && npm run ci` | **439 passed** |
+| Backend (keyless) | `pytest -m 'not integration' -q` | **741 passed** |
+| Frontend | `cd frontend && npm run ci` | **440 passed** |
 | Browser | `cd frontend && npm run e2e` | **20 passed** |
 | Contract | `python scripts/check_openapi.py` | pass |
 | Secrets | `python scripts/scan_secrets.py` | pass |

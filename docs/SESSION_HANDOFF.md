@@ -13,7 +13,7 @@
 - `main` is v1.0: Phases 1–9 plus the production-hardening pass, all merged.
 - **PR #2 is open** with three v1.1 roadmap items complete (head `43093b2`, four commits).
   It requires **no migration**. All local gates are green:
-  backend **711**, frontend **439**, Playwright **20**, `check_openapi.py`, `scan_secrets.py`.
+  backend **741**, frontend **440**, Playwright **20**, `check_openapi.py`, `scan_secrets.py`.
 - The **live-PostgreSQL lane was not run locally** (see §4). PR #2's CI run is its first
   execution, and two of its suites are brand new.
 
@@ -67,10 +67,10 @@ even the removal of an unrelated member.
 python -m venv .venv && . .venv/bin/activate       # Python 3.11
 pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.5.1"
 pip install -e ".[dev]" -c constraints.txt
-pytest -m "not integration" -q                      # expect 711 passed, ~2 min
+pytest -m "not integration" -q                      # expect 741 passed, ~2 min
 
 cd frontend && npm ci
-npm run ci                                          # expect 439 passed
+npm run ci                                          # expect 440 passed
 npx playwright install chromium && npm run e2e       # expect 20 passed
 cd .. && python scripts/check_openapi.py && python scripts/scan_secrets.py
 ```
@@ -107,7 +107,7 @@ embedding model once, so its first run downloads ~90 MB.
 
 1. **Land PR #2.** Watch the `integration` lane specifically (§4.1). If a store method fails
    there, it will be a SQL/type detail, not a design problem — the in-memory equivalents are
-   covered by 711 passing tests.
+   covered by 741 passing tests.
 2. **Trace-export polish** (unstarted v1.1 item, cheapest real feature). Two halves: the UI
    currently cannot tell "tracing is off" from "no traces yet", and an OpenTelemetry exporter
    alongside the LangSmith one would drop in behind the existing `Tracing_Exporter` seam.
