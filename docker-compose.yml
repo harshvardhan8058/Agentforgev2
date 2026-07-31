@@ -48,9 +48,13 @@ services:
       # Runtime_Config: the browser reaches the API SAME-ORIGIN through the nginx proxy,
       # so config.js is rendered with "/". The client resolves that marker to the page's
       # absolute origin before openapi-fetch constructs a Request, so the app works via
-      # localhost, 127.0.0.1, a LAN IP, or a domain — with no CORS and no dependency on
-      # the unpublished API port. A separate-origin API requires an absolute URL plus
-      # matching gateway `connect-src` and API CORS policies (see docs/DEPLOYMENT.md).
+      # localhost, 127.0.0.1, a LAN IP, or a domain — with no CORS and no dependence on
+      # the API port (:8000 is intentionally NOT published in this stack). Hardcoding a
+      # single host here is the bug that surfaces as "Unable to reach the server" the
+      # moment the app is opened from any other origin. Override with a full
+      # scheme://host only when the API lives on a SEPARATE origin, which additionally
+      # requires matching gateway `connect-src` and API CORS policies (Req 8.4; see
+      # docs/DEPLOYMENT.md).
       API_BASE_URL: ${API_BASE_URL:-/}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]

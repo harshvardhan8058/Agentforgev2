@@ -11,17 +11,18 @@
  * Usage:
  *   node scripts/check-codegen.mjs      # exits 1 on drift
  */
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import { runPackageBin } from "./node-bin.mjs";
+
 const frontendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const regenerated = execFileSync("npx", ["openapi-typescript", "./openapi.json"], {
+// Runs the pinned generator directly with the current Node binary — see
+// `node-bin.mjs` for why this must not shell out to `npx`.
+const regenerated = runPackageBin("openapi-typescript", ["./openapi.json"], {
   cwd: frontendRoot,
-  encoding: "utf-8",
-  stdio: ["ignore", "pipe", "inherit"],
 });
 
 const committed = readFileSync(
@@ -29,7 +30,13 @@ const committed = readFileSync(
   "utf-8",
 );
 
-if (regenerated.trim() !== committed.trim()) {
+// Compare content, not line endings. `.gitattributes` pins `eol=lf` so a fresh
+// checkout is LF on every OS, but a checkout predating that rule (or one made
+// with it disabled) can hold CRLF, which would otherwise report drift on every
+// single line on Windows and send you chasing a schema problem that isn't there.
+const normalize = (text) => text.replace(/\r\n/g, "\n").trim();
+
+if (normalize(regenerated) !== normalize(committed)) {
   console.error(
     "Codegen drift detected: src/api/schema.d.ts is out of sync with openapi.json.\n" +
       "Run `npm run codegen` and commit the regenerated schema.",

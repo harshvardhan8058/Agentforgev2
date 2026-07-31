@@ -38,6 +38,27 @@ describe("resolveConfig — API base URL resolution", () => {
     });
   });
 
+  /**
+   * Regression guard for the same-origin marker. `openapi-fetch` joins the base
+   * and path into `` `${baseUrl}${pathname}` `` and hands the result to
+   * `new Request(...)`, which requires an absolute URL. Resolving `"/"` to an
+   * empty (relative) base therefore throws `Failed to parse URL from /query`
+   * under Node/undici and jsdom — it only appears to work in a real document.
+   * The resolved same-origin base must stay absolute and directly usable.
+   */
+  it("resolves same-origin to an absolute, request-constructible base", () => {
+    withRuntime("/", () => {
+      const { baseUrl } = resolveConfig({});
+      expect(baseUrl.length).toBeGreaterThan(0);
+      expect(baseUrl.startsWith("/")).toBe(false);
+      expect(() => new URL(baseUrl)).not.toThrow();
+      // The exact join openapi-fetch performs before constructing the Request.
+      expect(() => new Request(`${baseUrl}/query`)).not.toThrow();
+      // Still same-origin, so no CORS preflight and no cross-origin exposure.
+      expect(new URL(`${baseUrl}/query`).origin).toBe(window.location.origin);
+    });
+  });
+
   it("uses an absolute runtime URL verbatim, trimming a trailing slash", () => {
     withRuntime("https://api.example.com/", () => {
       expect(resolveConfig({}).baseUrl).toBe("https://api.example.com");
