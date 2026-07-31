@@ -51,15 +51,15 @@ _MEMBER: frozenset[Permission] = _VIEWER | {
 # Integration connection configuration is administrative deployment-shaped work, granted
 # alongside API-key management: both configure how the org reaches the outside world, and
 # neither can disclose a credential (integration config is non-secret by construction).
-# Reading the audit trail is granted from admin upwards, not to every member: it names who
-# added and removed whom, and which principal issued a key. That is exactly the information
-# an admin needs for an incident and exactly what a member has no reason to browse.
 _ADMIN: frozenset[Permission] = _MEMBER | {
     Permission.MANAGE_API_KEYS,
     Permission.MANAGE_INTEGRATIONS,
-    Permission.READ_AUDIT_LOG,
 }
-_OWNER: frozenset[Permission] = _ADMIN | {Permission.MANAGE_MEMBERS}
+# Reading the audit trail is OWNER-only, deliberately matching the roster it exposes: the
+# trail's member events carry emails and role assignments, and `GET /orgs/{id}/members` is
+# gated on `manage_members`, which only an owner holds. Granting trail access to admins would
+# have handed them, through a side door, exactly the roster the direct endpoint withholds.
+_OWNER: frozenset[Permission] = _ADMIN | {Permission.MANAGE_MEMBERS, Permission.READ_AUDIT_LOG}
 
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.VIEWER: _VIEWER,

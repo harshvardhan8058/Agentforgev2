@@ -240,9 +240,15 @@ def test_requires_authentication(wired):
     assert resp.json()["error"]["code"] == "unauthorized"
 
 
-@pytest.mark.parametrize("role", [Role.VIEWER, Role.MEMBER])
-def test_a_member_cannot_read_the_audit_trail(wired, role: Role):
-    """The trail names who removed whom; that is administrative, not general, information."""
+@pytest.mark.parametrize("role", [Role.VIEWER, Role.MEMBER, Role.ADMIN])
+def test_only_an_owner_can_read_the_audit_trail(wired, role: Role):
+    """Owner-only, deliberately matching the roster the trail exposes.
+
+    The trail's member events carry emails and role assignments, and
+    ``GET /orgs/{id}/members`` is gated on ``manage_members`` — owner-only. Granting trail
+    access to an admin would hand over, through a side door, exactly the roster the direct
+    endpoint withholds.
+    """
     app, client, headers, org_id, ctx = wired
     from tests.enterprise_helpers import issue_principal_headers
 
@@ -256,15 +262,15 @@ def test_a_member_cannot_read_the_audit_trail(wired, role: Role):
     assert resp.json()["error"]["details"]["required"] == "read_audit_log"
 
 
-def test_an_admin_can_read_the_audit_trail(wired):
+def test_an_owner_can_read_the_audit_trail(wired):
     _app, client, _headers, _org_id, ctx = wired
     from tests.enterprise_helpers import issue_principal_headers
 
-    admin_headers, _admin_org = issue_principal_headers(
-        ctx, role=Role.ADMIN, org_name="Admin Org", email="admin@ex.com"
+    owner_headers, _owner_org = issue_principal_headers(
+        ctx, role=Role.OWNER, org_name="Second Org", email="second@ex.com"
     )
 
-    assert client.get("/audit-events", headers=admin_headers).status_code == 200
+    assert client.get("/audit-events", headers=owner_headers).status_code == 200
 
 
 def test_another_orgs_trail_is_never_returned(wired):
@@ -325,8 +331,14 @@ def test_the_time_window_filters(wired):
     assert _events(client, headers, end="2000-01-01T00:00:00Z") == []
 
 
-def test_fail_closed_makes_an_unrecordable_action_fail():
-    """With ``audit_log_required``, an action that cannot be recorded must not appear to work."""
+def test_fail_closed_reports_an_applied_but_unrecorded_change():
+    """``audit_log_required`` refuses to acknowledge a change it could not record.
+
+    It is not a rollback, and the response says so: the audited mutation is applied by a
+    different store in a different transaction and nothing spans the two. A generic 500 would
+    invite a retry that duplicates the change, so the envelope carries its own code and
+    ``applied: true``.
+    """
     from agentforge.enterprise.base import Audit_Log
 
     class _BrokenLog(Audit_Log):
@@ -346,5 +358,114 @@ def test_fail_closed_makes_an_unrecordable_action_fail():
 
     resp = client.post(f"/orgs/{org_id}/teams", json={"name": "Platform"}, headers=headers)
 
-    assert resp.status_code == 500
-    assert resp.json()["error"]["code"] == "internal_error"
+    assert resp.status_code == 503
+    body = resp.json()["error"]
+    assert body["code"] == "audit_unavailable"
+    assert body["details"] == {"action": "team.created", "applied": True}
+    assert "Do not retry" in body["message"]
+    # The action WAS applied — the honest fact the response reports rather than hides.
+    teams = client.get(f"/orgs/{org_id}/teams", headers=headers)
+    assert [t["name"] for t in teams.json()] == ["Platform"]
+
+
+# --- keyset pagination ------------------------------------------------------------
+
+
+def test_the_cursor_walks_the_whole_trail_without_repeats(wired):
+    """Events written in one burst share timestamps, which is exactly where offsets fail."""
+    _app, client, headers, org_id, _ctx = wired
+    for index in range(7):
+        client.post(f"/orgs/{org_id}/teams", json={"name": f"T{index}"}, headers=headers)
+
+    walked: list[dict] = []
+    params: dict[str, object] = {"limit": 3}
+    while True:
+        page = _events(client, headers, **params)
+        if not page:
+            break
+        walked.extend(page)
+        params = {"limit": 3, "before": page[-1]["created_at"], "before_id": page[-1]["id"]}
+
+    ids = [event["id"] for event in walked]
+    assert len(ids) == 7
+    assert len(set(ids)) == 7
+    # Same order as one big page would have produced.
+    assert ids == [event["id"] for event in _events(client, headers, limit=50)]
+
+
+def test_a_half_supplied_cursor_is_refused(wired):
+    _app, client, headers, _org_id, _ctx = wired
+
+    resp = client.get(
+        "/audit-events", headers=headers, params={"before": "2026-08-01T00:00:00Z"}
+    )
+
+    assert resp.status_code == 422
+    assert resp.json()["error"]["details"]["field"] == "before_id"
+
+
+def test_the_actor_filter_accepts_the_actor_id_it_reported(wired):
+    """A filter that silently returned nothing for a key actor would be a trap."""
+    app, client, headers, org_id, _ctx = wired
+    key_id = uuid.uuid4()
+
+    def _key_principal() -> Principal:
+        return Principal(
+            kind=PrincipalKind.API_KEY.value,
+            user_id=None,
+            key_id=key_id,
+            org_id=org_id,
+            role=Role.OWNER,
+            permissions=frozenset(Permission),
+        )
+
+    app.dependency_overrides[get_current_principal] = _key_principal
+    try:
+        client.post(f"/orgs/{org_id}/teams", json={"name": "Bots"}, headers=headers)
+        reported = _events(client, headers, action="team.created")[0]
+        filtered = _events(client, headers, actor_id=reported["actor_id"])
+    finally:
+        app.dependency_overrides.pop(get_current_principal, None)
+
+    assert [e["id"] for e in filtered] == [reported["id"]]
+
+
+def test_creating_an_org_is_recorded_in_both_the_new_and_the_acting_trail(wired):
+    """An org created with org A's credential is a fact org A's owners must be able to see."""
+    _app, client, headers, _org_id, _ctx = wired
+
+    created = client.post("/orgs", json={"name": "Subsidiary"}, headers=headers)
+    assert created.status_code == 201
+
+    # The acting org's trail records it, even though the new org is a different tenant.
+    acting = _events(client, headers, action="org.created")
+    assert len(acting) == 1
+    assert acting[0]["target_id"] == created.json()["org_id"]
+    assert acting[0]["metadata"] == {"name": "Subsidiary"}
+
+
+def test_a_long_value_is_truncated_rather_than_failing_the_action(wired):
+    """An over-long value must not turn a successful mutation into a 500 with no audit row.
+
+    Reachable through the documented surface: an address may be up to 320 characters (RFC
+    5321), which is longer than an audit metadata value. Before this, admission raised
+    *outside* the failure-posture guard, so the membership was created and the caller got a
+    500 with nothing in the trail — the exact combination the trail exists to prevent.
+    """
+    _app, client, headers, org_id, ctx = wired
+    long_email = "l" * 300 + "@ex.com"  # within the schema bound, beyond the audit bound
+    _seed_user(ctx, long_email)
+
+    resp = client.post(
+        f"/orgs/{org_id}/members",
+        json={"email": long_email, "role": Role.MEMBER.value},
+        headers=headers,
+    )
+
+    assert resp.status_code == 201
+    events = _events(client, headers, action="member.added")
+    assert len(events) == 1
+    recorded = events[0]["metadata"]["email"]
+    # Visibly truncated, so a reader can tell the value was longer than the row records.
+    assert recorded.endswith("\u2026")
+    assert long_email.startswith(recorded[:-1])

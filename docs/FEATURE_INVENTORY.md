@@ -163,13 +163,13 @@
 - **Frontend:** `features/audit/AuditLogView` — filterable table (action, page size), newest
   first, destructive actions badged, actor labels resolved, skeleton/empty/error states,
   `read_audit_log`-gated nav entry and route.
-- **Endpoints:** `GET /audit-events?action=&actor_id=&start=&end=&limit=` (`read_audit_log`).
+- **Endpoints:** `GET /audit-events?action=&actor_id=&start=&end=&before=&before_id=&limit=` (`read_audit_log`). Keyset-paginated on `(created_at, id)`; `actor_id` matches a user **or** an API-key actor.
 - **Audited actions:** `org.created`; `member.added|role_changed|removed`;
   `team.created|deleted`; `team_member.added|removed`; `api_key.created|revoked`;
   `integration_connection.created|updated|deleted`. The vocabulary is a server-side enum
   published through OpenAPI, so the console's filter options are generated rather than
   hardcoded.
-- **RBAC:** `read_audit_log`, granted from `admin` upwards (the trail names who removed whom).
+- **RBAC:** `read_audit_log`, **owner-only** — deliberately matching `GET /orgs/{id}/members`, since the trail's member events carry the same emails and roles.
 - **Guarantees:** append-only (the seam has no update or delete); org-scoped in SQL with no
   org parameter on the endpoint; only *successful* actions recorded; `metadata` admits
   non-secret scalars only and refuses credential-named keys; an API-key event records the key

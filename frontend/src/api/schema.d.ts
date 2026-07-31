@@ -171,6 +171,10 @@ export interface paths {
         /**
          * List Audit Events
          * @description Return the caller org's audit events, newest first (Req 4.3, 4.4).
+         *
+         *     Pagination is keyset, not offset: pass the last row's ``created_at`` and ``id`` back as
+         *     ``before`` / ``before_id`` to get the next page. Both or neither — a timestamp alone
+         *     cannot separate two events written in the same request.
          */
         get: operations["list_audit_events_audit_events_get"];
         put?: never;
@@ -2334,12 +2338,16 @@ export interface operations {
             query?: {
                 /** @description Restrict to these actions. Repeat the parameter to pass several. */
                 action?: components["schemas"]["Audit_Action"][] | null;
-                /** @description Restrict to events performed by this user. */
+                /** @description Restrict to events performed by this actor — a user id or an API-key id, matching the `actor_id` reported on each event. */
                 actor_id?: string | null;
                 /** @description Only events at or after this instant (inclusive). */
                 start?: string | null;
                 /** @description Only events at or before this instant (inclusive). */
                 end?: string | null;
+                /** @description Keyset cursor: the `created_at` of the last event of the previous page. Must be sent together with `before_id`. */
+                before?: string | null;
+                /** @description Keyset cursor: the `id` of the last event of the previous page. Paired with `before` so a page boundary cannot repeat or skip events that share a timestamp. */
+                before_id?: string | null;
                 limit?: number;
             };
             header?: never;

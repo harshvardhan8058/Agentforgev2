@@ -195,7 +195,7 @@ stateDiagram-v2
 
 ## 7. Data model & migrations
 
-Eleven additive SQL migrations, one per phase area, applied in order on startup (halting and naming the failing id on error):
+Thirteen additive SQL migrations, one per phase area, applied in order on startup (halting and naming the failing id on error):
 
 ```mermaid
 flowchart LR
@@ -204,9 +204,13 @@ flowchart LR
     m5 --> m6[0006 enterprise identity] --> m7[0007 org_id tenancy]
     m7 --> m8[0008 usage records] --> m9[0009 prompt registry]
     m9 --> m10[0010 evaluations] --> m11[0011 integration connections]
+    m11 --> m12[0012 document content hash] --> m13[0013 audit events]
 ```
 
-All resources are `org_id`-scoped; cross-tenant access resolves to 404, never 403.
+All resources are `org_id`-scoped; cross-tenant access resolves to 404, never 403. Two tables
+carry deliberate non-cascade rules: `usage_records.user_id` and `audit_events.actor_user_id`
+are `ON DELETE SET NULL`, so deleting a user cannot erase the cost it incurred or the record
+of what it did.
 
 ## 8. CI/CD pipeline
 

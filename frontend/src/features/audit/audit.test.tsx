@@ -38,7 +38,7 @@ afterAll(() => server.close());
 // covers it in a real browser).
 const AXE_OPTIONS = { rules: { "color-contrast": { enabled: false } } };
 
-function renderView(role: Role = "admin"): ReturnType<typeof render> {
+function renderView(role: Role = "owner"): ReturnType<typeof render> {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -94,7 +94,7 @@ describe("AuditLogView (MSW)", () => {
       ),
     );
 
-    renderView("admin");
+    renderView("owner");
 
     await waitFor(() => expect(screen.getByTestId("audit-table")).toBeInTheDocument());
     const rows = screen.getAllByTestId(/^audit-row-/);
@@ -108,7 +108,7 @@ describe("AuditLogView (MSW)", () => {
   });
 
   it("sends the selected action as a query filter", async () => {
-    renderView("admin");
+    renderView("owner");
     await waitFor(() => expect(requests.length).toBe(1));
     expect(requests[0].searchParams.get("action")).toBeNull();
     expect(requests[0].searchParams.get("limit")).toBe("50");
@@ -122,7 +122,7 @@ describe("AuditLogView (MSW)", () => {
   });
 
   it("sends the selected page size", async () => {
-    renderView("admin");
+    renderView("owner");
     await waitFor(() => expect(requests.length).toBe(1));
 
     const user = userEvent.setup();
@@ -161,7 +161,7 @@ describe("AuditLogView (MSW)", () => {
   it("shows an empty state that distinguishes 'nothing yet' from 'nothing matching'", async () => {
     server.use(http.get(`${BASE}/audit-events`, () => HttpResponse.json([])));
 
-    renderView("admin");
+    renderView("owner");
 
     await waitFor(() =>
       expect(screen.getByText("No administrative activity yet")).toBeInTheDocument(),
@@ -186,7 +186,7 @@ describe("AuditLogView (MSW)", () => {
       ),
     );
 
-    renderView("admin");
+    renderView("owner");
 
     await waitFor(() =>
       expect(screen.getByTestId("error-message")).toHaveTextContent("boom"),
@@ -195,7 +195,7 @@ describe("AuditLogView (MSW)", () => {
   });
 
   it("omits the trail entirely for a role without read_audit_log", () => {
-    // Rendered without any request: a member must not even ask for it.
+    // Rendered without any request: a role that cannot read it must not even ask.
     renderView("member");
 
     expect(screen.getByTestId("audit-view")).toBeInTheDocument();
@@ -206,10 +206,64 @@ describe("AuditLogView (MSW)", () => {
   });
 
   it("has no axe violations with a populated trail", async () => {
-    const { container } = renderView("admin");
+    const { container } = renderView("owner");
     await waitFor(() => expect(screen.getByTestId("audit-table")).toBeInTheDocument());
 
     const results = await axe(container, AXE_OPTIONS);
     expect(results).toHaveNoViolations();
+  });
+
+  it("is gated to owners: an admin cannot read the trail", () => {
+    // The trail's member events carry emails and roles, which `GET /orgs/{id}/members`
+    // reserves for `manage_members` (owner-only). Admin access would be a side door.
+    renderView("admin");
+
+    expect(screen.getByText("Audit log unavailable")).toBeInTheDocument();
+    expect(requests).toEqual([]);
+  });
+
+  it("marks the table busy while a filter switch is in flight", async () => {
+    renderView("owner");
+    await waitFor(() => expect(screen.getByTestId("audit-table")).toBeInTheDocument());
+    expect(screen.getByTestId("audit-table")).not.toHaveAttribute("aria-busy");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("audit-action-trigger"));
+    await user.click(screen.getByTestId("audit-action-team.created"));
+
+    // The previous filter's rows stay on screen, so the table must say it is stale.
+    await waitFor(() => expect(requests.length).toBe(2));
+  });
+
+  it("does not tell the reader to increase a page size that is already at the maximum", async () => {
+    server.use(
+      http.get(`${BASE}/audit-events`, ({ request }) => {
+        const url = new URL(request.url);
+        const size = Number(url.searchParams.get("limit"));
+        return HttpResponse.json(
+          Array.from({ length: size }, (_unused, index) => event({ id: `e${index}` })),
+        );
+      }),
+    );
+
+    renderView("owner");
+    // A full page below the cap invites a bigger page...
+    await waitFor(() => expect(screen.getByTestId("audit-page-hint")).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("audit-limit-trigger"));
+    await user.click(screen.getByTestId("audit-limit-200"));
+
+    // ...at the cap it points at the cursor instead of at a setting that cannot change.
+    await waitFor(() => expect(screen.getByTestId("audit-page-max")).toBeInTheDocument());
+    expect(screen.queryByTestId("audit-page-hint")).toBeNull();
+  });
+
+  it("announces the result count for a screen reader", async () => {
+    renderView("owner");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("audit-status")).toHaveTextContent("1 audit entry shown"),
+    );
   });
 });

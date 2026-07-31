@@ -39,11 +39,24 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
     the proxy, and `X-Forwarded-For` is client-controllable; recording a spoofable value that
     an auditor would read as authoritative is worse than recording none. Doing this properly
     needs a trusted-proxy configuration, which is deployment-specific.
-  - **No retention policy, export, or pagination beyond `limit`.** The trail grows without
-    bound (rows leave only with their organization), reads are capped at 200 newest-first
-    entries per request with no cursor, and there is no CSV/SIEM export yet.
-  - **Fail-open by default.** With `AUDIT_LOG_REQUIRED=false` a store outage means the action
-    succeeds and the entry is lost (logged at ERROR). Set it to `true` to fail closed.
+  - **No retention policy or export.** The trail grows without bound (rows leave only with
+    their organization) and there is no CSV/SIEM export yet. Reads *are* paginated — pass the
+    last row's `created_at`/`id` back as `before`/`before_id` — but the console renders one
+    page at a time and does not follow the cursor yet.
+  - **"Fail closed" refuses to acknowledge, it does not roll back.** The audited mutation and
+    its audit row are written by different stores in different transactions, and nothing
+    spans the two. With `AUDIT_LOG_REQUIRED=true` an unrecordable change is reported as
+    `audit_unavailable` (503, `details.applied = true`) *after* the change has been applied,
+    which is why the message says not to retry. With the default `false` the action succeeds
+    and the entry is lost, logged at ERROR.
+  - **An over-long metadata value is truncated, not refused.** A value beyond 256 characters
+    (a 320-character email, say) is recorded with a trailing `…`; the alternative — failing an
+    already-applied mutation — would be the trail defeating its own purpose.
+  - **Actor attribution does not survive a user deletion.** `actor_user_id` is
+    `ON DELETE SET NULL` and no label is denormalised onto the event, so an erasure request
+    turns that user's rows into an anonymous "Deleted user". Nothing in the product deletes a
+    user today, so this is reachable only through a DBA action or a future erasure feature —
+    which is exactly the case where attribution matters most.
 
 - **Trace export:** traces are always recorded locally; *export* is off until a destination is configured (`LANGSMITH_API_KEY` or `OTEL_EXPORTER_ENDPOINT`), which `GET /observability/status` and the console both state explicitly. Bounds worth knowing: exactly **one** destination is active (LangSmith wins if both are set — there is no fan-out to several backends); export is fire-and-forget with no retry or queue, so a collector that is down during a run loses that run's export (the trace itself is unaffected, and re-export is not implemented); only structural span attributes are exported, never the trace `detail` payload; and the OTLP path needs the optional `otel` extra, without which it logs once, reports itself unavailable (`GET /observability/status` says `enabled: false`), and exports nothing. Further bounds, all deliberate:
   - **"Enabled" means configured and importable, not reachable.** A wrong collector URL or a revoked key still reports `enabled: true`; deliverability is only discoverable by sending something, and no health probe is implemented.
@@ -58,6 +71,11 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
   - The credential admission policy refuses credential-shaped **keys** (segment- and substring-matched), recognisable credential **values** (vendor prefixes case-folded, JWTs, PEM blocks, URLs with userinfo, known webhook hosts) and non-scalar or oversized values. It is a heuristic, not a proof: a credential with no recognisable shape under an innocent key name (say a bare 32-character hex string as `identifier`) would be accepted, and listing needs only `read`, so treat the field as org-readable configuration.
   - Nothing constrains one connection per `(org_id, integration)`, and there is no per-org row cap. Neither matters while no connector reads the config; both need deciding before one does.
   - Config replacement is last-writer-wins. There is no version/ETag, so two administrators editing the same connection concurrently means the second save silently discards the first's settings.
+- **Audit reads are owner-only.** `read_audit_log` is granted to `owner`, not `admin`,
+  because the trail's member events carry emails and role assignments and
+  `GET /orgs/{id}/members` is itself owner-only — an admin-level trail would have been a side
+  door to the roster.
+
 - **Admin:** member and team management is complete (list/add/reassign-role/remove members; list/create/delete teams; list/add/remove team members), but roles are the fixed set `owner|admin|member|viewer` — custom roles and per-resource ACLs are out of scope — and there is **no invite flow**: a user must already exist (self-registered) before being added to an org by email. `manage_members` is granted to `owner` only, so admins cannot administer the roster. An organization always keeps at least one owner (`last_owner`, 400). API-key secrets are shown exactly once and never persisted client-side.
 
 ## 3. Deployment & infrastructure limitations

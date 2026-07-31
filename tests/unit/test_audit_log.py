@@ -125,10 +125,8 @@ def test_filters_compose():
     )
 
     assert len(log.list_for_org(ORG, actions=["member.added"])) == 2
-    assert len(log.list_for_org(ORG, actor_user_id=actor)) == 2
-    assert (
-        len(log.list_for_org(ORG, actions=["member.added"], actor_user_id=actor)) == 1
-    )
+    assert len(log.list_for_org(ORG, actor_id=actor)) == 2
+    assert len(log.list_for_org(ORG, actions=["member.added"], actor_id=actor)) == 1
     assert log.list_for_org(ORG, limit=1) == log.list_for_org(ORG, limit=1)
     assert len(log.list_for_org(ORG, limit=2)) == 2
 
@@ -222,11 +220,33 @@ def test_fail_open_is_the_default_and_is_logged_as_an_error(caplog):
 
 
 def test_fail_closed_propagates_when_the_operator_requires_auditing():
+    from agentforge.enterprise.audit import AuditUnavailableError
+
     service = Audit_Service(_BrokenLog(), required=True)
 
     assert service.required is True
-    with pytest.raises(RuntimeError):
+    with pytest.raises(AuditUnavailableError) as excinfo:
         service.record(_user_principal(), Audit_Action.MEMBER_ADDED, target_type="member")
+    # The error names the change that went unrecorded, so the response can too.
+    assert excinfo.value.action == "member.added"
+    assert "could not be recorded" in str(excinfo.value)
+
+
+def test_an_event_can_be_recorded_into_a_freshly_created_org():
+    """The one action whose subject is a different tenant than the caller's current one."""
+    log = InMemory_Audit_Log()
+    new_org = uuid.uuid4()
+
+    event = Audit_Service(log).record(
+        _user_principal(ORG),
+        Audit_Action.ORG_CREATED,
+        target_type="organization",
+        org_id=new_org,
+    )
+
+    assert event.org_id == new_org
+    assert log.list_for_org(new_org)
+    assert log.list_for_org(ORG) == []
 
 
 def test_the_failure_posture_comes_from_settings():
@@ -289,12 +309,58 @@ def test_non_scalar_metadata_is_refused(value):
         admit_metadata({"detail": value})
 
 
-def test_metadata_size_is_bounded():
+def test_too_many_keys_is_a_call_site_error_and_raises():
+    """A key count is fixed by the call site, so exceeding it is a programming error."""
     with pytest.raises(ValueError):
         admit_metadata({f"k{i}": "v" for i in range(MAX_METADATA_KEYS + 1)})
-    with pytest.raises(ValueError):
-        admit_metadata({"note": "x" * (MAX_METADATA_VALUE_LENGTH + 1)})
     assert admit_metadata({f"k{i}": "v" for i in range(MAX_METADATA_KEYS)})
+
+
+def test_an_over_long_value_is_truncated_not_refused():
+    """A long value comes from request data the API accepted; refusing to record the action
+    because a name was long would be the trail failing at its one job. It is truncated
+    visibly instead, so a reader can tell."""
+    admitted = admit_metadata({"note": "x" * (MAX_METADATA_VALUE_LENGTH + 50)})
+
+    value = admitted["note"]
+    assert len(value) == MAX_METADATA_VALUE_LENGTH
+    assert value.endswith("\u2026")
+    # A value at the bound is untouched.
+    exact = "y" * MAX_METADATA_VALUE_LENGTH
+    assert admit_metadata({"note": exact})["note"] == exact
+
+
+def test_an_admission_failure_follows_the_configured_posture(caplog):
+    """It must not escape as an unhandled error: the audited action has already happened."""
+    import logging
+
+    log = InMemory_Audit_Log()
+    principal = _user_principal()
+
+    # A non-scalar value is a call-site error; fail-open still must not raise at the caller.
+    with caplog.at_level(logging.ERROR, logger="agentforge.enterprise.audit"):
+        assert (
+            Audit_Service(log).record(
+                principal,
+                Audit_Action.MEMBER_ADDED,
+                target_type="member",
+                metadata={"nested": {"a": 1}},
+            )
+            is None
+        )
+    assert [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert log.list_for_org(ORG) == []
+
+    # Fail closed reports it as an audit failure, not as a generic error.
+    from agentforge.enterprise.audit import AuditUnavailableError
+
+    with pytest.raises(AuditUnavailableError):
+        Audit_Service(log, required=True).record(
+            principal,
+            Audit_Action.MEMBER_ADDED,
+            target_type="member",
+            metadata={"nested": {"a": 1}},
+        )
 
 
 def test_empty_metadata_is_admitted():
@@ -319,3 +385,55 @@ def test_the_recorded_action_vocabulary_is_stable():
         "integration_connection.updated",
         "integration_connection.deleted",
     }
+
+
+# --- keyset pagination ------------------------------------------------------------
+#
+# `limit` alone cannot walk a trail: an org past one page has older history that is simply
+# unreachable, and a client that tries to page by moving `end` backwards repeats or skips
+# rows wherever two events share a timestamp — which two writes in one request always do.
+
+
+def test_before_is_a_keyset_cursor_that_walks_the_whole_trail():
+    log = InMemory_Audit_Log()
+    principal = _user_principal()
+    service = Audit_Service(log)
+    recorded = [
+        service.record(principal, Audit_Action.MEMBER_ADDED, target_type="member")
+        for _ in range(7)
+    ]
+    # Force an exact timestamp tie across every event: the hard case for a cursor.
+    for event in recorded:
+        object.__setattr__(event, "created_at", NOW)
+
+    walked: list = []
+    cursor = None
+    while True:
+        page = log.list_for_org(ORG, before=cursor, limit=3)
+        if not page:
+            break
+        walked.extend(page)
+        last = page[-1]
+        cursor = (last.created_at, last.id)
+
+    # Every event exactly once, in the same order a single large page would have given.
+    assert [e.id for e in walked] == [
+        e.id for e in log.list_for_org(ORG, limit=100)
+    ]
+    assert len({e.id for e in walked}) == len(recorded)
+
+
+def test_the_actor_filter_matches_a_key_actor_too():
+    """The API reports one actor id per row, so the filter must accept what it reported."""
+    log = InMemory_Audit_Log()
+    key_principal = _key_principal()
+    Audit_Service(log).record(
+        key_principal, Audit_Action.API_KEY_CREATED, target_type="api_key"
+    )
+    Audit_Service(log).record(
+        _user_principal(), Audit_Action.MEMBER_ADDED, target_type="member"
+    )
+
+    matched = log.list_for_org(ORG, actor_id=key_principal.key_id)
+
+    assert [e.action for e in matched] == ["api_key.created"]

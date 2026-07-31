@@ -12,7 +12,9 @@ Contract shape:
   even name it, because there is no org parameter on the endpoint (Req 4.3, 4.4).
 * **``read_audit_log``**, granted from ``admin`` upwards. The trail names who added and
   removed whom; that is an administrator's business, not every member's.
-* **Newest first, bounded, filterable** by action, actor and time window. The action filter
+* **Newest first, keyset-paginated, filterable** by action, actor and time window. The
+  cursor is the ``(created_at, id)`` pair of the last row seen, because a timestamp alone
+  cannot separate two events written by one request. The action filter
   is typed against the server's own vocabulary, so the console's filter options come from
   the generated contract instead of a hardcoded list that can drift.
 * **Actor labels are resolved here**, in one batched lookup, because the audit row stores an
@@ -25,10 +27,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.concurrency import run_in_threadpool
 
 from agentforge.api.deps import get_audit_log, get_identity_store, require_permission
+from agentforge.api.errors import AppError
 from agentforge.api.schemas import AuditEventResponse
 from agentforge.enterprise.audit import Audit_Action
 from agentforge.enterprise.base import Audit_Log, Identity_Store
@@ -54,7 +57,11 @@ async def list_audit_events(
         description="Restrict to these actions. Repeat the parameter to pass several.",
     ),
     actor_id: UUID | None = Query(
-        default=None, description="Restrict to events performed by this user."
+        default=None,
+        description=(
+            "Restrict to events performed by this actor — a user id or an API-key id, "
+            "matching the `actor_id` reported on each event."
+        ),
     ),
     start: datetime | None = Query(
         default=None, description="Only events at or after this instant (inclusive)."
@@ -62,19 +69,52 @@ async def list_audit_events(
     end: datetime | None = Query(
         default=None, description="Only events at or before this instant (inclusive)."
     ),
+    before: datetime | None = Query(
+        default=None,
+        description=(
+            "Keyset cursor: the `created_at` of the last event of the previous page. "
+            "Must be sent together with `before_id`."
+        ),
+    ),
+    before_id: UUID | None = Query(
+        default=None,
+        description=(
+            "Keyset cursor: the `id` of the last event of the previous page. Paired with "
+            "`before` so a page boundary cannot repeat or skip events that share a timestamp."
+        ),
+    ),
     limit: int = Query(default=50, ge=1, le=_MAX_LIMIT),
     audit: Audit_Log = Depends(get_audit_log),
     identity: Identity_Store = Depends(get_identity_store),
     principal: Principal = Depends(require_permission(Permission.READ_AUDIT_LOG)),
 ) -> list[AuditEventResponse]:
-    """Return the caller org's audit events, newest first (Req 4.3, 4.4)."""
+    """Return the caller org's audit events, newest first (Req 4.3, 4.4).
+
+    Pagination is keyset, not offset: pass the last row's ``created_at`` and ``id`` back as
+    ``before`` / ``before_id`` to get the next page. Both or neither — a timestamp alone
+    cannot separate two events written in the same request.
+    """
+    if (before is None) != (before_id is None):
+        raise AppError(
+            "validation_error",
+            "`before` and `before_id` must be supplied together: a timestamp alone cannot "
+            "separate events that share it.",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"field": "before" if before is None else "before_id"},
+        )
+
     events = await run_in_threadpool(
         lambda: audit.list_for_org(
             principal.org_id,
             actions=[a.value for a in action] if action else None,
-            actor_user_id=actor_id,
+            actor_id=actor_id,
             start=_ensure_aware(start) if start else None,
             end=_ensure_aware(end) if end else None,
+            before=(
+                (_ensure_aware(before), before_id)
+                if before is not None and before_id is not None
+                else None
+            ),
             limit=limit,
         )
     )

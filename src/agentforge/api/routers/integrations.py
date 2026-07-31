@@ -57,6 +57,26 @@ def _to_response(connection: Integration_Connection) -> IntegrationConnectionRes
     )
 
 
+# An audit metadata value is bounded; the config admission policy allows up to 20 keys of 64
+# characters, whose joined names would blow past that. The count is the fact worth recording,
+# and the names are a best-effort detail, so the count is always exact and the list is what
+# fits.
+_MAX_AUDITED_SETTING_NAMES = 8
+
+
+def _settings_metadata(integration: str, config: dict) -> dict[str, object]:
+    """Audit metadata for a connection write: which integration, and which settings."""
+    names = sorted(config)
+    shown = names[:_MAX_AUDITED_SETTING_NAMES]
+    return {
+        "integration": integration,
+        "setting_count": len(names),
+        "settings": (
+            ", ".join(shown) + (", …" if len(names) > len(shown) else "") or None
+        ),
+    }
+
+
 def _not_found(connection_id: UUID) -> AppError:
     """Build the uniform 404 for an unknown or cross-tenant connection (Req 11.2)."""
     return AppError(
@@ -165,10 +185,7 @@ async def create_integration_connection(
         Audit_Action.INTEGRATION_CONNECTION_CREATED,
         target_type="integration_connection",
         target_id=str(connection.id),
-        metadata={
-            "integration": connection.integration,
-            "settings": ", ".join(sorted(config)) or None,
-        },
+        metadata=_settings_metadata(connection.integration, config),
     )
     return _to_response(connection)
 
@@ -215,10 +232,7 @@ async def update_integration_connection(
         Audit_Action.INTEGRATION_CONNECTION_UPDATED,
         target_type="integration_connection",
         target_id=str(connection_id),
-        metadata={
-            "integration": updated.integration,
-            "settings": ", ".join(sorted(config)) or None,
-        },
+        metadata=_settings_metadata(updated.integration, config),
     )
     return _to_response(updated)
 

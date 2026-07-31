@@ -215,15 +215,15 @@ class MultiAgentRunResult(BaseModel):
 class RegisterSelfRequest(BaseModel):
     """Self-registration body: bootstraps a new Organization + owner User (Req 1.1)."""
 
-    email: str = Field(..., min_length=1)
+    email: str = Field(..., min_length=1, max_length=320)
     password: str = Field(..., min_length=1)
-    org_name: str = Field(..., min_length=1)
+    org_name: str = Field(..., min_length=1, max_length=200)
 
 
 class LoginRequest(BaseModel):
     """Login body: verifies credentials to issue an Access_Token (Req 1.2, 1.3)."""
 
-    email: str = Field(..., min_length=1)
+    email: str = Field(..., min_length=1, max_length=320)
     password: str = Field(..., min_length=1)
 
 
@@ -240,7 +240,7 @@ class TokenResponse(BaseModel):
 class CreateOrgRequest(BaseModel):
     """Body for ``POST /orgs`` — an authenticated user creates an org they own."""
 
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=200)
 
 
 class CreateOrgResponse(BaseModel):
@@ -252,7 +252,7 @@ class CreateOrgResponse(BaseModel):
 class AddMemberRequest(BaseModel):
     """Body for ``POST /orgs/{id}/members`` — add an existing user under a Role (Req 2.2)."""
 
-    email: str = Field(..., min_length=1)
+    email: str = Field(..., min_length=1, max_length=320)
     role: RbacRole
 
 
@@ -267,7 +267,7 @@ class AddMemberResponse(BaseModel):
 class CreateTeamRequest(BaseModel):
     """Body for ``POST /orgs/{id}/teams`` — create an org-scoped Team (Req 2.3)."""
 
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=200)
 
 
 class CreateTeamResponse(BaseModel):
@@ -286,7 +286,7 @@ class CreateTeamResponse(BaseModel):
 class AddTeamMemberRequest(BaseModel):
     """Body for ``POST /orgs/{id}/teams/{tid}/members`` — add a user by email (Req 2.4)."""
 
-    email: str = Field(..., min_length=1)
+    email: str = Field(..., min_length=1, max_length=320)
 
 
 class AddTeamMemberResponse(BaseModel):
@@ -484,7 +484,7 @@ class CostRatesResponse(BaseModel):
 class CreatePromptVersionRequest(BaseModel):
     """Body for ``POST /prompts`` — append a new immutable Prompt_Version (Req 4.1)."""
 
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=200)
     body: str = Field(..., min_length=1)
     variables: list[str] = Field(default_factory=list)
 
@@ -558,7 +558,7 @@ class EvaluationItemRequest(BaseModel):
 class CreateDatasetRequest(BaseModel):
     """Body for ``POST /evaluations/datasets`` — a named dataset + its items (Req 6.1)."""
 
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=200)
     items: list[EvaluationItemRequest] = Field(default_factory=list)
 
 

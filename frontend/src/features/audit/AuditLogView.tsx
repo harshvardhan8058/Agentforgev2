@@ -17,6 +17,8 @@
  *  - An actor with no resolvable email (an API key, or a user since deleted) is rendered
  *    as such rather than hidden: the event still happened, and dropping it would make the
  *    trail lie by omission.
+ *  - While a filter change is in flight the previous rows stay on screen (fast feedback)
+ *    with `aria-busy` set, rather than flashing a skeleton.
  *  - `metadata` is rendered as plain key/value chips. It holds non-secret scalars only,
  *    so there is nothing to expand, redact, or truncate for safety.
  */
@@ -55,38 +57,48 @@ type AuditEvent = components["schemas"]["AuditEventResponse"];
 
 /** Page sizes offered; the server caps `limit` at 200. */
 const PAGE_SIZES = [25, 50, 100, 200] as const;
+const MAX_PAGE_SIZE = 200;
 
 /**
- * Every action the contract declares, grouped for the filter menu. Derived from the
- * generated union at build time via a const map, so adding a server action surfaces as a
- * TypeScript error here rather than as a silently missing filter option.
+ * Every action the contract declares, with its label and whether it took something away.
+ *
+ * `Record<AuditAction, …>` over the **generated** union is what keeps this honest: adding an
+ * action server-side fails `tsc` here with a missing property, rather than silently dropping
+ * a filter option. Both facts live in ONE map for the same reason — a separate
+ * "destructive" list accepted a partial set, so the next `*.deleted` action would have
+ * rendered as benign on the one screen whose job is to make removals scannable.
  */
-const ACTION_LABELS: Record<AuditAction, string> = {
-  "org.created": "Organization created",
-  "member.added": "Member added",
-  "member.role_changed": "Member role changed",
-  "member.removed": "Member removed",
-  "team.created": "Team created",
-  "team.deleted": "Team deleted",
-  "team_member.added": "Added to team",
-  "team_member.removed": "Removed from team",
-  "api_key.created": "API key created",
-  "api_key.revoked": "API key revoked",
-  "integration_connection.created": "Connector settings created",
-  "integration_connection.updated": "Connector settings updated",
-  "integration_connection.deleted": "Connector settings removed",
+const ACTION_META: Record<AuditAction, { label: string; destructive: boolean }> = {
+  "org.created": { label: "Organization created", destructive: false },
+  "member.added": { label: "Member added", destructive: false },
+  "member.role_changed": { label: "Member role changed", destructive: false },
+  "member.removed": { label: "Member removed", destructive: true },
+  "team.created": { label: "Team created", destructive: false },
+  "team.deleted": { label: "Team deleted", destructive: true },
+  "team_member.added": { label: "Added to team", destructive: false },
+  "team_member.removed": { label: "Removed from team", destructive: true },
+  "api_key.created": { label: "API key created", destructive: false },
+  "api_key.revoked": { label: "API key revoked", destructive: true },
+  "integration_connection.created": {
+    label: "Connector settings created",
+    destructive: false,
+  },
+  "integration_connection.updated": {
+    label: "Connector settings updated",
+    destructive: false,
+  },
+  "integration_connection.deleted": {
+    label: "Connector settings removed",
+    destructive: true,
+  },
 };
 
-const ALL_ACTIONS = Object.keys(ACTION_LABELS) as AuditAction[];
+const ALL_ACTIONS = Object.keys(ACTION_META) as AuditAction[];
 
-/** Actions whose effect removes access or a resource, highlighted for scanning. */
-const DESTRUCTIVE: ReadonlySet<AuditAction> = new Set<AuditAction>([
-  "member.removed",
-  "team.deleted",
-  "team_member.removed",
-  "api_key.revoked",
-  "integration_connection.deleted",
-]);
+/** Label for an action, falling back to the raw value if a stale bundle sees a new one. */
+function actionLabel(action: AuditAction): string {
+  return ACTION_META[action]?.label ?? action;
+}
 
 function actorLabel(event: AuditEvent): string {
   if (event.actor_email) return event.actor_email;
@@ -158,7 +170,8 @@ export function AuditLogView(): JSX.Element {
               id="audit-action"
               data-testid="audit-action-trigger"
               className="w-64"
-              value={action ? ACTION_LABELS[action] : "All actions"}
+              aria-label="Filter by action"
+              value={action ? actionLabel(action) : "All actions"}
             />
             <DropdownMenuContent className="max-h-80 overflow-y-auto">
               <DropdownMenuItem
@@ -173,7 +186,7 @@ export function AuditLogView(): JSX.Element {
                   data-testid={`audit-action-${value}`}
                   onSelect={() => setAction(value)}
                 >
-                  {ACTION_LABELS[value]}
+                  {actionLabel(value)}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -189,6 +202,7 @@ export function AuditLogView(): JSX.Element {
               id="audit-limit"
               data-testid="audit-limit-trigger"
               className="w-32"
+              aria-label="Entries per page"
               value={`${limit} entries`}
             />
             <DropdownMenuContent>
@@ -215,6 +229,15 @@ export function AuditLogView(): JSX.Element {
           Refresh
         </Button>
       </div>
+
+      {/* The table is replaced asynchronously; without a live region a screen reader is
+          told nothing when a filter change or refresh lands. Polite, and only the count,
+          so it never competes with the table the user is already reading. */}
+      <p className="sr-only" aria-live="polite" data-testid="audit-status">
+        {events.isFetching
+          ? "Loading audit entries"
+          : `${rows.length} audit ${rows.length === 1 ? "entry" : "entries"} shown`}
+      </p>
 
       {events.isError && (
         <ErrorBanner error={events.error} onRetry={() => void events.refetch()} />
@@ -243,7 +266,14 @@ export function AuditLogView(): JSX.Element {
       {rows.length > 0 && (
         <Card>
           <CardContent className="overflow-x-auto p-0">
-            <table className="w-full text-sm" data-testid="audit-table">
+            {/* `aria-busy` while a filter switch is in flight: `keepPreviousData` keeps the
+                previous filter's rows on screen (which is what makes filtering feel
+                immediate), so the table must say that it is not yet the new answer. */}
+            <table
+              className="w-full text-sm"
+              data-testid="audit-table"
+              aria-busy={events.isPlaceholderData || undefined}
+            >
               <caption className="sr-only">
                 Administrative audit entries for this organization, newest first
               </caption>
@@ -283,8 +313,12 @@ export function AuditLogView(): JSX.Element {
                         </time>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge tone={DESTRUCTIVE.has(event.action) ? "danger" : "primary"}>
-                          {ACTION_LABELS[event.action] ?? event.action}
+                        <Badge
+                          tone={
+                            ACTION_META[event.action]?.destructive ? "danger" : "primary"
+                          }
+                        >
+                          {actionLabel(event.action)}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-text">{actorLabel(event)}</td>
@@ -318,9 +352,16 @@ export function AuditLogView(): JSX.Element {
         </Card>
       )}
 
-      {rows.length === limit && (
+      {rows.length === limit && limit < MAX_PAGE_SIZE && (
         <p className="text-xs text-text-subtle" data-testid="audit-page-hint">
           Showing the most recent {limit} entries. Increase the page size to see more.
+        </p>
+      )}
+      {rows.length === MAX_PAGE_SIZE && (
+        <p className="text-xs text-text-subtle" data-testid="audit-page-max">
+          Showing the most recent {MAX_PAGE_SIZE} entries, the largest page this endpoint
+          returns. Older history is reachable through the API&apos;s <code>before</code> /{" "}
+          <code>before_id</code> cursor.
         </p>
       )}
     </div>

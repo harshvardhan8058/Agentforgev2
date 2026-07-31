@@ -132,9 +132,13 @@ async def test_pg_audit_log_round_trip_filters_and_isolation(engine):
         second.id
     ]
     assert len(store.list_for_org(org.id, actions=["team.created", "member.added"])) == 2
-    assert [e.id for e in store.list_for_org(org.id, actor_user_id=actor.id)] == [
+    assert [e.id for e in store.list_for_org(org.id, actor_id=actor.id)] == [
         second.id,
         first.id,
+    ]
+    # The same filter matches a key actor, which is what the API reports for such a row.
+    assert [e.id for e in store.list_for_org(org.id, actor_id=key_event.actor_key_id)] == [
+        key_event.id
     ]
     assert [e.id for e in store.list_for_org(org.id, limit=1)] == [key_event.id]
     assert [
@@ -158,6 +162,17 @@ async def test_pg_audit_log_round_trip_filters_and_isolation(engine):
     assert all(
         e.actor_user_id is None for e in surviving if e.actor_kind == "user"
     ), "the event survives with an unresolvable actor rather than being deleted"
+
+    # --- the keyset cursor walks the trail without repeating or skipping ---
+    walked = []
+    cursor = None
+    while True:
+        page = store.list_for_org(org.id, before=cursor, limit=2)
+        if not page:
+            break
+        walked.extend(page)
+        cursor = (page[-1].created_at, page[-1].id)
+    assert [e.id for e in walked] == [e.id for e in store.list_for_org(org.id, limit=50)]
 
     # --- equal timestamps still order deterministically ---
     same_time = datetime.now(timezone.utc)

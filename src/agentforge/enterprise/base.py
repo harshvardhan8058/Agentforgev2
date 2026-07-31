@@ -237,16 +237,22 @@ class Audit_Log(ABC):
         org_id: UUID,
         *,
         actions: list[str] | None = None,
-        actor_user_id: UUID | None = None,
+        actor_id: UUID | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
+        before: tuple[datetime, UUID] | None = None,
         limit: int = 50,
     ) -> list[Audit_Event]:
         """Return ``org_id``'s events, **newest first**, matching every supplied filter.
 
         Newest-first because the question an audit trail answers is almost always "what
-        changed recently"; ``limit`` bounds the page, and equal timestamps are broken by id
-        so a page boundary can neither repeat nor skip a row.
+        changed recently". ``limit`` bounds the page and ``before`` is a keyset cursor: the
+        ``(created_at, id)`` pair of the last row of the previous page. The pair — rather than
+        the timestamp alone — is what makes a boundary unable to repeat or skip a row when
+        several events share a timestamp, which two writes in one request always do.
+
+        ``actor_id`` matches a user **or** a key actor, because the transport layer reports
+        one actor id per row and a filter must accept what it reported.
         """
         raise NotImplementedError
 

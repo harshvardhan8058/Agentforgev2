@@ -65,7 +65,6 @@ describe("auth/rbac — ROLE_PERMISSIONS + can", () => {
       "manage_api_keys",
       "manage_integrations",
       "read",
-      "read_audit_log",
       "run_agents",
     ]);
     expect([...ROLE_PERMISSIONS.owner].sort()).toEqual([

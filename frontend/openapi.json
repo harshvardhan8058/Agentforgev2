@@ -5,6 +5,7 @@
         "description": "Body for ``POST /orgs/{id}/members`` \u2014 add an existing user under a Role (Req 2.2).",
         "properties": {
           "email": {
+            "maxLength": 320,
             "minLength": 1,
             "title": "Email",
             "type": "string"
@@ -49,6 +50,7 @@
         "description": "Body for ``POST /orgs/{id}/teams/{tid}/members`` \u2014 add a user by email (Req 2.4).",
         "properties": {
           "email": {
+            "maxLength": 320,
             "minLength": 1,
             "title": "Email",
             "type": "string"
@@ -706,6 +708,7 @@
             "type": "array"
           },
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
@@ -779,6 +782,7 @@
         "description": "Body for ``POST /orgs`` \u2014 an authenticated user creates an org they own.",
         "properties": {
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
@@ -814,6 +818,7 @@
             "type": "string"
           },
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
@@ -837,6 +842,7 @@
         "description": "Body for ``POST /orgs/{id}/teams`` \u2014 create an org-scoped Team (Req 2.3).",
         "properties": {
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
@@ -1305,6 +1311,7 @@
         "description": "Login body: verifies credentials to issue an Access_Token (Req 1.2, 1.3).",
         "properties": {
           "email": {
+            "maxLength": 320,
             "minLength": 1,
             "title": "Email",
             "type": "string"
@@ -1639,11 +1646,13 @@
         "description": "Self-registration body: bootstraps a new Organization + owner User (Req 1.1).",
         "properties": {
           "email": {
+            "maxLength": 320,
             "minLength": 1,
             "title": "Email",
             "type": "string"
           },
           "org_name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Org Name",
             "type": "string"
@@ -2404,7 +2413,7 @@
     },
     "/audit-events": {
       "get": {
-        "description": "Return the caller org's audit events, newest first (Req 4.3, 4.4).",
+        "description": "Return the caller org's audit events, newest first (Req 4.3, 4.4).\n\nPagination is keyset, not offset: pass the last row's ``created_at`` and ``id`` back as\n``before`` / ``before_id`` to get the next page. Both or neither \u2014 a timestamp alone\ncannot separate two events written in the same request.",
         "operationId": "list_audit_events_audit_events_get",
         "parameters": [
           {
@@ -2429,7 +2438,7 @@
             }
           },
           {
-            "description": "Restrict to events performed by this user.",
+            "description": "Restrict to events performed by this actor \u2014 a user id or an API-key id, matching the `actor_id` reported on each event.",
             "in": "query",
             "name": "actor_id",
             "required": false,
@@ -2443,7 +2452,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Restrict to events performed by this user.",
+              "description": "Restrict to events performed by this actor \u2014 a user id or an API-key id, matching the `actor_id` reported on each event.",
               "title": "Actor Id"
             }
           },
@@ -2483,6 +2492,44 @@
               ],
               "description": "Only events at or before this instant (inclusive).",
               "title": "End"
+            }
+          },
+          {
+            "description": "Keyset cursor: the `created_at` of the last event of the previous page. Must be sent together with `before_id`.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keyset cursor: the `created_at` of the last event of the previous page. Must be sent together with `before_id`.",
+              "title": "Before"
+            }
+          },
+          {
+            "description": "Keyset cursor: the `id` of the last event of the previous page. Paired with `before` so a page boundary cannot repeat or skip events that share a timestamp.",
+            "in": "query",
+            "name": "before_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keyset cursor: the `id` of the last event of the previous page. Paired with `before` so a page boundary cannot repeat or skip events that share a timestamp.",
+              "title": "Before Id"
             }
           },
           {

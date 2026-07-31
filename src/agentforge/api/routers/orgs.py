@@ -33,7 +33,6 @@ thread to avoid blocking the event loop.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
@@ -71,6 +70,11 @@ from agentforge.enterprise.models import Principal
 from agentforge.enterprise.rbac import Permission, Role
 
 router = APIRouter(tags=["orgs"])
+
+
+def _distinct(*org_ids: UUID) -> list[UUID]:
+    """Return the given org ids without repeats, preserving order."""
+    return list(dict.fromkeys(org_ids))
 
 
 def _ensure_same_org(principal: Principal, org_id: UUID) -> None:
@@ -145,16 +149,21 @@ async def create_org(
         await run_in_threadpool(
             identity.add_membership, principal.user_id, org.id, Role.OWNER
         )
-    # Recorded into the NEW org's trail, not the caller's current one: the event describes
-    # that organization's creation, so that is where an auditor of it will look.
-    await run_in_threadpool(
-        audit.record,
-        replace(principal, org_id=org.id),
-        Audit_Action.ORG_CREATED,
-        target_type="organization",
-        target_id=str(org.id),
-        metadata={"name": org.name},
-    )
+    # Recorded in BOTH trails. The new organization's, because that is where an auditor of it
+    # will look; and the caller's current one, because an organization created with org A's
+    # credential is a fact org A's owners must be able to see — a key principal gains no
+    # membership in the new org, so without this the acting tenant would have no evidence at
+    # all that its key was used this way.
+    for trail_org_id in _distinct(org.id, principal.org_id):
+        await run_in_threadpool(
+            audit.record,
+            principal,
+            Audit_Action.ORG_CREATED,
+            target_type="organization",
+            target_id=str(org.id),
+            metadata={"name": org.name},
+            org_id=trail_org_id,
+        )
     return CreateOrgResponse(org_id=org.id)
 
 

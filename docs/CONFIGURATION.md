@@ -124,17 +124,21 @@ Notes and guarantees:
 Optional in both profiles, and **not** a credential. Every administrative mutation
 (`/orgs/*` members, teams and API keys; `/integrations/connections`) appends an append-only
 `audit_events` row for the acting principal, readable at `GET /audit-events` by a principal
-holding `read_audit_log` (granted from `admin` upwards).
+holding `read_audit_log` (**owner-only**, matching the owner-only member roster the trail's
+metadata would otherwise expose).
 
 `AUDIT_LOG_REQUIRED` selects the **failure posture**, which is the only genuinely contested
 decision here:
 
 - **`false` (default) — fail open.** A failed audit write is logged at `ERROR` and the audited
   request still succeeds. An audit store outage must not become a platform outage.
-- **`true` — fail closed.** The audited request fails (500) when its event cannot be
-  recorded, so no administrative action can happen unrecorded. This is what an auditor means
-  by a complete trail, at the cost of coupling the admin surface's availability to the
-  trail's.
+- **`true` — fail closed.** The audited request is reported as failed when its event cannot be
+  recorded: `503 audit_unavailable` with `details.applied = true`. Be precise about what this
+  does — the mutation and its audit row are written by different stores in different
+  transactions, so the change is **not rolled back**; the deployment refuses to *acknowledge*
+  a change it could not record, and the response says so explicitly (and says not to retry, so
+  a client cannot duplicate the change). Coupling the admin surface's availability to the
+  trail's is the cost.
 
 Guarantees that do not depend on configuration:
 
