@@ -93,6 +93,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/cost-rates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Cost Rates
+         * @description Return the pricing this deployment charges usage at (Req 2.4, 2.5, 3.4).
+         *
+         *     A usage report's ``total_cost`` is only interpretable next to the rates that produced
+         *     it: a zero total means "nothing spent" *or* "nothing priced", and a non-zero one is
+         *     unauditable without knowing the per-model rate. Both questions are answered here.
+         *
+         *     The response is deployment configuration, not tenant data — it is identical for every
+         *     org — but it still requires ``read``, because an unauthenticated caller has no reason
+         *     to learn how a deployment is priced. It contains no credential: rates are numbers, and
+         *     the preset is a public name (Req 10.1).
+         */
+        get: operations["get_cost_rates_analytics_cost_rates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics/usage": {
         parameters: {
             query?: never;
@@ -1142,6 +1171,53 @@ export interface components {
             preview?: string | null;
         };
         /**
+         * CostRateEntry
+         * @description One effective per-1K-token price for a ``(provider, model)`` pair.
+         *
+         *     Rates are exact decimal **strings** for the same reason costs are: a price of
+         *     ``0.00005`` per 1K tokens is not representable as a float without drift, and the
+         *     client renders it verbatim rather than reformatting it.
+         */
+        CostRateEntry: {
+            /** Completion Per 1K */
+            completion_per_1k: string;
+            /** Model */
+            model: string;
+            /** Prompt Per 1K */
+            prompt_per_1k: string;
+            /** Provider */
+            provider: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "preset" | "override";
+        };
+        /**
+         * CostRatesResponse
+         * @description The pricing configuration behind every cost figure this deployment reports.
+         *
+         *     Deployment-wide (identical for every org) and credential-free: rates are numbers and
+         *     ``preset`` is a public name.
+         */
+        CostRatesResponse: {
+            /** Available Presets */
+            available_presets?: string[];
+            /**
+             * Configured
+             * @default false
+             */
+            configured: boolean;
+            /** Default Completion Per 1K */
+            default_completion_per_1k: string;
+            /** Default Prompt Per 1K */
+            default_prompt_per_1k: string;
+            /** Preset */
+            preset?: string | null;
+            /** Rates */
+            rates?: components["schemas"]["CostRateEntry"][];
+        };
+        /**
          * CreateApiKeyRequest
          * @description Body for ``POST /orgs/{id}/api-keys`` — issue a key granting ``role`` (Req 5.1).
          */
@@ -1929,6 +2005,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_cost_rates_analytics_cost_rates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CostRatesResponse"];
                 };
             };
         };

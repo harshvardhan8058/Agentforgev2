@@ -77,6 +77,39 @@ derived selector `Settings.persist_domain_stores()` returns `use_database or pro
 The deterministic keyless unit lane never sets `USE_DATABASE`, so `use_database` defaults
 `False` and the stores stay in-memory and reproducible.
 
+## Cost pricing (`COST_RATE_PRESET`, `COST_RATE_TABLE_JSON`, `COST_DEFAULT_*_PER_1K`)
+
+All three are **optional in both profiles**, and none is a credential. Together they decide
+what the usage/cost analytics report, and they resolve lowest precedence first:
+
+1. **`COST_DEFAULT_PROMPT_PER_1K` / `COST_DEFAULT_COMPLETION_PER_1K`** (default `0.0`) — the
+   rate for any `(provider, model)` pair the stages below do not list.
+2. **`COST_RATE_PRESET`** (default unset) — a **named preset** of published per-model list
+   prices shipped in `src/agentforge/observability/cost_presets.py`. Known presets:
+   `groq-public-2026-07`. Setting this one variable is enough for a deployment that holds a
+   `GROQ_API_KEY` to report real costs.
+3. **`COST_RATE_TABLE_JSON`** (default unset) — explicit per-1K rates keyed
+   `"provider:model"`, e.g.
+   `{"groq:llama-3.1-8b-instant": {"prompt": "0.00005", "completion": "0.00008"}}`. Entries
+   here **override the preset** for the same pair, so a preset can be adopted wholesale and
+   corrected model by model.
+
+Notes and guarantees:
+
+- **Keyless stays free and deterministic.** With none of the three set, every call costs
+  exactly `Decimal("0")` — correct, because the keyless Fallback provider runs locally.
+- **Rates are indicative.** Preset values are the vendor's public list prices as of the date
+  in the preset name; a deployment with negotiated, batch, or cached-input pricing should
+  override the affected pairs. All arithmetic is `Decimal`, and rates cross the API as exact
+  strings, so no float drift is possible.
+- **A typo aborts startup.** An unknown `COST_RATE_PRESET` fails in `load_settings`, naming
+  the setting, rather than leaving the deployment silently unpriced.
+- **Verify at runtime.** `GET /analytics/cost-rates` (requires `read`) reports the effective
+  preset, the per-model rates with their source (`preset` / `override`), the default rates,
+  and whether the deployment prices anything at all. `GET /analytics/usage` carries the same
+  fact as `cost_rates_configured`, which is how the console distinguishes "nothing spent"
+  from "nothing priced". Both are shown on the Analytics page.
+
 ## See also
 
 - `.env.example` — every `local` setting with placeholder values.

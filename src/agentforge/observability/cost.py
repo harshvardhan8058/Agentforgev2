@@ -98,12 +98,22 @@ def parse_rate_table(rate_table_json: str | None) -> dict[tuple[str, str], Rate]
 def build_default_cost_model(settings: Settings) -> Default_Cost_Model:
     """Build a :class:`Default_Cost_Model` from ``Settings`` (invoked by the container).
 
-    Reads the optional ``cost_rate_table_json`` into the rate table and the
-    ``cost_default_prompt_per_1k`` / ``cost_default_completion_per_1k`` fields into the
-    default fallback rate. On the keyless path both defaults are ``"0.0"``, so the model
-    returns ``Decimal("0")`` for every unlisted pair (Req 2.4, 2.5, 10.2).
+    The rate table is the named ``cost_rate_preset`` (if any) overlaid with explicit
+    ``cost_rate_table_json`` entries, and the ``cost_default_prompt_per_1k`` /
+    ``cost_default_completion_per_1k`` fields become the fallback rate for any pair
+    neither of them lists. On the keyless path there is no preset and both defaults are
+    ``"0.0"``, so the model returns ``Decimal("0")`` for every pair (Req 2.4, 2.5, 10.2).
+
+    Raises:
+        ValueError: if ``cost_rate_preset`` names a preset that does not exist — a
+            configuration typo must fail at boot rather than silently unprice the
+            deployment.
     """
-    rates = parse_rate_table(settings.cost_rate_table_json)
+    # Imported here rather than at module scope: the preset catalogue imports Rate and
+    # parse_rate_table from this module, so a top-level import would be circular.
+    from agentforge.observability.cost_presets import resolve_rate_table
+
+    rates = resolve_rate_table(settings.cost_rate_preset, settings.cost_rate_table_json)
     default_rate = Rate(
         prompt_per_1k=Decimal(str(settings.cost_default_prompt_per_1k)),
         completion_per_1k=Decimal(str(settings.cost_default_completion_per_1k)),

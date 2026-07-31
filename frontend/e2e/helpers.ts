@@ -127,6 +127,20 @@ export async function mockCommon(page: Page): Promise<void> {
   await page.route(`${API}/orgs/*/members`, (route) => respond(route, []));
   await page.route(`${API}/orgs/*/teams`, (route) => respond(route, []));
   await page.route(`${API}/orgs/*/api-keys`, (route) => respond(route, []));
+
+  // The analytics page always asks how the deployment is priced. The catch-all's
+  // `{}` would render as absent rates rather than as the honest "prices nothing"
+  // state, so the real unpriced shape is declared here.
+  await page.route(`${API}/analytics/cost-rates`, (route) =>
+    respond(route, {
+      preset: null,
+      available_presets: ["groq-public-2026-07"],
+      default_prompt_per_1k: "0.0",
+      default_completion_per_1k: "0.0",
+      configured: false,
+      rates: [],
+    }),
+  );
 }
 
 /** Register a JSON responder for a specific API path (any method). */

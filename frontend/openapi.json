@@ -437,6 +437,93 @@
         "title": "ConversationSummaryResponse",
         "type": "object"
       },
+      "CostRateEntry": {
+        "description": "One effective per-1K-token price for a ``(provider, model)`` pair.\n\nRates are exact decimal **strings** for the same reason costs are: a price of\n``0.00005`` per 1K tokens is not representable as a float without drift, and the\nclient renders it verbatim rather than reformatting it.",
+        "properties": {
+          "completion_per_1k": {
+            "title": "Completion Per 1K",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "prompt_per_1k": {
+            "title": "Prompt Per 1K",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "preset",
+              "override"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "model",
+          "prompt_per_1k",
+          "completion_per_1k",
+          "source"
+        ],
+        "title": "CostRateEntry",
+        "type": "object"
+      },
+      "CostRatesResponse": {
+        "description": "The pricing configuration behind every cost figure this deployment reports.\n\nDeployment-wide (identical for every org) and credential-free: rates are numbers and\n``preset`` is a public name.",
+        "properties": {
+          "available_presets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Presets",
+            "type": "array"
+          },
+          "configured": {
+            "default": false,
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "default_completion_per_1k": {
+            "title": "Default Completion Per 1K",
+            "type": "string"
+          },
+          "default_prompt_per_1k": {
+            "title": "Default Prompt Per 1K",
+            "type": "string"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset"
+          },
+          "rates": {
+            "items": {
+              "$ref": "#/components/schemas/CostRateEntry"
+            },
+            "title": "Rates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "default_prompt_per_1k",
+          "default_completion_per_1k"
+        ],
+        "title": "CostRatesResponse",
+        "type": "object"
+      },
       "CreateApiKeyRequest": {
         "description": "Body for ``POST /orgs/{id}/api-keys`` \u2014 issue a key granting ``role`` (Req 5.1).",
         "properties": {
@@ -1936,6 +2023,28 @@
         "summary": "Stream Agent",
         "tags": [
           "agent"
+        ]
+      }
+    },
+    "/analytics/cost-rates": {
+      "get": {
+        "description": "Return the pricing this deployment charges usage at (Req 2.4, 2.5, 3.4).\n\nA usage report's ``total_cost`` is only interpretable next to the rates that produced\nit: a zero total means \"nothing spent\" *or* \"nothing priced\", and a non-zero one is\nunauditable without knowing the per-model rate. Both questions are answered here.\n\nThe response is deployment configuration, not tenant data \u2014 it is identical for every\norg \u2014 but it still requires ``read``, because an unauthenticated caller has no reason\nto learn how a deployment is priced. It contains no credential: rates are numbers, and\nthe preset is a public name (Req 10.1).",
+        "operationId": "get_cost_rates_analytics_cost_rates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostRatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Cost Rates",
+        "tags": [
+          "analytics"
         ]
       }
     },

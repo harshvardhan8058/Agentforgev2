@@ -148,8 +148,14 @@ class Settings(BaseSettings):
     # Decimal-as-string so no float drift; the keyless default is free (Req 2.5).
     cost_default_prompt_per_1k: str = "0.0"
     cost_default_completion_per_1k: str = "0.0"
+    # Optional named rate preset shipped with the platform (see
+    # ``observability/cost_presets.py``), e.g. "groq-public-2026-07". Unset means no
+    # preset, which keeps the keyless stack free and deterministic. An unknown name is a
+    # startup error, not a silent fallback.
+    cost_rate_preset: str | None = None
     # Optional JSON rate table, e.g.
-    # {"groq:llama-3.1-8b": {"prompt": "0.05", "completion": "0.08"}}.
+    # {"groq:llama-3.1-8b": {"prompt": "0.05", "completion": "0.08"}}. Entries here
+    # override the preset for the same (provider, model) pair.
     cost_rate_table_json: str | None = None
 
     # Guardrails (deterministic defaults; all optional). ``guardrail_max_input_chars`` is
@@ -294,6 +300,21 @@ def load_settings() -> Settings:
         and settings.jwt_secret is None
     ):
         raise ConfigError(["jwt_secret"], detail="required in production profile")
+
+    # A misspelled cost preset must abort startup, not quietly leave the deployment
+    # unpriced: reported costs are only trustworthy if the rates behind them were the
+    # ones the operator asked for. Validated here — the single configuration gate — so
+    # the failure names the setting instead of surfacing later from the cost model.
+    if settings.cost_rate_preset is not None:
+        # Local import: the preset catalogue imports nothing from this module at import
+        # time, but keeping it lazy holds settings free of observability dependencies.
+        from agentforge.observability.cost_presets import RATE_PRESETS, preset_names
+
+        if settings.cost_rate_preset not in RATE_PRESETS:
+            raise ConfigError(
+                ["cost_rate_preset"],
+                detail=f"unknown preset; known presets: {', '.join(preset_names())}",
+            )
     return settings
 
 

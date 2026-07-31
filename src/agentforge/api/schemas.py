@@ -425,6 +425,44 @@ class UsageReportResponse(BaseModel):
     cost_rates_configured: bool = False
 
 
+class CostRateEntry(BaseModel):
+    """One effective per-1K-token price for a ``(provider, model)`` pair.
+
+    Rates are exact decimal **strings** for the same reason costs are: a price of
+    ``0.00005`` per 1K tokens is not representable as a float without drift, and the
+    client renders it verbatim rather than reformatting it.
+    """
+
+    provider: str
+    model: str
+    prompt_per_1k: str
+    completion_per_1k: str
+    # Where this entry came from: the selected named preset, or an explicit
+    # ``COST_RATE_TABLE_JSON`` entry that overrode it.
+    source: Literal["preset", "override"]
+
+
+class CostRatesResponse(BaseModel):
+    """The pricing configuration behind every cost figure this deployment reports.
+
+    Deployment-wide (identical for every org) and credential-free: rates are numbers and
+    ``preset`` is a public name.
+    """
+
+    # The selected preset, or None when no preset is active (the keyless default).
+    preset: str | None = None
+    # Preset names this build ships, so a client can name the alternatives instead of
+    # sending an operator to the source.
+    available_presets: list[str] = Field(default_factory=list)
+    # Applied to any pair the table below does not list.
+    default_prompt_per_1k: str
+    default_completion_per_1k: str
+    # False when nothing here can produce a non-zero cost, which is what distinguishes
+    # "nothing spent" from "nothing priced" in a report that totals zero.
+    configured: bool = False
+    rates: list[CostRateEntry] = Field(default_factory=list)
+
+
 # --- observability: prompt registry (Phase 6) -------------------------------------
 
 

@@ -87,13 +87,14 @@
 **Usage & Cost Dashboard**
 - **Purpose:** Org-scoped token/cost usage with time-range and by-provider/model/user breakdowns.
 - **Backend modules:** `observability` (Instrumented_Provider usage capture, Cost_Model with Decimal, analytics store), `api/routers/analytics.py`, migrations.
-- **Frontend:** `features/analytics/UsageDashboardView`, lazy `UsageCharts` (Recharts), per-breakdown error boundaries; cost strings rendered verbatim.
-- **Endpoints:** `GET /analytics/usage?start&end`.
-- **User workflow:** Open dashboard → totals + breakdowns + charts → set time range → empty state when no records.
+- **Frontend:** `features/analytics/UsageDashboardView`, lazy `UsageCharts` (Recharts), per-breakdown error boundaries, `CostRatesPanel` (effective pricing + how to set it); cost strings and rate strings rendered verbatim.
+- **Endpoints:** `GET /analytics/usage?start&end`, `GET /analytics/cost-rates`.
+- **Pricing:** resolves default rates → named `COST_RATE_PRESET` (shipped presets, e.g. `groq-public-2026-07` with Groq's published per-model list prices) → explicit `COST_RATE_TABLE_JSON` overrides. One environment variable prices a Groq deployment; an unknown preset name aborts startup naming the setting. `GET /analytics/cost-rates` reports the effective result with each entry's source.
+- **User workflow:** Open dashboard → totals + breakdowns + charts → set time range → empty state when no records; the Cost rates panel explains a zero total and names the presets available.
 - **Status:** Fully working.
-- **Keyless:** Yes (costs default to `0.0`; usage recorded from runs).
-- **Optional credentials:** None (real cost figures require configuring `cost_rate_table_json`).
-- **Limitations:** Costs are 0 unless a rate table is set; meaningful volume requires runs.
+- **Keyless:** Yes (no preset ⇒ every call costs exactly `Decimal("0")`, which is accurate for the local Fallback provider; usage is still recorded).
+- **Optional credentials:** None.
+- **Limitations:** Preset rates are the vendor's public list prices at the date in the preset name — indicative, not authoritative — so negotiated/batch/cached-input pricing needs per-pair overrides; meaningful volume requires runs.
 
 ## 8. Guardrails
 
