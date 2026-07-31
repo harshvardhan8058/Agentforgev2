@@ -162,7 +162,7 @@
 - **Status:** Fully working locally (one-command).
 - **Keyless:** Yes.
 - **Optional credentials (production):** `JWT_SECRET` (required), DB creds, TLS certs, optional provider keys.
-- **Limitations:** Backend image is large (~11–12 GB, CUDA torch) because the CPU-wheel CDN is unreachable in CI — CI relocates Docker storage to `/mnt` to build it; CPU-slim image deferred. Compose-smoke + migration-idempotence properties (2 & 3) are integration-lane/runtime-gated. No Kubernetes/managed-cloud/DNS/real-cert-issuance in v1 (documented as external).
+- **Limitations:** the backend image still carries the embedding model's dependency tree; it installs **CPU-only torch** first (production hardening B4) and CI asserts the built image is ≤ 4 GB with no NVIDIA/CUDA packages in the venv, so the earlier ~11–12 GB CUDA build no longer applies. CI relocates Docker's storage to `/mnt` because the image is multi-GB while it builds. Compose-smoke + migration-idempotence properties (2 & 3) are integration-lane/runtime-gated. No Kubernetes/managed-cloud/DNS/real-cert-issuance in v1 (documented as external).
 
 ## Cross-cutting capabilities
 
@@ -171,12 +171,10 @@
 - **Conversation context** (`POST /conversations`, `GET /conversations/{id}`) threading `conversation_id` into agent + multi-agent runs.
 - **Premium frontend platform:** dark/light theming (design tokens, no-FOWT), command palette (⌘K, RBAC-gated), keyboard shortcuts, responsive app shell, skeleton/empty/error states, markdown+citations, Monaco, charts — all lazy-loaded.
 - **Observability everywhere:** trace recorder + pluggable exporter (NoOp keyless / LangSmith with key), never changes run outcomes.
-- **Testing posture:** backend keyless lane (472 tests) + Hypothesis properties; frontend `npm run ci`; deterministic, keyless.
+- **Testing posture:** backend keyless lane (**711** tests) + Hypothesis properties; frontend `npm run ci` (**439**); Playwright e2e (**20**, real production build with the API mocked at the network layer); all deterministic and keyless. A live-PostgreSQL integration lane (`pytest -m integration`) runs in CI against an ephemeral `pgvector` service container.
 
 ## Known v1.0 limitations / open items
 
 - LLM output deterministic without `GROQ_API_KEY`; tracing export NoOp without `LANGSMITH_API_KEY`; web search & all integrations disabled without their keys.
-- No frontend UI for integrations management yet (status API only).
-- `frontend/openapi.json` predates Phase 8's `/integrations/status` (contract-freshness gap; the SPA doesn't call that endpoint) — optional regen.
 - Manual final checkpoints (frontend Task 30, deployment Task 13) left unchecked for human sign-off; deployment Properties 2 & 3 run only in the integration lane / real Docker host.
-- Backend container image size (CUDA torch) — CPU-slim optimization deferred.
+- Backend container image size: CPU-only torch keeps it under the 4 GB CI budget, but a genuinely slim (~1 GB) image would need the embedding model moved out of the image.

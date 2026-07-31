@@ -33,14 +33,14 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
 
 ## 3. Deployment & infrastructure limitations
 
-- **Backend image size:** ~11–12 GB because it ships CUDA-enabled torch. The CPU-only wheel CDN is unreachable from CI, so CI relocates Docker's storage to `/mnt` to build the image. A CPU-slim (~3.5 GB) image is deferred to future work.
+- **Backend image size:** the image carries the local embedding model's dependency tree. It installs **CPU-only torch** from the PyTorch CPU wheel index before the requirements resolve (production hardening B4), and CI asserts the built image is ≤ 4 GB **and** that the venv contains no NVIDIA/CUDA packages. (An earlier build did ship CUDA torch at ~11–12 GB; that is no longer the case.) CI relocates Docker's storage to `/mnt` because the build is multi-GB in flight. A genuinely slim image would require serving embeddings from outside the image.
 - **Runtime properties gated:** the compose-smoke and migration-idempotence correctness properties (Properties 2 & 3) run only in the integration lane / against a real Docker host, not in the fast keyless unit lane.
 - **No managed-cloud primitives in v1:** Kubernetes/Helm, cloud autoscaling, DNS management, and real TLS certificate issuance are out of scope and documented as external responsibilities. v1 targets `docker compose` (local) and a production compose overlay.
 
 ## 4. Contract & testing gaps
 
-- **`frontend/openapi.json` is slightly stale:** it predates Phase 8's `GET /integrations/status`. This is a contract-freshness gap only — the SPA does not call that endpoint — and a regen is optional.
-- **Deterministic test posture:** the keyless backend lane (472 tests + Hypothesis properties) and `frontend npm run ci` are the source of truth. Integration-lane tests require external services/credentials and are not part of the default fast lane.
+- **Contract freshness is enforced, not assumed:** `scripts/check_openapi.py` fails if `frontend/openapi.json` differs from the mounted routes, and `frontend/scripts/check-codegen.mjs` fails if `schema.d.ts` differs from that contract. Both run in CI, so the client cannot reference an endpoint or field the server does not serve.
+- **Deterministic test posture:** the keyless backend lane (**711** tests + Hypothesis properties), `frontend npm run ci` (**439**) and the keyless Playwright lane (**20**) are the source of truth. The live-PostgreSQL integration lane (`pytest -m integration`) is credential-free but needs a `pgvector` database, so it runs in CI rather than in the fast local lane.
 
 ## 5. Manual sign-off items (intentionally open)
 

@@ -247,4 +247,6 @@ plus `pull` + `up -d`.
 - [Infrastructure & CI/CD](docs/INFRASTRUCTURE.md)
 - [Known limitations](docs/KNOWN_LIMITATIONS.md)
 - [Future roadmap](docs/FUTURE_ROADMAP.md)
+- [Changelog](CHANGELOG.md)
+- [Project state](docs/PROJECT_STATE.md) · [Session handoff](docs/SESSION_HANDOFF.md)
 - [Frontend guide](frontend/README.md)
