@@ -11,7 +11,7 @@ open_prs:
   - number: 2
     title: "v1.1: complete member/team administration + named cost-rate presets"
     branch: feat/v1.1-admin-crud-and-cost-defaults
-    head_sha: <pending push>
+    head_sha: f3a3039
     state: open
     contains:
       - "member/team admin CRUD (store + 7 endpoints + MembersView) incl. a cross-tenant write fix"
