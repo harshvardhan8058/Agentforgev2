@@ -7,6 +7,11 @@ Permission is a **single-file edit** here and requires no endpoint changes (Req 
 The mapping is constructed so the permission sets nest strictly
 ``viewer ⊆ member ⊆ admin ⊆ owner`` and every Role grants :attr:`Permission.READ`
 (Req 3.2, 3.5).
+
+Adding a Permission here is intentionally the whole change: ``frontend/src/auth/rbac.ts``
+mirrors this map for UI gating, and the two are kept honest by the frontend's own
+nesting/READ properties plus the fact that the client can only ever hide affordances the
+server would refuse anyway.
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ class Permission(str, Enum):
 
     MANAGE_MEMBERS = "manage_members"
     MANAGE_API_KEYS = "manage_api_keys"
+    MANAGE_INTEGRATIONS = "manage_integrations"
     INGEST_DOCUMENTS = "ingest_documents"
     RUN_AGENTS = "run_agents"
     READ = "read"
@@ -41,7 +47,13 @@ _MEMBER: frozenset[Permission] = _VIEWER | {
     Permission.RUN_AGENTS,
     Permission.INGEST_DOCUMENTS,
 }
-_ADMIN: frozenset[Permission] = _MEMBER | {Permission.MANAGE_API_KEYS}
+# Integration connection configuration is administrative deployment-shaped work, granted
+# alongside API-key management: both configure how the org reaches the outside world, and
+# neither can disclose a credential (integration config is non-secret by construction).
+_ADMIN: frozenset[Permission] = _MEMBER | {
+    Permission.MANAGE_API_KEYS,
+    Permission.MANAGE_INTEGRATIONS,
+}
 _OWNER: frozenset[Permission] = _ADMIN | {Permission.MANAGE_MEMBERS}
 
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {

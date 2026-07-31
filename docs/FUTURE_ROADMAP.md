@@ -4,15 +4,41 @@
 
 ## v1.1 — Hardening & polish (near-term)
 
-Goal: reduce operational friction and close the small gaps left open in v1.0, without new problem domains.
+Goal: reduce operational friction and close the small gaps left open in v1.0, without new
+problem domains. Status is tracked per item; `docs/PROJECT_STATE.md` holds the same list in
+machine-readable form.
 
-- **CPU-slim backend image:** publish a ~3.5 GB CPU-only image variant alongside the CUDA image; make the default runtime image lighter for cloud deploys.
-- **Integrations management UI:** a frontend page to view `/integrations/status`, toggle enablement, and manage per-integration connection config (non-secret fields).
-- **OpenAPI contract refresh:** regenerate `frontend/openapi.json` to include `/integrations/status` and wire a CI freshness check.
-- **Admin CRUD completion:** add list/update/remove endpoints for members and list/delete for teams, plus the matching UI, closing the create/add-only gap.
-- **Analytics cost defaults:** ship a starter `cost_rate_table_json` and per-model rate presets so cost dashboards are meaningful out of the box.
-- **Trace export polish:** graceful UI when tracing is NoOp; optional OpenTelemetry exporter in addition to LangSmith.
-- **Docs & DX:** expand `DEPLOYMENT.md` rollback runbooks, add a quickstart, and document the integration-lane test suite.
+**Done** (on `feat/v1.1-admin-crud-and-cost-defaults`, [PR #2](https://github.com/harshvardhan8058/Agentforgev2/pull/2)):
+
+- ~~**Admin CRUD completion:**~~ list/update/remove members, list/delete teams, team-member
+  list/remove, plus the UI. Also enforced a last-owner invariant and closed a cross-tenant
+  team-membership write.
+- ~~**Analytics cost defaults:**~~ named per-model rate presets (`COST_RATE_PRESET`,
+  shipping `groq-public-2026-07`), `GROQ_MODEL` so every priced model is selectable, and
+  `GET /analytics/cost-rates` + a pricing panel so a zero total is explained rather than
+  presented as a real figure.
+- ~~**Integrations management UI:**~~ per-org **non-secret** connection config over
+  `/integrations/connections` behind a new `manage_integrations` permission. Enablement
+  deliberately stays a server-credential decision, so there is no in-app "toggle" — the UI
+  reports enablement and manages configuration. This also gave the Phase 8
+  `Integration_Connection` store its first HTTP surface.
+
+**Already delivered earlier** (the entries below predated production hardening B6):
+
+- ~~**OpenAPI contract refresh:**~~ `frontend/openapi.json` is regenerated and both
+  `scripts/check_openapi.py` (server side) and `frontend/scripts/check-codegen.mjs` (client
+  side) fail CI on drift.
+
+**Remaining:**
+
+- **CPU-slim backend image:** the shipped image is already CPU-only (no CUDA/NVIDIA packages,
+  CI-gated at ≤ 4 GB). Going materially smaller means serving embeddings from outside the
+  image — a design change rather than a packaging tweak.
+- **Trace export polish:** graceful UI when tracing is NoOp (today a client cannot tell
+  "tracing is off" from "no traces yet"); optional OpenTelemetry exporter behind the existing
+  `Tracing_Exporter` seam, alongside LangSmith.
+- **Docs & DX:** expand `DEPLOYMENT.md` rollback runbooks, add a quickstart, and document the
+  integration-lane test suite (credential-free, but needs a `pgvector` database).
 
 ## v2.0 — Real integrations & production scale
 

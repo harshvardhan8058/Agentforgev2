@@ -77,9 +77,14 @@ export function UsageTotals({
               Tokens are being recorded, but this deployment has no cost rates, so
               every cost computes to zero. Set{" "}
               <code className="rounded bg-bg-subtle px-1 py-0.5 font-mono text-[0.7rem]">
+                COST_RATE_PRESET
+              </code>{" "}
+              (or{" "}
+              <code className="rounded bg-bg-subtle px-1 py-0.5 font-mono text-[0.7rem]">
                 COST_RATE_TABLE_JSON
               </code>{" "}
-              in the server environment to price them.
+              for individual models) in the server environment to price them — see
+              Cost rates below.
             </p>
           )}
         </CardContent>

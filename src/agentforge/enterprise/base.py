@@ -13,6 +13,7 @@ the irreversible ``password_hash`` / ``key_hash`` (Req 1.1, 5.2, 8.5).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from uuid import UUID
 
 from agentforge.enterprise.models import (
@@ -43,6 +44,16 @@ class Identity_Store(ABC):
     @abstractmethod
     def get_user(self, user_id: UUID) -> User | None:
         """Return the User with ``user_id`` or ``None`` if no such User exists."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_users_by_ids(self, user_ids: Sequence[UUID]) -> list[User]:
+        """Return the Users whose ids appear in ``user_ids`` (unknown ids are skipped).
+
+        Exists so a caller resolving a *set* of memberships to display names issues one
+        store call instead of one per row. Ordering is unspecified; callers that need a
+        particular order index the result by ``User.id``.
+        """
         raise NotImplementedError
 
     # --- organizations ---
@@ -77,10 +88,63 @@ class Identity_Store(ABC):
         """Return every Membership held by ``user_id`` (used by ``Auth_Service.login``)."""
         raise NotImplementedError
 
+    @abstractmethod
+    def update_membership_role(
+        self, user_id: UUID, org_id: UUID, role: Role
+    ) -> Membership | None:
+        """Set the Role on an existing Membership; return it, or ``None`` if absent.
+
+        ``None`` (rather than an error) so the transport layer maps an unknown member —
+        including a member of a *different* organization — to the same uniform 404 and
+        never discloses existence across tenants (Req 4.3, 5.7).
+
+        Raises ``AppError("last_owner", 400)`` when the change would leave ``org_id``
+        with no Membership holding :attr:`Role.OWNER`: an Organization must always
+        retain at least one principal that can administer it.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_membership(self, user_id: UUID, org_id: UUID) -> bool:
+        """Remove a Membership (and the User's Team_Memberships within ``org_id``).
+
+        Returns ``True`` when a Membership was removed and ``False`` when none existed,
+        so an unknown or cross-tenant member is the uniform 404 (Req 4.3, 5.7). Team
+        memberships inside ``org_id`` are removed with it, because a Team_Membership may
+        only exist for a User holding a Membership in the Team's Organization (Req 2.5).
+
+        Raises ``AppError("last_owner", 400)`` when the removal would leave ``org_id``
+        with no Membership holding :attr:`Role.OWNER`.
+        """
+        raise NotImplementedError
+
     # --- teams (org-scoped) + team memberships ---
     @abstractmethod
     def create_team(self, org_id: UUID, name: str) -> Team:
         """Persist a Team associated with ``org_id`` (Req 2.3)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_team(self, org_id: UUID, team_id: UUID) -> Team | None:
+        """Return the Team ``team_id`` iff it belongs to ``org_id``, else ``None``.
+
+        ``org_id`` is part of the query, so a Team owned by another tenant is
+        structurally invisible rather than filtered after the fact (Req 4.3, 5.7).
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_teams(self, org_id: UUID) -> list[Team]:
+        """Return every Team scoped to ``org_id``, oldest first (Req 2.3, 4.4)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_team(self, org_id: UUID, team_id: UUID) -> bool:
+        """Delete the Team ``team_id`` iff it belongs to ``org_id``, with its memberships.
+
+        Returns ``True`` when a Team was deleted, ``False`` when none matched, so an
+        unknown or cross-tenant Team is the uniform 404 (Req 4.3, 5.7).
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -89,6 +153,24 @@ class Identity_Store(ABC):
 
         Raises ``AppError("org_mismatch", 400)`` when the User holds no Membership in
         the Team's Organization (Req 2.5).
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_team_members(self, org_id: UUID, team_id: UUID) -> list[Team_Membership]:
+        """Return the Team_Memberships of ``team_id`` iff it belongs to ``org_id``.
+
+        A Team owned by another tenant yields an empty list, never another tenant's rows
+        (Req 4.3, 5.7). Ordered oldest first for a stable presentation.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_team_member(self, org_id: UUID, team_id: UUID, user_id: UUID) -> bool:
+        """Remove a User from a Team iff the Team belongs to ``org_id``.
+
+        Returns ``True`` when a Team_Membership was removed and ``False`` otherwise, so
+        an unknown or cross-tenant target is the uniform 404 (Req 4.3, 5.7).
         """
         raise NotImplementedError
 

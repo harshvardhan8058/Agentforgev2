@@ -175,6 +175,14 @@ integration — so the keyless promise holds. Enable one by setting its env-only
 token (e.g. `SLACK_BOT_TOKEN`) in `.env`; introspect enablement (RBAC-gated,
 never exposing a value) via `GET /integrations/status`.
 
+Per-organization **non-secret** connector settings (a default Slack channel, a
+repository name) are managed over `/integrations/connections` — `read` to list,
+`manage_integrations` (admin and owner) to change — and surfaced on the
+Integrations page. Credentials are never accepted there: a credential-shaped key
+or value is refused with `invalid_config`, and the table has no column that could
+hold one. Storing settings never enables an integration; enablement remains a pure
+function of the server's credentials.
+
 ## Deployment
 
 Production runs the same images under a Compose overlay
@@ -239,4 +247,6 @@ plus `pull` + `up -d`.
 - [Infrastructure & CI/CD](docs/INFRASTRUCTURE.md)
 - [Known limitations](docs/KNOWN_LIMITATIONS.md)
 - [Future roadmap](docs/FUTURE_ROADMAP.md)
+- [Changelog](CHANGELOG.md)
+- [Project state](docs/PROJECT_STATE.md) · [Session handoff](docs/SESSION_HANDOFF.md)
 - [Frontend guide](frontend/README.md)

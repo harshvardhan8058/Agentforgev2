@@ -38,6 +38,7 @@ import { RANGE_PRESETS } from "./rangePresets";
 import { UsageTotals } from "./UsageTotals";
 import { UsageBreakdownTable } from "./UsageBreakdownTable";
 import { BreakdownBoundary } from "./BreakdownBoundary";
+import { CostRatesPanel } from "./CostRatesPanel";
 
 // Code-split the charting layer: kept out of the initial bundle and mocked in
 // tests (the module default-exports the chart component for `React.lazy`).
@@ -247,6 +248,11 @@ export function UsageDashboardView(): JSX.Element {
               </div>
             </div>
           )}
+
+          {/* Pricing is deployment configuration, not usage, so it renders
+              regardless of whether this range recorded anything — an operator
+              setting the platform up needs it most when there is no usage yet. */}
+          {!usage.isLoading && <CostRatesPanel />}
         </>
       )}
     </div>

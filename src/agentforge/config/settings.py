@@ -14,7 +14,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, ValidationError
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -148,8 +148,14 @@ class Settings(BaseSettings):
     # Decimal-as-string so no float drift; the keyless default is free (Req 2.5).
     cost_default_prompt_per_1k: str = "0.0"
     cost_default_completion_per_1k: str = "0.0"
+    # Optional named rate preset shipped with the platform (see
+    # ``observability/cost_presets.py``), e.g. "groq-public-2026-07". Unset means no
+    # preset, which keeps the keyless stack free and deterministic. An unknown name is a
+    # startup error, not a silent fallback.
+    cost_rate_preset: str | None = None
     # Optional JSON rate table, e.g.
-    # {"groq:llama-3.1-8b": {"prompt": "0.05", "completion": "0.08"}}.
+    # {"groq:llama-3.1-8b": {"prompt": "0.05", "completion": "0.08"}}. Entries here
+    # override the preset for the same (provider, model) pair.
     cost_rate_table_json: str | None = None
 
     # Guardrails (deterministic defaults; all optional). ``guardrail_max_input_chars`` is
@@ -170,6 +176,12 @@ class Settings(BaseSettings):
     # minute and a multi-role run can exhaust that on its own; the limit clears in
     # seconds, so a short bounded wait turns a dead run into a slightly slower one.
     llm_rate_limit_max_wait_seconds: float = 8.0
+
+    # Model the Groq provider requests. Exposed because the cost presets price models
+    # individually: without it, only the provider's built-in default was ever reachable,
+    # so a priced row for any other model was documentation rather than configuration.
+    # Blank/unset keeps the provider's own default.
+    groq_model: str | None = None
 
     # --- credentials (ALL optional) ---
     groq_api_key: SecretStr | None = None
@@ -246,6 +258,22 @@ class Settings(BaseSettings):
         toggle = getattr(self, f"{name}_enabled")
         return credential is not None and toggle is not False
 
+    @field_validator("cost_rate_preset", "cost_rate_table_json", "groq_model", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        """Treat an empty/whitespace-only string as "unset" for optional string settings.
+
+        Environment-driven configuration cannot distinguish "absent" from "present but
+        empty": a blank line in an `.env` template, Compose `${VAR}` interpolation with
+        the variable unset, `--env-file`, and CI all deliver ``""``. Without this,
+        ``COST_RATE_PRESET=`` would be validated as a *misspelled preset name* and abort
+        startup, so shipping the setting in a template with no value would ship an
+        unbootable deployment.
+        """
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
+
     def active_tracing_exporter(self) -> str:
         """Return the active Tracing_Exporter name based on credential presence.
 
@@ -294,6 +322,26 @@ def load_settings() -> Settings:
         and settings.jwt_secret is None
     ):
         raise ConfigError(["jwt_secret"], detail="required in production profile")
+
+    # A misspelled cost preset must abort startup, not quietly leave the deployment
+    # unpriced: reported costs are only trustworthy if the rates behind them were the
+    # ones the operator asked for. Validated here — the single configuration gate — so
+    # the failure names the setting instead of surfacing later from the cost model.
+    #
+    # Truthiness, not ``is not None``: an EMPTY value means "unset", and empty values are
+    # everywhere in this deployment model — a blank line in an `.env` template, Compose
+    # `${VAR}` interpolation with the variable unset, `--env-file`, CI. Treating `""` as
+    # a misspelled preset name would make a blank optional setting an unbootable API.
+    if settings.cost_rate_preset:
+        # Local import: the preset catalogue imports nothing from this module at import
+        # time, but keeping it lazy holds settings free of observability dependencies.
+        from agentforge.observability.cost_presets import RATE_PRESETS, preset_names
+
+        if settings.cost_rate_preset not in RATE_PRESETS:
+            raise ConfigError(
+                ["cost_rate_preset"],
+                detail=f"unknown preset; known presets: {', '.join(preset_names())}",
+            )
     return settings
 
 

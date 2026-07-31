@@ -151,11 +151,15 @@ def _build_groq(settings: Settings) -> LLM_Provider:
     from agentforge.llm.groq_provider import Groq_Provider  # local import by design
 
     assert settings.groq_api_key is not None
+    # The model is passed only when configured, so an unset value keeps the provider's
+    # own documented default rather than this module restating it.
+    model = {"model": settings.groq_model} if settings.groq_model else {}
     return Groq_Provider(
         api_key=settings.groq_api_key.get_secret_value(),
         timeout_seconds=settings.llm_timeout_seconds,
         max_retries=settings.llm_max_retries,
         rate_limit_max_wait_seconds=settings.llm_rate_limit_max_wait_seconds,
+        **model,
     )
 
 

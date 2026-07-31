@@ -1,0 +1,229 @@
+"""Unit tests for the Integration_Connection config admission policy (Req 11.4).
+
+``integration_connections`` has no column that could hold a credential, which is a
+guarantee about the *schema*, not about what an operator types into a free-form JSON
+object. The obvious mistake — pasting a bot token in as ``{"token": "xoxb-…"}`` — would
+otherwise be stored happily and become readable by anyone in the org holding ``read``.
+
+These tests pin the policy that refuses it: credential-shaped keys, credential-shaped
+values, nested structures (which would let one level of indirection evade the key check),
+and unbounded payloads. Every rejection must name the field and must never echo the
+submitted value, since that value may be the credential it just refused.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from agentforge.integrations.config_policy import (
+    MAX_CONFIG_KEYS,
+    MAX_KEY_LENGTH,
+    MAX_VALUE_LENGTH,
+    validate_connection_config,
+)
+
+
+# --- accepted ---------------------------------------------------------------------
+
+
+def test_none_and_empty_are_accepted_as_empty():
+    assert validate_connection_config(None) == {}
+    assert validate_connection_config({}) == {}
+
+
+def test_flat_scalar_settings_are_accepted_verbatim():
+    config = {
+        "default_channel": "#ops",
+        "max_results": 25,
+        "threshold": 0.5,
+        "notify": True,
+        "label": None,
+    }
+    assert validate_connection_config(config) == config
+
+
+def test_the_returned_mapping_is_a_copy():
+    """A caller mutating the result must not mutate what it submitted."""
+    submitted = {"default_channel": "#ops"}
+    accepted = validate_connection_config(submitted)
+    accepted["default_channel"] = "#changed"
+    assert submitted == {"default_channel": "#ops"}
+
+
+# --- credential-shaped keys -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "token",
+        "TOKEN",
+        "slack_bot_token",
+        "api_key",
+        "apiKey",
+        "client_secret",
+        "password",
+        "passwd",
+        "credential",
+        "private_key",
+        "Authorization",
+        "bearer",
+        "refresh_token",
+        "session_id",
+        "access_key_id",
+        "webhook_signature",
+    ],
+)
+def test_credential_shaped_keys_are_refused(key: str):
+    """The key's *intent* is what makes it dangerous: a placeholder becomes a real token."""
+    with pytest.raises(ValueError) as excinfo:
+        validate_connection_config({key: "placeholder"})
+    assert key in str(excinfo.value)
+
+
+def test_an_innocent_key_containing_a_marker_substring_is_still_refused():
+    """Substring matching is deliberate: `user_token_hint` is not worth the argument."""
+    with pytest.raises(ValueError):
+        validate_connection_config({"user_token_hint": "x"})
+
+
+# --- credential-shaped values -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "xoxb-1111-2222-abcdef",
+        "xoxp-1111-2222",
+        "xapp-1-A0000",
+        "ghp_0123456789abcdef",
+        "github_pat_0123456789",
+        "sk-0123456789abcdef",
+        "gsk_0123456789abcdef",
+        "ya29.a0AfB_placeholder",
+        "AIzaSyPlaceholderValue",
+        "Bearer abcdef",
+    ],
+)
+def test_credential_shaped_values_are_refused_under_any_key(value: str):
+    with pytest.raises(ValueError) as excinfo:
+        validate_connection_config({"default_channel": value})
+    assert "default_channel" in str(excinfo.value)
+
+
+def test_a_refusal_never_echoes_the_submitted_value():
+    """The message may be logged or returned; it must not carry the credential."""
+    secret = "xoxb-do-not-echo-this-value"
+    with pytest.raises(ValueError) as excinfo:
+        validate_connection_config({"channel": secret})
+    assert secret not in str(excinfo.value)
+
+
+# --- shape and size ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", [{"nested": "x"}, ["a", "b"], (1, 2), {1, 2}])
+def test_non_scalar_values_are_refused(value):
+    """Nesting would let one level of indirection evade the credential-key check."""
+    with pytest.raises(ValueError) as excinfo:
+        validate_connection_config({"settings": value})
+    assert "settings" in str(excinfo.value)
+
+
+def test_empty_or_non_string_keys_are_refused():
+    with pytest.raises(ValueError):
+        validate_connection_config({"": "x"})
+    with pytest.raises(ValueError):
+        validate_connection_config({"   ": "x"})
+    with pytest.raises(ValueError):
+        validate_connection_config({1: "x"})
+
+
+def test_too_many_keys_are_refused():
+    config = {f"setting_{i}": "x" for i in range(MAX_CONFIG_KEYS + 1)}
+    with pytest.raises(ValueError) as excinfo:
+        validate_connection_config(config)
+    assert str(MAX_CONFIG_KEYS) in str(excinfo.value)
+    # Exactly at the limit is accepted.
+    assert len(
+        validate_connection_config({f"setting_{i}": "x" for i in range(MAX_CONFIG_KEYS)})
+    ) == MAX_CONFIG_KEYS
+
+
+def test_oversized_key_and_value_are_refused():
+    with pytest.raises(ValueError):
+        validate_connection_config({"k" * (MAX_KEY_LENGTH + 1): "x"})
+    with pytest.raises(ValueError):
+        validate_connection_config({"default_channel": "v" * (MAX_VALUE_LENGTH + 1)})
+    # At the limit both are accepted.
+    assert validate_connection_config(
+        {"k" * MAX_KEY_LENGTH: "v" * MAX_VALUE_LENGTH}
+    ) == {"k" * MAX_KEY_LENGTH: "v" * MAX_VALUE_LENGTH}
+
+
+
+# --- the credential shapes an operator actually pastes ----------------------------
+#
+# A first cut recognised credentials only by key-name substrings and a case-sensitive list
+# of vendor prefixes. That caught `bot_token` and `xoxb-…` while accepting exactly the
+# things people put in connector settings: a Slack incoming-webhook URL (possession of
+# which IS authority to post), a DSN with the password inside it, a bare JWT, a lowercase
+# `bearer …` header value, and any vendor token pasted in upper case. Because listing
+# connections needs only `read`, anything admitted is readable by every member of the org.
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        # A webhook URL is a bearer capability, under any key name.
+        {"webhook_url": "https://hooks.slack.com/services/T00000/B00000/XXXXXXXX"},
+        {"notify_endpoint": "https://hooks.slack.com/services/T00000/B00000/XXXXXXXX"},
+        {"target": "https://discord.com/api/webhooks/123/abcdef"},
+        {"target": "https://chat.googleapis.com/v1/spaces/AAA/messages?key=x"},
+        # A DSN carries its password in the authority section.
+        {"store": "postgresql://user:sup3rpw@db.internal:5432/app"},
+        {"broker": "amqps://svc:pw@rabbit.internal:5671/vhost"},
+        # A JWT is a bearer token wherever it sits.
+        {"identifier": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.signature"},
+        {"header_value": "bearer eyJhbGciOiJIUzI1NiJ9.abc.def"},
+        # Case-folded vendor prefixes.
+        {"default_channel": "XOXB-1111-2222-secret"},
+        {"account": "AKIAIOSFODNN7EXAMPLE"},
+        {"account": "AIzaSyExampleValue"},
+        # PEM blocks.
+        {"material": "-----BEGIN OPENSSH PRIVATE KEY-----"},
+    ],
+)
+def test_credential_shapes_are_refused_regardless_of_key_name(config):
+    with pytest.raises(ValueError):
+        validate_connection_config(config)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["ssh_key", "signingKey", "deploy-key", "keys", "pat", "cookie", "dsn", "auth"],
+)
+def test_capability_bearing_key_names_are_refused(key: str):
+    """Names that grant something without ever saying "secret"."""
+    with pytest.raises(ValueError):
+        validate_connection_config({key: "placeholder"})
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        # Segment matching, not substring matching: "pat" is inside `folder_path` and
+        # "key" inside `keyboard_shortcut`, and refusing those would make the policy
+        # useless for ordinary settings.
+        {"folder_path": "/Shared/Reports"},
+        {"keyboard_shortcut": "ctrl+k"},
+        {"patch_level": 3},
+        {"monkey": "business"},
+        # A plain URL with no userinfo and no webhook host is ordinary configuration.
+        {"base_url": "https://api.example.com/v2"},
+        {"default_channel": "#ops", "repo": "acme/platform", "max_results": 25},
+        {"notify": True, "label": None},
+    ],
+)
+def test_ordinary_settings_are_still_accepted(config):
+    assert validate_connection_config(config) == config

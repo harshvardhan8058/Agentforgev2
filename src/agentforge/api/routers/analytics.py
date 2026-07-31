@@ -25,9 +25,15 @@ from agentforge.api.deps import (
     get_settings,
     require_permission,
 )
-from agentforge.api.schemas import UsageBreakdownEntry, UsageReportResponse
+from agentforge.api.schemas import (
+    CostRateEntry,
+    CostRatesResponse,
+    UsageBreakdownEntry,
+    UsageReportResponse,
+)
 from agentforge.config.settings import Settings
-from agentforge.observability.cost import parse_rate_table
+from agentforge.observability.cost import Rate, parse_rate_table
+from agentforge.observability.cost_presets import preset_names, resolve_rate_table
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.rbac import Permission
 from agentforge.observability.analytics import Analytics_Service
@@ -63,14 +69,24 @@ def _to_entries(entries: list[Breakdown_Entry]) -> list[UsageBreakdownEntry]:
     ]
 
 
+def _effective_rates(settings: Settings) -> dict[tuple[str, str], Rate]:
+    """Return the effective ``(provider, model) -> Rate`` table for this deployment.
+
+    Exactly the table the :class:`~agentforge.observability.cost.Cost_Model` was built
+    with — the named preset overlaid with explicit overrides — so what the pricing
+    endpoint reports and what the usage records were charged at cannot drift apart.
+    """
+    return resolve_rate_table(settings.cost_rate_preset, settings.cost_rate_table_json)
+
+
 def _rates_configured(settings: Settings) -> bool:
     """Return True iff this deployment can produce a non-zero cost.
 
-    True when a per-model rate table is supplied, or when either default per-1K rate is
-    non-zero. Parsed rather than merely checked for presence so an empty or all-zero
-    table is reported honestly as "not priced".
+    True when the effective per-model table prices anything, or when either default
+    per-1K rate is non-zero. Resolved rather than merely checked for presence so an empty
+    or all-zero table is reported honestly as "not priced".
     """
-    for rate in parse_rate_table(settings.cost_rate_table_json).values():
+    for rate in _effective_rates(settings).values():
         if rate.prompt_per_1k != 0 or rate.completion_per_1k != 0:
             return True
     return (
@@ -120,3 +136,42 @@ async def get_usage(
         )
     )
     return _to_response(report, rates_configured=_rates_configured(settings))
+
+
+@router.get("/analytics/cost-rates", response_model=CostRatesResponse)
+async def get_cost_rates(
+    settings: Settings = Depends(get_settings),
+    _principal: Principal = Depends(require_permission(Permission.READ)),
+) -> CostRatesResponse:
+    """Return the pricing this deployment charges usage at (Req 2.4, 2.5, 3.4).
+
+    A usage report's ``total_cost`` is only interpretable next to the rates that produced
+    it: a zero total means "nothing spent" *or* "nothing priced", and a non-zero one is
+    unauditable without knowing the per-model rate. Both questions are answered here.
+
+    The response is deployment configuration, not tenant data — it is identical for every
+    org — but it still requires ``read``, because an unauthenticated caller has no reason
+    to learn how a deployment is priced. It contains no credential: rates are numbers, and
+    the preset is a public name (Req 10.1).
+    """
+    rates = _effective_rates(settings)
+    overrides = set(parse_rate_table(settings.cost_rate_table_json))
+    return CostRatesResponse(
+        preset=settings.cost_rate_preset,
+        available_presets=preset_names(),
+        default_prompt_per_1k=str(Decimal(str(settings.cost_default_prompt_per_1k))),
+        default_completion_per_1k=str(
+            Decimal(str(settings.cost_default_completion_per_1k))
+        ),
+        configured=_rates_configured(settings),
+        rates=[
+            CostRateEntry(
+                provider=provider,
+                model=model,
+                prompt_per_1k=str(rate.prompt_per_1k),
+                completion_per_1k=str(rate.completion_per_1k),
+                source="override" if (provider, model) in overrides else "preset",
+            )
+            for (provider, model), rate in sorted(rates.items())
+        ],
+    )

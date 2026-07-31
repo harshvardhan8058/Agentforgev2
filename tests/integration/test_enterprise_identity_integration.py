@@ -13,6 +13,7 @@ import uuid
 import pytest
 from sqlalchemy import text
 
+from agentforge.api.errors import AppError
 from agentforge.db.engine import create_engine
 from agentforge.db.migrations import run_migrations
 from agentforge.enterprise.identity import Pg_Identity_Store
@@ -85,3 +86,101 @@ async def test_pg_identity_round_trip(engine):
             text("DELETE FROM organizations WHERE id = :id"), {"id": str(org.id)}
         )
         await conn.execute(text("DELETE FROM users WHERE id = :id"), {"id": str(user.id)})
+
+
+
+async def test_pg_admin_crud_parity(engine):
+    """The administrative surface behaves identically to InMemory_Identity_Store.
+
+    Exercises the v1.1 read/update/remove methods against real SQL: batched user lookup,
+    role reassignment, the last-owner refusal (evaluated over a ``SELECT ... FOR UPDATE``
+    roster inside the writing transaction), member removal cascading to that org's team
+    memberships only, and the org-scoped team reads/writes.
+    """
+    store = Pg_Identity_Store(_dsn())
+
+    org = store.create_organization("Acme")
+    other_org = store.create_organization("Beta")
+    owner = store.create_user(f"owner-{uuid.uuid4().hex}@example.com", "hash")
+    member = store.create_user(f"member-{uuid.uuid4().hex}@example.com", "hash")
+    store.add_membership(owner.id, org.id, Role.OWNER)
+    store.add_membership(member.id, org.id, Role.MEMBER)
+    # The same user also belongs to the other tenant, so "removed from org" must not
+    # mean "removed everywhere".
+    store.add_membership(member.id, other_org.id, Role.OWNER)
+
+    team = store.create_team(org.id, f"eng-{uuid.uuid4().hex}")
+    other_team = store.create_team(other_org.id, f"eng-{uuid.uuid4().hex}")
+    store.add_team_member(team.id, member.id)
+    store.add_team_member(other_team.id, member.id)
+
+    # --- batched user lookup: deduplicated, unknown ids skipped ---
+    found = store.list_users_by_ids([owner.id, member.id, owner.id, uuid.uuid4()])
+    assert {u.id for u in found} == {owner.id, member.id}
+    assert store.list_users_by_ids([]) == []
+
+    # --- rosters are ordered oldest-first ---
+    assert [m.user_id for m in store.list_org_members(org.id)] == [owner.id, member.id]
+
+    # --- role reassignment ---
+    updated = store.update_membership_role(member.id, org.id, Role.ADMIN)
+    assert updated is not None and updated.role is Role.ADMIN
+    assert store.get_membership(member.id, org.id).role is Role.ADMIN
+    # Unknown / cross-tenant membership is None, never an error.
+    assert store.update_membership_role(uuid.uuid4(), org.id, Role.ADMIN) is None
+    assert store.update_membership_role(owner.id, other_org.id, Role.ADMIN) is None
+
+    # --- last-owner invariant, enforced in SQL ---
+    with pytest.raises(AppError) as excinfo:
+        store.update_membership_role(owner.id, org.id, Role.ADMIN)
+    assert excinfo.value.code == "last_owner"
+    with pytest.raises(AppError):
+        store.remove_membership(owner.id, org.id)
+    assert store.get_membership(owner.id, org.id).role is Role.OWNER
+
+    # --- org-scoped team reads ---
+    assert store.get_team(org.id, team.id).id == team.id
+    assert store.get_team(org.id, other_team.id) is None
+    assert [t.id for t in store.list_teams(org.id)] == [team.id]
+    assert [m.user_id for m in store.list_team_members(org.id, team.id)] == [member.id]
+    assert store.list_team_members(org.id, other_team.id) == []
+
+    # --- add_team_member is idempotent and preserves the original created_at ---
+    first = store.list_team_members(org.id, team.id)[0]
+    assert store.add_team_member(team.id, member.id).created_at == first.created_at
+
+    # --- member removal drops team memberships in THIS org only ---
+    assert store.remove_membership(member.id, org.id) is True
+    assert store.get_membership(member.id, org.id) is None
+    assert store.list_team_members(org.id, team.id) == []
+    assert store.get_membership(member.id, other_org.id) is not None
+    assert [m.user_id for m in store.list_team_members(other_org.id, other_team.id)] == [
+        member.id
+    ]
+    assert store.remove_membership(member.id, org.id) is False
+
+    # --- team member removal keeps the org membership; team deletion cascades ---
+    store.add_membership(member.id, org.id, Role.MEMBER)
+    store.add_team_member(team.id, member.id)
+    assert store.remove_team_member(org.id, team.id, member.id) is True
+    assert store.remove_team_member(org.id, team.id, member.id) is False
+    assert store.get_membership(member.id, org.id) is not None
+    assert store.remove_team_member(other_org.id, team.id, member.id) is False
+
+    store.add_team_member(team.id, member.id)
+    assert store.delete_team(other_org.id, team.id) is False  # cross-tenant: absent
+    assert store.delete_team(org.id, team.id) is True
+    assert store.list_teams(org.id) == []
+    assert store.list_team_members(org.id, team.id) == []
+    assert store.delete_team(org.id, team.id) is False
+
+    # Cleanup: deleting the orgs cascades memberships/teams/team_memberships.
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("DELETE FROM organizations WHERE id = ANY(CAST(:ids AS uuid[]))"),
+            {"ids": [str(org.id), str(other_org.id)]},
+        )
+        await conn.execute(
+            text("DELETE FROM users WHERE id = ANY(CAST(:ids AS uuid[]))"),
+            {"ids": [str(owner.id), str(member.id)]},
+        )

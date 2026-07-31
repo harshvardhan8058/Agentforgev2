@@ -93,6 +93,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/cost-rates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Cost Rates
+         * @description Return the pricing this deployment charges usage at (Req 2.4, 2.5, 3.4).
+         *
+         *     A usage report's ``total_cost`` is only interpretable next to the rates that produced
+         *     it: a zero total means "nothing spent" *or* "nothing priced", and a non-zero one is
+         *     unauditable without knowing the per-model rate. Both questions are answered here.
+         *
+         *     The response is deployment configuration, not tenant data — it is identical for every
+         *     org — but it still requires ``read``, because an unauthenticated caller has no reason
+         *     to learn how a deployment is priced. It contains no credential: rates are numbers, and
+         *     the preset is a public name (Req 10.1).
+         */
+        get: operations["get_cost_rates_analytics_cost_rates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics/usage": {
         parameters: {
             query?: never;
@@ -456,6 +485,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/integrations/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Integration Connections
+         * @description Return the caller org's stored connection configs, oldest first (Req 11.1).
+         *
+         *     ``read`` is sufficient: the records are non-secret by construction, and seeing that (say)
+         *     a default Slack channel is set is ordinary context for anybody who can use the platform.
+         *     Mutating them requires ``manage_integrations``.
+         */
+        get: operations["list_integration_connections_integrations_connections_get"];
+        put?: never;
+        /**
+         * Create Integration Connection
+         * @description Store non-secret config for one integration, scoped to the caller's org (Req 11.1).
+         *
+         *     The integration name must be one the platform ships, and the config must satisfy the
+         *     non-secret admission policy; both refusals are 400s naming the offending field. The
+         *     record does not affect enablement — that stays a pure function of ``Settings``
+         *     (Req 11.5) — so writing config never grants an integration any capability.
+         */
+        post: operations["create_integration_connection_integrations_connections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/connections/{connection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Integration Connection
+         * @description Return one connection owned by the caller's org; unknown/cross-tenant is 404.
+         */
+        get: operations["get_integration_connection_integrations_connections__connection_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Integration Connection
+         * @description Delete a connection owned by the caller's org; unknown/cross-tenant is 404.
+         */
+        delete: operations["delete_integration_connection_integrations_connections__connection_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Integration Connection
+         * @description Replace a connection's config; unknown/cross-tenant is 404, bad config is 400.
+         */
+        patch: operations["update_integration_connection_integrations_connections__connection_id__patch"];
+        trace?: never;
+    };
     "/integrations/status": {
         parameters: {
             query?: never;
@@ -668,7 +758,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Members
+         * @description Return every Membership in ``org_id`` with its User's email (Req 2.6, 4.4).
+         *
+         *     The store filters by ``org_id``, so another tenant's roster is structurally
+         *     unreachable; emails are resolved in one batched call rather than per row.
+         */
+        get: operations["list_members_orgs__org_id__members_get"];
         put?: never;
         /**
          * Add Member
@@ -681,7 +778,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/orgs/{org_id}/teams": {
+    "/orgs/{org_id}/members/{user_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -689,6 +786,40 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Member
+         * @description Remove a member from ``org_id``, together with their Team_Memberships (Req 2.5).
+         *
+         *     An unknown or cross-tenant member is a uniform 404; removing the last owner raises
+         *     ``AppError("last_owner", 400)``.
+         */
+        delete: operations["remove_member_orgs__org_id__members__user_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Member Role
+         * @description Reassign a member's Role within ``org_id`` (Req 2.2, 3.4).
+         *
+         *     An unknown member — or one belonging to another tenant — is a uniform 404. Demoting
+         *     the organization's last owner raises ``AppError("last_owner", 400)``.
+         */
+        patch: operations["update_member_role_orgs__org_id__members__user_id__patch"];
+        trace?: never;
+    };
+    "/orgs/{org_id}/teams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Teams
+         * @description Return every Team in ``org_id``, oldest first (Req 2.3, 4.4).
+         */
+        get: operations["list_teams_orgs__org_id__teams_get"];
         put?: never;
         /**
          * Create Team
@@ -701,7 +832,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/orgs/{org_id}/teams/{team_id}/members": {
+    "/orgs/{org_id}/teams/{team_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -710,15 +841,66 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        post?: never;
+        /**
+         * Delete Team
+         * @description Delete a Team from ``org_id`` with its Team_Memberships; unknown/cross-org is 404.
+         */
+        delete: operations["delete_team_orgs__org_id__teams__team_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org_id}/teams/{team_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Team Members
+         * @description Return a Team's members with their emails; unknown/cross-org Team is 404.
+         */
+        get: operations["list_team_members_orgs__org_id__teams__team_id__members_get"];
+        put?: never;
         /**
          * Add Team Member
          * @description Add a user (by email) to a Team (Req 2.4, 2.5).
+         *
+         *     The Team is resolved **within the caller's org first**: a Team belonging to another
+         *     tenant is a uniform 404, never an attempt that the store might accept. (Without that
+         *     lookup, a user who happens to hold memberships in both organizations would satisfy the
+         *     store's cross-org guard and be added to a foreign tenant's Team — Req 4.3, 5.7.)
          *
          *     A user holding no Membership in the team's Organization propagates
          *     ``AppError("org_mismatch", 400)`` from the Identity_Store.
          */
         post: operations["add_team_member_orgs__org_id__teams__team_id__members_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org_id}/teams/{team_id}/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Team Member
+         * @description Remove a User from a Team within ``org_id``; unknown/cross-org target is 404.
+         *
+         *     The member keeps their Organization Membership — only the Team association is removed.
+         */
+        delete: operations["remove_team_member_orgs__org_id__teams__team_id__members__user_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1050,6 +1232,55 @@ export interface components {
             preview?: string | null;
         };
         /**
+         * CostRateEntry
+         * @description One effective per-1K-token price for a ``(provider, model)`` pair.
+         *
+         *     Rates are exact decimal **strings** for the same reason costs are: a price of
+         *     ``0.00005`` per 1K tokens is not representable as a float without drift, and the
+         *     client renders it verbatim rather than reformatting it.
+         */
+        CostRateEntry: {
+            /** Completion Per 1K */
+            completion_per_1k: string;
+            /** Model */
+            model: string;
+            /** Prompt Per 1K */
+            prompt_per_1k: string;
+            /** Provider */
+            provider: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "preset" | "override";
+        };
+        /**
+         * CostRatesResponse
+         * @description The pricing this deployment charges **new** usage at.
+         *
+         *     Deployment-wide (identical for every org) and credential-free: rates are numbers and
+         *     ``preset`` is a public name. It describes current configuration only — a stored
+         *     ``Usage_Record.cost`` was computed by the rates in force when that record was written,
+         *     so changing pricing does not restate history and this response cannot explain it.
+         */
+        CostRatesResponse: {
+            /** Available Presets */
+            available_presets?: string[];
+            /**
+             * Configured
+             * @default false
+             */
+            configured: boolean;
+            /** Default Completion Per 1K */
+            default_completion_per_1k: string;
+            /** Default Prompt Per 1K */
+            default_prompt_per_1k: string;
+            /** Preset */
+            preset?: string | null;
+            /** Rates */
+            rates?: components["schemas"]["CostRateEntry"][];
+        };
+        /**
          * CreateApiKeyRequest
          * @description Body for ``POST /orgs/{id}/api-keys`` — issue a key granting ``role`` (Req 5.1).
          */
@@ -1101,6 +1332,23 @@ export interface components {
             name: string;
         };
         /**
+         * CreateIntegrationConnectionRequest
+         * @description Body for ``POST /integrations/connections`` — per-org, NON-SECRET config (Req 11.4).
+         *
+         *     ``config`` is a flat mapping of scalar settings (e.g. ``{"default_channel": "#ops"}``).
+         *     Credential-shaped keys/values, nested structures, and oversized payloads are refused by
+         *     the admission policy in ``integrations/config_policy.py``; credentials belong in the
+         *     server environment, never here.
+         */
+        CreateIntegrationConnectionRequest: {
+            /** Config */
+            config?: {
+                [key: string]: string | number | boolean | null;
+            };
+            /** Integration */
+            integration: string;
+        };
+        /**
          * CreateOrgRequest
          * @description Body for ``POST /orgs`` — an authenticated user creates an org they own.
          */
@@ -1141,9 +1389,18 @@ export interface components {
         };
         /**
          * CreateTeamResponse
-         * @description Response carrying the newly-created Team id (Req 2.3).
+         * @description Response carrying the newly-created Team (Req 2.3).
+         *
+         *     Carries the same fields as a :class:`TeamSummary` row (``created_at`` included) so a
+         *     client can place the created team into its list immediately instead of guessing a
+         *     timestamp or blocking on a re-read.
          */
         CreateTeamResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /** Name */
             name: string;
             /**
@@ -1329,6 +1586,28 @@ export interface components {
             status: "ingested";
         };
         /**
+         * IntegrationConnectionResponse
+         * @description One stored Integration_Connection — non-secret config only (Req 11.1, 11.4).
+         */
+        IntegrationConnectionResponse: {
+            /** Config */
+            config: {
+                [key: string]: string | number | boolean | null;
+            };
+            /**
+             * Connection Id
+             * Format: uuid
+             */
+            connection_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Integration */
+            integration: string;
+        };
+        /**
          * IntegrationStatusEntry
          * @description One integration's public status: its stable name and whether it is Enabled.
          *
@@ -1369,6 +1648,31 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /**
+         * MemberSummary
+         * @description One row of ``GET /orgs/{id}/members`` — a Membership with its User's email.
+         *
+         *     ``email`` is ``None`` only when no User row backs the Membership. Postgres makes that
+         *     referentially impossible (``memberships.user_id`` is a foreign key), so it can occur
+         *     only for a synthetic in-memory membership; the row is still reported rather than
+         *     silently dropped, because omitting a member from an administrative roster is worse
+         *     than reporting one whose display name could not be resolved.
+         */
+        MemberSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Email */
+            email?: string | null;
+            role: components["schemas"]["Role"];
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
         };
         /** MessageModel */
         MessageModel: {
@@ -1544,6 +1848,44 @@ export interface components {
             status: "running" | "awaiting_approval" | "terminated";
         };
         /**
+         * TeamMemberSummary
+         * @description One row of ``GET /orgs/{id}/teams/{tid}/members`` (Req 2.4).
+         *
+         *     ``email`` follows the same contract as :attr:`MemberSummary.email`.
+         */
+        TeamMemberSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Email */
+            email?: string | null;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /**
+         * TeamSummary
+         * @description One row of ``GET /orgs/{id}/teams`` — an org-scoped Team (Req 2.3).
+         */
+        TeamSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Name */
+            name: string;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+        };
+        /**
          * TokenResponse
          * @description A freshly-issued bearer Access_Token (Req 1.2).
          */
@@ -1576,6 +1918,31 @@ export interface components {
             entries?: components["schemas"]["TraceEntryModel"][];
             /** Run Id */
             run_id: string;
+        };
+        /**
+         * UpdateIntegrationConnectionRequest
+         * @description Body for ``PATCH /integrations/connections/{id}`` — replaces the stored config.
+         *
+         *     The config is **replaced**, not merged: merging would make removing a setting
+         *     impossible, and the record is small enough that a client always holds all of it.
+         *
+         *     ``config`` is therefore **required**. With replace semantics an omitted field cannot mean
+         *     "leave it alone", so defaulting it would make ``PATCH {}`` a silent erase of every setting
+         *     reported as success — reachable by a client that serialises only dirty fields, or by a
+         *     typo. Sending ``{"config": {}}`` explicitly still clears it.
+         */
+        UpdateIntegrationConnectionRequest: {
+            /** Config */
+            config: {
+                [key: string]: string | number | boolean | null;
+            };
+        };
+        /**
+         * UpdateMemberRoleRequest
+         * @description Body for ``PATCH /orgs/{id}/members/{user_id}`` — reassign a member's Role.
+         */
+        UpdateMemberRoleRequest: {
+            role: components["schemas"]["Role"];
         };
         /**
          * UsageBreakdownEntry
@@ -1767,6 +2134,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_cost_rates_analytics_cost_rates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CostRatesResponse"];
                 };
             };
         };
@@ -2307,6 +2694,154 @@ export interface operations {
             };
         };
     };
+    list_integration_connections_integrations_connections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationConnectionResponse"][];
+                };
+            };
+        };
+    };
+    create_integration_connection_integrations_connections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateIntegrationConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationConnectionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_integration_connection_integrations_connections__connection_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationConnectionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_integration_connection_integrations_connections__connection_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_integration_connection_integrations_connections__connection_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateIntegrationConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationConnectionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_integration_status_integrations_status_get: {
         parameters: {
             query?: never;
@@ -2617,6 +3152,37 @@ export interface operations {
             };
         };
     };
+    list_members_orgs__org_id__members_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     add_member_orgs__org_id__members_post: {
         parameters: {
             query?: never;
@@ -2639,6 +3205,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AddMemberResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_member_orgs__org_id__members__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_member_role_orgs__org_id__members__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMemberRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_teams_orgs__org_id__teams_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamSummary"][];
                 };
             };
             /** @description Validation Error */
@@ -2687,6 +3350,68 @@ export interface operations {
             };
         };
     };
+    delete_team_orgs__org_id__teams__team_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_team_members_orgs__org_id__teams__team_id__members_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamMemberSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     add_team_member_orgs__org_id__teams__team_id__members_post: {
         parameters: {
             query?: never;
@@ -2711,6 +3436,37 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AddTeamMemberResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_team_member_orgs__org_id__teams__team_id__members__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                team_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

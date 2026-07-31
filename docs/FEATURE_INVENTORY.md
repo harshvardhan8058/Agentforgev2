@@ -87,13 +87,14 @@
 **Usage & Cost Dashboard**
 - **Purpose:** Org-scoped token/cost usage with time-range and by-provider/model/user breakdowns.
 - **Backend modules:** `observability` (Instrumented_Provider usage capture, Cost_Model with Decimal, analytics store), `api/routers/analytics.py`, migrations.
-- **Frontend:** `features/analytics/UsageDashboardView`, lazy `UsageCharts` (Recharts), per-breakdown error boundaries; cost strings rendered verbatim.
-- **Endpoints:** `GET /analytics/usage?start&end`.
-- **User workflow:** Open dashboard → totals + breakdowns + charts → set time range → empty state when no records.
+- **Frontend:** `features/analytics/UsageDashboardView`, lazy `UsageCharts` (Recharts), per-breakdown error boundaries, `CostRatesPanel` (effective pricing + how to set it); cost strings and rate strings rendered verbatim.
+- **Endpoints:** `GET /analytics/usage?start&end`, `GET /analytics/cost-rates`.
+- **Pricing:** resolves default rates → named `COST_RATE_PRESET` (shipped presets, e.g. `groq-public-2026-07` with Groq's published per-model list prices) → explicit `COST_RATE_TABLE_JSON` overrides. One environment variable prices a Groq deployment; an unknown preset name aborts startup naming the setting. `GET /analytics/cost-rates` reports the effective result with each entry's source.
+- **User workflow:** Open dashboard → totals + breakdowns + charts → set time range → empty state when no records; the Cost rates panel explains a zero total and names the presets available.
 - **Status:** Fully working.
-- **Keyless:** Yes (costs default to `0.0`; usage recorded from runs).
-- **Optional credentials:** None (real cost figures require configuring `cost_rate_table_json`).
-- **Limitations:** Costs are 0 unless a rate table is set; meaningful volume requires runs.
+- **Keyless:** Yes (no preset ⇒ every call costs exactly `Decimal("0")`, which is accurate for the local Fallback provider; usage is still recorded).
+- **Optional credentials:** None.
+- **Limitations:** Preset rates are the vendor's public list prices at the date in the preset name — indicative, not authoritative — so negotiated/batch/cached-input pricing needs per-pair overrides; meaningful volume requires runs.
 
 ## 8. Guardrails
 
@@ -127,26 +128,28 @@
 - **Purpose:** Expose third-party services as pluggable agent tools behind the Tool interface.
 - **Backend modules:** `integrations/base` (Integration_Tool, Connector ABC, error vocabulary), `integrations/{slack,gmail,google_drive,github}` (Disabled/Keyed/Mock connectors), `integrations/status`, `integrations/connection` (+ migration 0011), `integrations/governance`; wired in `config/container`; `api/routers/integrations.py`.
 - **Frontend:** No dedicated UI page in v1 (backend + status API only). Enabled tools become available to agent/multi-agent runs.
-- **Endpoints:** `GET /integrations/status` (RBAC-gated, org-scoped, `{name, enabled}`).
+- **Endpoints:** `GET /integrations/status` (RBAC-gated, org-scoped, `{name, enabled}`); connection config — `GET/POST /integrations/connections`, `GET/PATCH/DELETE /integrations/connections/{connection_id}` (`read` to list, `manage_integrations` to mutate).
 - **Tools/actions:** Slack (read_channel/post_message), Gmail (search/read/send), Drive (list/search/read — read-only), GitHub (search_code/search_issues/read_repo/create_issue).
-- **User workflow:** Set the integration's `SecretStr` token → tool auto-registers → agents can invoke it; `/integrations/status` shows which are enabled.
+- **User workflow:** Set the integration's `SecretStr` token → tool auto-registers → agents can invoke it; `/integrations/status` shows which are enabled; the Integrations page also manages per-org **non-secret** connector settings (default channel, repo, …).
+- **Non-secret guarantee:** the connection admission policy (`integrations/config_policy.py`) refuses credential-shaped keys (`token`, `api_key`, `client_secret`, …), recognisable credential values (`xoxb-`, `ghp_`, `sk-`, …), nested structures, and oversized payloads, with `invalid_config` (400) and without echoing the submitted value. Migration `0011` has no column that could hold a secret, and stored config never affects enablement.
 - **Status:** Disabled by default.
 - **Keyless:** Runs (all disabled — never invoked, no network).
 - **Optional credentials required to enable:** `SLACK_BOT_TOKEN`, `GMAIL_TOKEN`, `GOOGLE_DRIVE_TOKEN`, `GITHUB_TOKEN` (+ per-integration enable toggles).
-- **Limitations:** No frontend management UI in v1; connectors are deterministic stand-ins for real HTTP in this build; bounded timeout + result cap; single-write actions gated by `run_agents`; OAuth flows/webhooks out of scope; org connection config is non-secret only.
+- **Limitations:** connectors are deterministic stand-ins for real HTTP in this build; bounded timeout + result cap; single-write actions gated by `run_agents`; OAuth flows/webhooks out of scope; connection config is non-secret only and is not yet *read* by the connectors themselves (they take their parameters per tool call), so it is operator-facing configuration ahead of the live-connector work.
 
 ## 11. Admin (Enterprise controls)
 
 **Orgs, Teams, Members, API Keys, RBAC, Tenancy, Rate Limiting**
 - **Purpose:** Multi-tenant org management, role-based access, org-scoped API keys, per-principal rate limiting.
 - **Backend modules:** `enterprise/{principal,rbac,tenancy,models}`, auth service, Redis rate limiter, `api/routers/orgs.py`, migrations.
-- **Frontend:** `features/orgs/MembersView` (add member, create team, add team member), `ApiKeysView` (list/create/revoke, one-time secret + copy); `Can` RBAC gate; `OrgContextBadge`, `OrgSwitcher`.
-- **Endpoints:** `POST /orgs`, `POST /orgs/{org_id}/members`, `POST /orgs/{org_id}/teams`, `POST /orgs/{org_id}/teams/{team_id}/members`, `GET/POST /orgs/{org_id}/api-keys`, `DELETE /orgs/{org_id}/api-keys/{key_id}`.
-- **RBAC:** roles owner ⊇ admin ⊇ member ⊇ viewer over `read`, `run_agents`, `ingest_documents`, `manage_api_keys`, `manage_members`. Cross-tenant access → 404 (never 403).
+- **Frontend:** `features/orgs/MembersView` (roster with role reassignment + member removal, team list/create/delete, team-member add/remove — all confirmed for destructive actions), `ApiKeysView` (list/create/revoke, one-time secret + copy); `Can` RBAC gate; `OrgContextBadge`, `OrgSwitcher`.
+- **Endpoints:** `POST /orgs`; members — `GET/POST /orgs/{org_id}/members`, `PATCH/DELETE /orgs/{org_id}/members/{user_id}`; teams — `GET/POST /orgs/{org_id}/teams`, `DELETE /orgs/{org_id}/teams/{team_id}`, `GET/POST /orgs/{org_id}/teams/{team_id}/members`, `DELETE /orgs/{org_id}/teams/{team_id}/members/{user_id}`; API keys — `GET/POST /orgs/{org_id}/api-keys`, `DELETE /orgs/{org_id}/api-keys/{key_id}`.
+- **RBAC:** roles owner ⊇ admin ⊇ member ⊇ viewer over `read`, `run_agents`, `ingest_documents`, `manage_api_keys`, `manage_integrations`, `manage_members`. Cross-tenant access → 404 (never 403). A principal's permissions are derived from its role at authentication time, so adding a permission to a role also grants it to already-issued API keys holding that role.
 - **Status:** Fully working.
 - **Keyless:** Yes (rate limiting NoOp without Redis-enabled; Redis present in compose).
 - **Optional credentials:** None.
-- **Limitations:** Backend ships create/add only for members/teams — no list/update/remove member or list/delete team endpoints, so the UI intentionally omits those; API-key secret shown once, never persisted client-side.
+- **Invariants:** an organization always retains at least one `owner` — a demotion or removal that would remove the last one is refused with `last_owner` (400), checked inside the writing transaction; removing a member also drops their team memberships in that org only; every team read/write is scoped by `org_id`, so another tenant's team is 404.
+- **Limitations:** roles are the fixed set `owner|admin|member|viewer` (no custom roles); there is no invite flow — a user must already exist before being added by email; `manage_members` is granted to `owner` only; API-key secret shown once, never persisted client-side.
 
 ## 12. Deployment (Phase 9)
 
@@ -159,7 +162,7 @@
 - **Status:** Fully working locally (one-command).
 - **Keyless:** Yes.
 - **Optional credentials (production):** `JWT_SECRET` (required), DB creds, TLS certs, optional provider keys.
-- **Limitations:** Backend image is large (~11–12 GB, CUDA torch) because the CPU-wheel CDN is unreachable in CI — CI relocates Docker storage to `/mnt` to build it; CPU-slim image deferred. Compose-smoke + migration-idempotence properties (2 & 3) are integration-lane/runtime-gated. No Kubernetes/managed-cloud/DNS/real-cert-issuance in v1 (documented as external).
+- **Limitations:** the backend image still carries the embedding model's dependency tree; it installs **CPU-only torch** first (production hardening B4) and CI asserts the built image is ≤ 4 GB with no NVIDIA/CUDA packages in the venv, so the earlier ~11–12 GB CUDA build no longer applies. CI relocates Docker's storage to `/mnt` because the image is multi-GB while it builds. Compose-smoke + migration-idempotence properties (2 & 3) are integration-lane/runtime-gated. No Kubernetes/managed-cloud/DNS/real-cert-issuance in v1 (documented as external).
 
 ## Cross-cutting capabilities
 
@@ -168,13 +171,10 @@
 - **Conversation context** (`POST /conversations`, `GET /conversations/{id}`) threading `conversation_id` into agent + multi-agent runs.
 - **Premium frontend platform:** dark/light theming (design tokens, no-FOWT), command palette (⌘K, RBAC-gated), keyboard shortcuts, responsive app shell, skeleton/empty/error states, markdown+citations, Monaco, charts — all lazy-loaded.
 - **Observability everywhere:** trace recorder + pluggable exporter (NoOp keyless / LangSmith with key), never changes run outcomes.
-- **Testing posture:** backend keyless lane (472 tests) + Hypothesis properties; frontend `npm run ci`; deterministic, keyless.
+- **Testing posture:** backend keyless lane (**741** tests) + Hypothesis properties; frontend `npm run ci` (**440**); Playwright e2e (**20**, real production build with the API mocked at the network layer); all deterministic and keyless. A live-PostgreSQL integration lane (`pytest -m integration`) runs in CI against an ephemeral `pgvector` service container.
 
 ## Known v1.0 limitations / open items
 
 - LLM output deterministic without `GROQ_API_KEY`; tracing export NoOp without `LANGSMITH_API_KEY`; web search & all integrations disabled without their keys.
-- No frontend UI for integrations management yet (status API only).
-- Member/team management is create/add-only (no list/edit/remove) per shipped backend contracts.
-- `frontend/openapi.json` predates Phase 8's `/integrations/status` (contract-freshness gap; the SPA doesn't call that endpoint) — optional regen.
 - Manual final checkpoints (frontend Task 30, deployment Task 13) left unchecked for human sign-off; deployment Properties 2 & 3 run only in the integration lane / real Docker host.
-- Backend container image size (CUDA torch) — CPU-slim optimization deferred.
+- Backend container image size: CPU-only torch keeps it under the 4 GB CI budget, but a genuinely slim (~1 GB) image would need the embedding model moved out of the image.

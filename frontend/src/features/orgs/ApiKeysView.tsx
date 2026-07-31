@@ -181,11 +181,20 @@ export function ApiKeysView(): JSX.Element {
       {/* The create form is two controls; on its own row above the list it left
           most of the viewport empty. Beside the list it reads as one screen. */}
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
-      <div className="flex flex-col gap-4">
+      {/* The heading is what keeps the document order valid: the cards below use
+          <h3> titles, so without an <h2> at this level the page would jump
+          h1 -> h3 (axe `heading-order`, WCAG 1.3.1). */}
+      <section className="flex flex-col gap-3" aria-labelledby="issue-key-heading">
+      <h2
+        id="issue-key-heading"
+        className="text-sm font-semibold uppercase tracking-wide text-text-muted"
+      >
+        Create a key
+      </h2>
       <Can permission={MANAGE_API_KEYS}>
         <Card>
           <CardHeader>
-            <CardTitle>Create a key</CardTitle>
+            <CardTitle>Key role</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col items-stretch gap-3">
             <div className="flex flex-col gap-1.5">
@@ -252,7 +261,7 @@ export function ApiKeysView(): JSX.Element {
         </Card>
       )}
 
-      </div>
+      </section>
 
       <section className="flex min-w-0 flex-col gap-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-text-muted">

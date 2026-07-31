@@ -1,109 +1,173 @@
 # AgentForge — Session Handoff
 
-**Repo:** `harshvardhan8058/AgentForge` · **Branch of record:** `main` · **Last updated:** 2026-07-09
+**Repo:** `harshvardhan8058/Agentforgev2` · **Branch of record:** `main` ·
+**Work in flight:** `feat/v1.1-admin-crud-and-cost-defaults` ([PR #2](https://github.com/harshvardhan8058/Agentforgev2/pull/2)) ·
+**Last updated:** 2026-07-31
 
-> Self-contained handoff: a new session can continue from this file alone. Treat git/PR history as truth over the older docs (some are stale).
+> Self-contained: a new session can continue from this file alone. Treat git/PR history as
+> truth over prose. `docs/PROJECT_STATE.md` holds the same state in machine-readable form;
+> `CHANGELOG.md` lists the v1.1 changes individually.
 
-## 1. Current repository state (actual `main`)
-- `main` is the complete, production-ready source of truth. Phases 1–9 + production hardening are all merged. **No open PRs.**
-- Last significant merge: **PR #22 (Production Hardening)** → merge commit `1d7a15e`, 2026-07-09.
-- Stale docs: `docs/PROJECT_STATE.md` still says "Phase 9 in progress / PR #17 anticipated" (predates merges). Always `git checkout main && git pull` before working.
+## 1. Current state
 
-## 2. Merged PRs and what each introduced
-- **#1–#2** — Phases 1–2: FastAPI skeleton, config (all creds optional), Postgres+pgvector, Docker Compose, health checks, core RAG (chunk→embed→retrieve→grounded answer w/ citations), keyless Fallback LLM.
-- **#3/#5** — Phase 3 agentic layer: bounded LangGraph agent loop, Tool interface+registry, memory, conversations, SSE streaming, tracing.
-- **#6/#9** — Phase 4 multi-agent: supervisor Planner→Researcher→Writer→Critic, bounded rounds/revisions, human-approval gate (auto-approve keyless).
-- **#8/#10** — Phase 5 enterprise: argon2+JWT auth, orgs/teams, RBAC, `org_id` multi-tenancy (cross-tenant→404), API keys, Redis rate limiting.
-- **#11/#12** — Phase 6 observability: tracing exporter (NoOp/LangSmith), usage/cost, analytics, prompt registry, guardrails, evaluations.
-- **#14/#15** — Phase 7 React SPA ("AI-OS console").
-- **#16** — Phase 8 integrations: Slack/Gmail/Drive/GitHub pluggable tools (disabled keyless).
-- **#17** — Phase 9 deployment: multi-stage non-root images, nginx reverse proxy, unified keyless `docker-compose.yml` + `docker-compose.production.yml`, auto migrations, 4-job CI/CD (GHCR).
-- **#18** — docs (limitations/roadmap/architecture).
-- **#19** — runtime fixes: `.gitattributes` LF (fixes CRLF entrypoint `exec: no such file`); migration runner uses asyncpg simple query protocol (fixes "cannot insert multiple commands").
-- **#20** — Dockerfile strips CRLF from entrypoint at build.
-- **#21** — nginx/frontend healthcheck uses `127.0.0.1` (IPv4) not `localhost` (IPv6 `::1` was failing).
-- **#22 — Production Hardening (B1–B6):**
-  - B1 persistence: `Settings.use_database` + `persist_domain_stores()`; nine store builders DB-backed when `USE_DATABASE=true` OR production; `docker-compose.yml` sets `USE_DATABASE=true` → local stack persists to Postgres, keyless. No new migrations.
-  - B2 documented keyless↔production config boundary (`docs/CONFIGURATION.md`, `.env.production.example`).
-  - B3 nginx SSE: `proxy_http_version 1.1` + `X-Accel-Buffering no` (+ existing buffering/cache off, 3600s timeouts).
-  - B4 CPU-only torch installed before requirements (image target ≤4 GB; CI size gate + CUDA-absence assert).
-  - B5 removed stray `Dockerfile.verify`.
-  - B6 regenerated `frontend/openapi.json` (+`schema.d.ts`) to include `GET /integrations/status`; added keyless `scripts/check_openapi.py` drift check in CI.
-  - Also merged: `Redis_Rate_Limiter` uses a sync redis client (async client caused 500 on every authed endpoint); `RATE_LIMIT_ENABLED=false` default locally.
+- `main` is v1.0: Phases 1–9 plus the production-hardening pass, all merged.
+- **PR #2 is open** with three v1.1 roadmap items complete (head `43093b2`, four commits).
+  It requires **no migration**. All local gates are green:
+  backend **741**, frontend **440**, Playwright **20**, `check_openapi.py`, `scan_secrets.py`.
+- The **live-PostgreSQL lane was not run locally** (see §4). PR #2's CI run is its first
+  execution, and two of its suites are brand new.
 
-## 3. Current production-readiness status
-- Code complete. Keyless unit lane **484 passed**; frontend `npm run ci` green; `scripts/check_openapi.py` passes; migrations 0001–0011 intact.
-- Static audit clean (interface parity, schema match, tenancy for all nine `Pg_*` stores; torch/sentence-transformers version compat).
-- NOT yet validated on a real Docker host (see §5). This is the gating item for "verified production ready."
+## 2. What PR #2 contains, and why each piece exists
 
-## 4. Remaining known limitations
-- LLM answers are deterministic stub without `GROQ_API_KEY`.
-- Embeddings download the ~90 MB model on first use (needs network at runtime).
-- Web search + all four integrations disabled without keys; tracing export NoOp without `LANGSMITH_API_KEY`.
-- Local vector embeddings (Chroma) are ephemeral — NOT one of the ten persisted domain stores; re-ingestion regenerates them. pgvector is used in production profile.
-- Member/team management is create/add-only (no list/update/remove endpoints).
-- Analytics costs are `0.0` until a rate table is configured.
-- Docs stale (see §1).
+**a. Member and team administration** (`Identity_Store`, `/orgs/*`, `MembersView`)
 
-## 5. Not yet verified on a real Docker host
-All require Docker/Postgres (unavailable in the assistant sandbox):
-- `docker compose build` — esp. B4: PyTorch CPU index (`download.pytorch.org/whl/cpu`) reachability and image ≤4 GB.
-- `docker compose up` → all 5 healthy; live migrations incl. `CREATE EXTENSION vector`.
-- B1 persistence live — nine `Pg_*` stores' first real run; data survives `docker compose restart`.
-- B3 SSE incremental delivery through nginx; long-lived timeouts.
-- Auth / RAG / single-agent / multi-agent / integrations-status live; production overlay boot with secrets.
-- Left unchecked for sign-off: production-hardening Task 12, deployment Task 13, frontend Task 30.
+Phase 5 shipped members/teams as create-and-add only: no roster, no role change, no removal.
+Added eight store methods (both in-memory and Postgres), seven endpoints under
+`manage_members`, and a fully server-backed admin UI. Two invariants live next to the write
+rather than in the router, so no future call site can bypass them:
 
-## 6. Assumptions made in previous sessions
-- B4 CPU CDN reachable from the build environment. History: it once failed in CI with `SSLV3_ALERT_HANDSHAKE_FAILURE`, which led to a temporary CUDA/PyPI build; B4 deliberately returns to the CPU index. Unverified in the user's current environment.
-- The nine `Pg_*` stores are correct — verified statically only, never run against a live DB.
-- Sandbox has no Docker/Postgres → all runtime checks deferred to the user's host.
-- User runs Windows + Docker Desktop (WSL2); PowerShell (no `&&`, no `curl`/`grep`/`head` — use `curl.exe`, `Select-String`).
-- Raw `git push`/`fetch` is blocked in the assistant environment; git ops go through the GitHub power tools; pushes go to a branch + PR.
+- an organization always retains at least one `owner` (`last_owner`, 400) — checked over a
+  `SELECT … FOR UPDATE` roster inside the writing transaction;
+- a `Team_Membership` may exist only for a member of the team's org (Req 2.5), so removing a
+  membership removes that user's team memberships **in that org only**.
 
-## 7. Docker validation checklist (run on host, from `main`)
+**Security fix in the same commit:** `POST /orgs/{id}/teams/{tid}/members` previously relied
+on the store's "is this user a member of the team's org?" guard alone. A user holding
+memberships in *both* organizations satisfies it, so a caller could add a member to a foreign
+tenant's team. The team is now resolved within the caller's org first (404 otherwise).
+
+**b. Cost pricing** (`cost_presets.py`, `GET /analytics/cost-rates`, `CostRatesPanel`)
+
+Costs defaulted to zero, which is right for the keyless stack but meant a deployment with a
+real provider key still reported `$0.00` until someone hand-authored a JSON rate table.
+Pricing now resolves *default rates → named preset → explicit table*, with the shipped preset
+`groq-public-2026-07` carrying published per-model list prices. Keyless is unchanged and
+asserted. `GET /analytics/cost-rates` reports the effective rates through the same function
+that builds the `Cost_Model`, so what is reported and what was charged cannot drift.
+
+**c. Integration connection configuration** (`/integrations/connections`, `ConnectionsPanel`)
+
+`Integration_Connection`, its Postgres store, migration `0011`, a container builder and a
+FastAPI dependency all shipped in Phase 8 **with no HTTP surface**, so the whole store existed
+only in tests. It now backs five endpoints (`read` to list, the new `manage_integrations`
+permission to mutate) and a UI panel. `integrations/config_policy.py` refuses
+credential-shaped keys/values, nesting and oversized payloads — the schema cannot hold a
+secret, but nothing stopped an operator pasting a token in under a key like `token`, where
+anyone with `read` could then see it.
+
+**d. Self-review fixes** — eight findings from a behavioural review of (a) and (b), each with
+a regression test. The two worth knowing about: `COST_RATE_PRESET=` (shipped empty in
+`.env.production.example`) made `load_settings` abort, so the production template was
+unbootable; and the last-owner predicate froze an *already* ownerless organization, refusing
+even the removal of an unrelated member.
+
+## 3. How to verify it (all keyless, no credential)
+
+```bash
+python -m venv .venv && . .venv/bin/activate       # Python 3.11
+pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.5.1"
+pip install -e ".[dev]" -c constraints.txt
+pytest -m "not integration" -q                      # expect 741 passed, ~2 min
+
+cd frontend && npm ci
+npm run ci                                          # expect 440 passed
+npx playwright install chromium && npm run e2e       # expect 20 passed
+cd .. && python scripts/check_openapi.py && python scripts/scan_secrets.py
 ```
+
+Install CPU torch **first**: otherwise `sentence-transformers` resolves the CUDA build and
+drags in multi-GB `nvidia-cu*` wheels the runtime never loads. The backend lane loads the real
+embedding model once, so its first run downloads ~90 MB.
+
+## 4. What is NOT verified
+
+1. **The live-PostgreSQL lane (`pytest -m integration`).** No database could be started in the
+   authoring sandbox — a `pgvector` container was pulled and started but the postmaster exited
+   immediately (cgroup/crun limits), so this was deferred. Two suites in PR #2 have therefore
+   **never executed against real SQL**:
+   `test_pg_admin_crud_parity` and `test_pg_connection_update_and_delete_are_org_scoped`.
+   They are the first thing to check in CI. Highest-risk constructs in them:
+   `= ANY(CAST(:ids AS uuid[]))`, `UPDATE … RETURNING`, `SELECT … FOR UPDATE/FOR SHARE`,
+   `rowcount` read after the transaction block, and JSONB replacement.
+2. **Concurrency behaviour.** The `FOR UPDATE` / `FOR SHARE` / lock-ordering choices are
+   reasoned from PostgreSQL semantics, not exercised by a concurrent test.
+3. **A real Docker host.** `docker compose build` / `up`, all five services healthy, live
+   migrations including `CREATE EXTENSION vector`, persistence across `docker compose
+   restart`, SSE incremental delivery through nginx, and the production overlay booting with
+   real secrets. Unchanged from the previous handoff.
+4. **Real integration traffic.** The four connectors are deterministic stand-ins; no OAuth or
+   live HTTP exists yet. Stored connection config is operator-facing and is not yet read by
+   the connectors themselves.
+5. **Preset rate keys against a live provider response.** A usage record stores the model the
+   provider reports having *served*; if that string differs from the preset key, usage falls
+   back to the default (zero) rate while the pricing panel shows a priced table. Worth one
+   check with a real `GROQ_API_KEY`.
+
+## 5. Recommended next steps, in order
+
+1. **Land PR #2.** Watch the `integration` lane specifically (§4.1). If a store method fails
+   there, it will be a SQL/type detail, not a design problem — the in-memory equivalents are
+   covered by 741 passing tests.
+2. **Trace-export polish** (unstarted v1.1 item, cheapest real feature). Two halves: the UI
+   currently cannot tell "tracing is off" from "no traces yet", and an OpenTelemetry exporter
+   alongside the LangSmith one would drop in behind the existing `Tracing_Exporter` seam.
+3. **Deployment DX** (unstarted): rollback runbooks in `DEPLOYMENT.md`, a quickstart, and
+   documentation of the integration lane (it is credential-free but needs `pgvector`).
+4. **CPU-slim image** (unstarted): the image is already CPU-only and CI-gated at ≤ 4 GB;
+   getting materially smaller means serving embeddings from outside the image, which is a
+   design change, not a packaging tweak.
+5. **Runtime validation on a Docker host** — the standing gate on calling the stack verified:
+
+```bash
 git checkout main && git pull
-docker compose build                                      # B4 risk point
-docker image inspect agentforge-api --format '{{.Size}}'  # < ~4e9
-docker compose up -d && docker compose ps                 # all 5 healthy
-curl.exe http://localhost/health/live
-curl.exe http://localhost/health/ready                    # database:up, redis:up
-# Browser @ http://localhost:
-#  - register + login (Pg_Identity_Store)
-#  - docker compose restart -> user still exists (B1 core proof)
-#  - Documents: upload -> Query -> grounded answer + citations
-#  - Agent Run (streaming) -> live SSE (B3)
-#  - Multi-Agent run -> completes
-#  - GET /integrations/status (bearer) -> all enabled:false
-# On host, close the integration lane:
-#  pytest -m integration        # needs a pgvector Postgres
+docker compose build
+docker image inspect agentforge-backend --format '{{.Size}}'   # < 4e9
+docker compose up -d && docker compose ps                      # all 5 healthy
+curl -fsS http://localhost/health/ready                        # database:up, redis:up
+# In the browser at http://localhost:
+#  register + login, then `docker compose restart` -> the user still exists (persistence)
+#  Documents: upload -> Query -> grounded answer + citations
+#  Agent Run (streaming) -> live incremental SSE through nginx
+#  Multi-Agent run -> completes
+#  Members: roster, role change, remove; Teams: create/delete, add/remove members
+#  Integrations: connection settings save/edit/remove; a token-shaped setting is refused
+#  Analytics: Cost rates panel reports "prices nothing" (or the preset, if set)
+pytest -m integration        # needs the pgvector database
 ```
 
-## 8. Architecture summary
-- Backend: FastAPI (`agentforge.main:create_app`). `lifespan` loads `Settings`, opens async DB engine + async Redis, runs migrations, then builds nine context graphs via the single composition root `config/container.py` — the only place concrete implementations are named; everything else depends on interface seams (Clean/Hexagonal).
-- 14 routers: health, ingest, query, documents, conversations, agent, multi_agent, auth, orgs, analytics, prompts, guardrails, evaluations, integrations.
-- Keyless defaults: Fallback LLM, SentenceTransformer embeddings, Chroma vectors, in-memory domain stores — unless `USE_DATABASE=true`/production (→ `Pg_*` stores) and credentials present.
-- DB access: `Pg_*` domain stores are sync psycopg, called via `run_in_threadpool`; async engine reserved for migrations/health. Additive migrations `0001–0011`. `org_id` tenancy → cross-tenant resolves to 404. Uniform `AppError` envelope. Secrets typed `SecretStr`.
-- Frontend: React 18 + Vite SPA; runtime config via `/config.js` (`window.__AGENTFORGE_CONFIG__.apiBaseUrl`); talks to API same-origin through nginx.
-- Infra: nginx is the sole published entry (`:80→:8080`), routes `/`→frontend:8080 and API prefixes (+SSE)→api:8000; Postgres+pgvector; Redis. Production overlay adds TLS, GHCR images, secrets, one-shot migrate.
+## 6. Environment notes for the next session
 
-## 9. Known risks
-1. B4 build — CPU-torch CDN unreachable from the build network would fail `docker compose build` (highest-likelihood blocker). Fix only if it actually fails.
-2. `Pg_*` stores at runtime — first live exercise; a store-specific SQL/serialization quirk could surface only against real Postgres (auth, persistence, prompts, analytics, evaluations, api-keys are the paths to watch).
-3. Model download at first embedding requires runtime network egress.
-4. Rate limiting is off locally by default; enabling it relies on the sync-redis-client fix (already merged).
+- Python **3.11**; install CPU torch before the project (§3). The venv used here lives outside
+  the repo.
+- `docker` exists in the assistant sandbox but **PostgreSQL will not stay up** in it; do not
+  spend time retrying the integration lane locally.
+- Raw `git push` is blocked in the assistant environment — pushes go through the GitHub power
+  tools, to a branch, with a PR.
+- Playwright needs `npx playwright install chromium` once (~114 MB); after that
+  `npm run e2e` runs the real production build with the API mocked at the network layer.
+- The frontend lane is the only place lint runs (`npm run ci` includes `eslint .`); there is
+  no Python linter configured in the repo, so match the surrounding style by hand.
 
-## 10. Recommended next steps (priority order)
-1. Build on the host and confirm B4 (`docker compose build`); if it fails at torch, that's the one expected fix.
-2. `docker compose up` + health; confirm all 5 healthy and migrations applied.
-3. Validate B1 persistence (register → restart → still logged-in) and the full runtime matrix (§7).
-4. Run the integration lane (`pytest -m integration`) on the host to close Task 12/13/30.
-5. Refresh stale docs (`PROJECT_STATE.md` → mark all phases + PR #22 merged; note the three PR #18 docs live on `main`) — docs-only.
-6. If all green: the outstanding feature initiative is the Premium UI redesign (unstarted; needs a short visual-identity conversation first — palette/typography/motion/iconography — before any implementation).
+## 7. Architecture summary (unchanged)
 
-## Quick reference
-- Env toggles: `PROFILE` (local|production), `USE_DATABASE` (true locally), `RATE_LIMIT_ENABLED` (false locally), `API_BASE_URL` (frontend; `http://localhost` locally), `JWT_SECRET` (required in production, SecretStr from overlay), optional `GROQ_API_KEY`/`SEARCH_API_KEY`/`HOSTED_EMBEDDING_API_KEY`/`LANGSMITH_API_KEY`/integration tokens.
-- Keyless backend lane: `pytest -m "not integration" -q` (expect 484). Frontend: `cd frontend && npm run ci`. Contract: `python scripts/check_openapi.py`.
+- **Backend:** FastAPI (`agentforge.main:create_app`). `lifespan` loads `Settings`, opens the
+  async DB engine + async Redis, runs migrations, then builds the context graphs via the
+  single composition root `config/container.py` — the only module naming concrete
+  implementations. 14 routers.
+- **Keyless defaults:** Fallback LLM, local SentenceTransformer embeddings, Chroma vectors,
+  in-memory domain stores — unless `USE_DATABASE=true` / the production profile selects the
+  `Pg_*` stores.
+- **Data access:** `Pg_*` stores are synchronous, called via `run_in_threadpool`; the async
+  engine is reserved for migrations and health checks. Additive migrations `0001`–`0012`.
+  `org_id` is a required store parameter and appears in the query, so cross-tenant access is
+  404, never 403. Domain invariants are enforced next to the write.
+- **Contracts:** uniform `AppError` envelope; `SecretStr` secrets; `Decimal` money as exact
+  strings; `frontend/openapi.json` + `schema.d.ts` drift-checked in CI.
+- **Frontend:** React 18 + Vite SPA; runtime config via `/config.js`; RBAC-gated controls are
+  omitted from the DOM; server state keyed by `orgScopedKey` so switching org re-scopes every
+  list.
+- **Infra:** nginx is the sole published entry (`:80→:8080`), routing `/`→frontend and API
+  prefixes (+SSE)→api; Postgres+pgvector; Redis. Production overlay adds TLS, GHCR images,
+  secrets, one-shot migrate.
 
 ## End of handoff.

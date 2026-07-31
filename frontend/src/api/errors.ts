@@ -71,14 +71,21 @@ function kindFor(status: number | null, code: string | null): ErrorKind {
       return "provider";
     case 400:
       // 400 covers guardrail_blocked / missing_variable / empty_document /
-      // field validation — all surfaced as validation-class; unknown 400s fall
-      // back to "unknown".
+      // field validation, plus the domain-rule refusals the admin surface can
+      // return (`last_owner`, `org_mismatch`, and the uniqueness conflicts) —
+      // all "the request as submitted cannot be applied", i.e. validation-class.
+      // Unknown 400s fall back to "unknown".
       return code &&
         [
           "guardrail_blocked",
           "missing_variable",
           "empty_document",
           "validation_error",
+          "last_owner",
+          "org_mismatch",
+          "email_exists",
+          "membership_exists",
+          "team_exists",
         ].includes(code)
         ? "validation"
         : "unknown";

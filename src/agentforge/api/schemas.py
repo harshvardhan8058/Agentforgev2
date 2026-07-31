@@ -265,10 +265,16 @@ class CreateTeamRequest(BaseModel):
 
 
 class CreateTeamResponse(BaseModel):
-    """Response carrying the newly-created Team id (Req 2.3)."""
+    """Response carrying the newly-created Team (Req 2.3).
+
+    Carries the same fields as a :class:`TeamSummary` row (``created_at`` included) so a
+    client can place the created team into its list immediately instead of guessing a
+    timestamp or blocking on a re-read.
+    """
 
     team_id: UUID
     name: str
+    created_at: datetime
 
 
 class AddTeamMemberRequest(BaseModel):
@@ -282,6 +288,47 @@ class AddTeamMemberResponse(BaseModel):
 
     team_id: UUID
     user_id: UUID
+
+
+class MemberSummary(BaseModel):
+    """One row of ``GET /orgs/{id}/members`` — a Membership with its User's email.
+
+    ``email`` is ``None`` only when no User row backs the Membership. Postgres makes that
+    referentially impossible (``memberships.user_id`` is a foreign key), so it can occur
+    only for a synthetic in-memory membership; the row is still reported rather than
+    silently dropped, because omitting a member from an administrative roster is worse
+    than reporting one whose display name could not be resolved.
+    """
+
+    user_id: UUID
+    email: str | None = None
+    role: RbacRole
+    created_at: datetime
+
+
+class UpdateMemberRoleRequest(BaseModel):
+    """Body for ``PATCH /orgs/{id}/members/{user_id}`` — reassign a member's Role."""
+
+    role: RbacRole
+
+
+class TeamSummary(BaseModel):
+    """One row of ``GET /orgs/{id}/teams`` — an org-scoped Team (Req 2.3)."""
+
+    team_id: UUID
+    name: str
+    created_at: datetime
+
+
+class TeamMemberSummary(BaseModel):
+    """One row of ``GET /orgs/{id}/teams/{tid}/members`` (Req 2.4).
+
+    ``email`` follows the same contract as :attr:`MemberSummary.email`.
+    """
+
+    user_id: UUID
+    email: str | None = None
+    created_at: datetime
 
 
 # --- enterprise: API keys (Phase 5) -----------------------------------------------
@@ -382,6 +429,47 @@ class UsageReportResponse(BaseModel):
     # from the figures alone, and presenting an unpriced deployment's "$0.00" as a real
     # total is misleading. Defaulted so existing clients are unaffected.
     cost_rates_configured: bool = False
+
+
+class CostRateEntry(BaseModel):
+    """One effective per-1K-token price for a ``(provider, model)`` pair.
+
+    Rates are exact decimal **strings** for the same reason costs are: a price of
+    ``0.00005`` per 1K tokens is not representable as a float without drift, and the
+    client renders it verbatim rather than reformatting it.
+    """
+
+    provider: str
+    model: str
+    prompt_per_1k: str
+    completion_per_1k: str
+    # Where this entry came from: the selected named preset, or an explicit
+    # ``COST_RATE_TABLE_JSON`` entry (which may override a preset pair or add one the
+    # preset never listed).
+    source: Literal["preset", "override"]
+
+
+class CostRatesResponse(BaseModel):
+    """The pricing this deployment charges **new** usage at.
+
+    Deployment-wide (identical for every org) and credential-free: rates are numbers and
+    ``preset`` is a public name. It describes current configuration only — a stored
+    ``Usage_Record.cost`` was computed by the rates in force when that record was written,
+    so changing pricing does not restate history and this response cannot explain it.
+    """
+
+    # The selected preset, or None when no preset is active (the keyless default).
+    preset: str | None = None
+    # Preset names this build ships, so a client can name the alternatives instead of
+    # sending an operator to the source.
+    available_presets: list[str] = Field(default_factory=list)
+    # Applied to any pair the table below does not list.
+    default_prompt_per_1k: str
+    default_completion_per_1k: str
+    # False when nothing here can produce a non-zero cost, which is what distinguishes
+    # "nothing spent" from "nothing priced" in a report that totals zero.
+    configured: bool = False
+    rates: list[CostRateEntry] = Field(default_factory=list)
 
 
 # --- observability: prompt registry (Phase 6) -------------------------------------
@@ -524,6 +612,53 @@ class IntegrationStatusEntry(BaseModel):
 
     name: str
     enabled: bool
+
+
+# A connection config value is a JSON scalar. Declaring it precisely (rather than as an
+# opaque object) makes the contract state what the admission policy actually accepts, gives
+# generated clients a usable type, and rejects nested structures at the transport layer
+# before the policy has to.
+IntegrationConfigValue = str | int | float | bool | None
+
+
+class CreateIntegrationConnectionRequest(BaseModel):
+    """Body for ``POST /integrations/connections`` — per-org, NON-SECRET config (Req 11.4).
+
+    ``config`` is a flat mapping of scalar settings (e.g. ``{"default_channel": "#ops"}``).
+    Credential-shaped keys/values, nested structures, and oversized payloads are refused by
+    the admission policy in ``integrations/config_policy.py``; credentials belong in the
+    server environment, never here.
+    """
+
+    integration: str = Field(..., min_length=1)
+    config: dict[str, IntegrationConfigValue] = Field(default_factory=dict)
+
+
+class UpdateIntegrationConnectionRequest(BaseModel):
+    """Body for ``PATCH /integrations/connections/{id}`` — replaces the stored config.
+
+    The config is **replaced**, not merged: merging would make removing a setting
+    impossible, and the record is small enough that a client always holds all of it.
+
+    ``config`` is therefore **required**. With replace semantics an omitted field cannot mean
+    "leave it alone", so defaulting it would make ``PATCH {}`` a silent erase of every setting
+    reported as success — reachable by a client that serialises only dirty fields, or by a
+    typo. Sending ``{"config": {}}`` explicitly still clears it.
+    """
+
+    config: dict[str, IntegrationConfigValue] = Field(...)
+
+
+class IntegrationConnectionResponse(BaseModel):
+    """One stored Integration_Connection — non-secret config only (Req 11.1, 11.4)."""
+
+    connection_id: UUID
+    integration: str
+    # Required, not defaulted: the server always sends it (an empty mapping when there are no
+    # settings), so declaring it optional would make every generated client handle an absent
+    # field that never occurs.
+    config: dict[str, IntegrationConfigValue]
+    created_at: datetime
 
 
 class IntegrationStatusResponse(BaseModel):

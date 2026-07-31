@@ -115,3 +115,50 @@ async def test_pg_store_round_trip_isolation_and_cascade(engine):
         await conn.execute(
             text("DELETE FROM organizations WHERE id = :id"), {"id": str(org_b)}
         )
+
+
+
+async def test_pg_connection_update_and_delete_are_org_scoped(engine):
+    """The mutating half of the store, against real SQL and real JSONB.
+
+    ``update_config`` and ``delete`` back the connection-management endpoints, so their
+    org scoping is a tenancy control, not a convenience: a cross-org write must match zero
+    rows and report "nothing happened" rather than touching another tenant's row.
+    """
+    org_a = await _make_org(engine, f"org-a-{uuid.uuid4().hex}")
+    org_b = await _make_org(engine, f"org-b-{uuid.uuid4().hex}")
+    store = Pg_Integration_Connection_Store(_dsn())
+
+    created = store.create(org_a, "slack", {"default_channel": "#general"})
+
+    # Cross-org update matches nothing and leaves the owner's row untouched.
+    assert store.update_config(org_b, created.id, {"default_channel": "#hijacked"}) is None
+    assert store.get(org_a, created.id).config == {"default_channel": "#general"}
+
+    # The owner replaces the config wholesale (removing a key), keeping id/created_at.
+    updated = store.update_config(org_a, created.id, {"notify": False, "max_results": 5})
+    assert updated is not None
+    assert updated.id == created.id
+    assert updated.created_at == created.created_at
+    assert updated.config == {"notify": False, "max_results": 5}
+    assert store.get(org_a, created.id).config == {"notify": False, "max_results": 5}
+
+    # An unknown id is None, not an error.
+    assert store.update_config(org_a, uuid.uuid4(), {"a": "b"}) is None
+
+    # Listing is oldest-first and org-scoped.
+    second = store.create(org_a, "github", {"repo": "acme/platform"})
+    assert [c.id for c in store.list_for_org(org_a)] == [created.id, second.id]
+    assert store.list_for_org(org_b) == []
+
+    # Cross-org delete matches nothing; the owner's delete removes exactly one row.
+    assert store.delete(org_b, created.id) is False
+    assert store.delete(org_a, created.id) is True
+    assert store.delete(org_a, created.id) is False
+    assert [c.id for c in store.list_for_org(org_a)] == [second.id]
+
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("DELETE FROM organizations WHERE id = ANY(CAST(:ids AS uuid[]))"),
+            {"ids": [str(org_a), str(org_b)]},
+        )
