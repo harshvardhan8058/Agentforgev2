@@ -33,6 +33,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Optional OTLP trace export (docs/CONFIGURATION.md "Trace export"). Not a runtime
+# dependency: the exporter imports these lazily and degrades to "no export" without them,
+# so the keyless install stays unchanged. Install with `pip install -e ".[otel]"`.
+otel = [
+    "opentelemetry-sdk==1.29.0",
+    "opentelemetry-exporter-otlp-proto-http==1.29.0",
+]
+
 # Pinned test/development dependencies.
 dev = [
     "pytest==8.3.4",

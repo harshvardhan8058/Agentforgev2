@@ -14,9 +14,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from datetime import datetime
 from uuid import UUID
 
 from agentforge.enterprise.models import (
+    Audit_Event,
     API_Key,
     Membership,
     Organization,
@@ -205,6 +207,53 @@ class API_Key_Store(ABC):
     @abstractmethod
     def revoke_for_org(self, org_id: UUID, key_id: UUID) -> API_Key | None:
         """Mark ``key_id`` revoked iff it belongs to ``org_id``; else ``None`` (Req 5.5, 5.7)."""
+        raise NotImplementedError
+
+
+class Audit_Log(ABC):
+    """Append-only, org-scoped store of administrative :class:`Audit_Event`s.
+
+    Deliberately has **no update or delete**: an audit trail that can be edited answers no
+    compliance question. Rows leave only with the organization they describe (the ``org_id``
+    foreign key cascades), so a tenant deletion still removes them.
+
+    Every read takes ``org_id`` as a query parameter, so another tenant's trail is
+    structurally unreachable rather than filtered afterwards (Req 4.3, 4.4).
+    """
+
+    @abstractmethod
+    def record(self, event: Audit_Event) -> Audit_Event:
+        """Append ``event`` and return it. Raises on failure; the caller decides the posture.
+
+        Implementations must not swallow errors: whether a failed audit write should fail the
+        audited request is a *deployment* decision, made once in ``Audit_Service`` from
+        configuration, not silently in a store.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_for_org(
+        self,
+        org_id: UUID,
+        *,
+        actions: list[str] | None = None,
+        actor_id: UUID | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        before: tuple[datetime, UUID] | None = None,
+        limit: int = 50,
+    ) -> list[Audit_Event]:
+        """Return ``org_id``'s events, **newest first**, matching every supplied filter.
+
+        Newest-first because the question an audit trail answers is almost always "what
+        changed recently". ``limit`` bounds the page and ``before`` is a keyset cursor: the
+        ``(created_at, id)`` pair of the last row of the previous page. The pair — rather than
+        the timestamp alone — is what makes a boundary unable to repeat or skip a row when
+        several events share a timestamp, which two writes in one request always do.
+
+        ``actor_id`` matches a user **or** a key actor, because the transport layer reports
+        one actor id per row and a filter must accept what it reported.
+        """
         raise NotImplementedError
 
 

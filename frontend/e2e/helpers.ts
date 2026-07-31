@@ -128,6 +128,31 @@ export async function mockCommon(page: Page): Promise<void> {
   await page.route(`${API}/orgs/*/teams`, (route) => respond(route, []));
   await page.route(`${API}/orgs/*/api-keys`, (route) => respond(route, []));
   await page.route(`${API}/integrations/connections`, (route) => respond(route, []));
+  // The audit log is a collection endpoint like the others; `{}` would be handed to a table.
+  await page.route(`${API}/audit-events**`, (route) => respond(route, []));
+  // The analytics page reads the org's spend standing; `{}` would render as absent numbers.
+  await page.route(`${API}/budget`, (route) =>
+    respond(route, {
+      period_start: "2026-08-01T00:00:00Z",
+      period_end: "2026-09-01T00:00:00Z",
+      spent: "0",
+      limit_amount: null,
+      remaining: null,
+      percent_used: null,
+      action: null,
+      exceeded: false,
+      blocked: false,
+    }),
+  );
+
+  // Trace surfaces ask whether this deployment exports traces anywhere. The catch-all's
+  // `{}` would leave the notice unable to render either state, so the keyless shape is
+  // declared here.
+  await page.route(`${API}/observability/status`, (route) =>
+    respond(route, {
+      trace_export: { enabled: false, exporter: "noop", destination: null },
+    }),
+  );
 
   // The analytics page always asks how the deployment is priced. The catch-all's
   // `{}` would render as absent rates rather than as the honest "prices nothing"

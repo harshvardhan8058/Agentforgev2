@@ -22,6 +22,11 @@ one is refused with ``AppError("last_owner", 400)``. The check lives in the Iden
 (next to the write, inside the same transaction for the Postgres implementation) rather
 than here, so it cannot be bypassed by a future call site.
 
+Every mutation here records an :class:`Audit_Event` **after** it succeeds, so the trail
+never claims something happened that did not. Recording is fail-open by default (a failed
+audit write is logged at ERROR and the request still succeeds) and fail-closed when
+``audit_log_required`` is set — the posture belongs to the deployment, not to these handlers.
+
 The Identity_Store / API_Key_Service are synchronous, so their calls run in a worker
 thread to avoid blocking the event loop.
 """
@@ -35,6 +40,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from agentforge.api.deps import (
     get_api_key_service,
+    get_audit_service,
     get_current_principal,
     get_identity_store,
     require_permission,
@@ -58,11 +64,17 @@ from agentforge.api.schemas import (
     UpdateMemberRoleRequest,
 )
 from agentforge.enterprise.api_keys import API_Key_Service
+from agentforge.enterprise.audit import Audit_Action, Audit_Service
 from agentforge.enterprise.base import Identity_Store
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.rbac import Permission, Role
 
 router = APIRouter(tags=["orgs"])
+
+
+def _distinct(*org_ids: UUID) -> list[UUID]:
+    """Return the given org ids without repeats, preserving order."""
+    return list(dict.fromkeys(org_ids))
 
 
 def _ensure_same_org(principal: Principal, org_id: UUID) -> None:
@@ -124,6 +136,7 @@ async def _emails_for(
 async def create_org(
     payload: CreateOrgRequest,
     identity: Identity_Store = Depends(get_identity_store),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(get_current_principal),
 ) -> CreateOrgResponse:
     """Create a NEW Organization owned by the caller (Req 2.1, 2.2).
@@ -135,6 +148,21 @@ async def create_org(
     if principal.user_id is not None:
         await run_in_threadpool(
             identity.add_membership, principal.user_id, org.id, Role.OWNER
+        )
+    # Recorded in BOTH trails. The new organization's, because that is where an auditor of it
+    # will look; and the caller's current one, because an organization created with org A's
+    # credential is a fact org A's owners must be able to see — a key principal gains no
+    # membership in the new org, so without this the acting tenant would have no evidence at
+    # all that its key was used this way.
+    for trail_org_id in _distinct(org.id, principal.org_id):
+        await run_in_threadpool(
+            audit.record,
+            principal,
+            Audit_Action.ORG_CREATED,
+            target_type="organization",
+            target_id=str(org.id),
+            metadata={"name": org.name},
+            org_id=trail_org_id,
         )
     return CreateOrgResponse(org_id=org.id)
 
@@ -148,6 +176,7 @@ async def add_member(
     org_id: UUID,
     payload: AddMemberRequest,
     identity: Identity_Store = Depends(get_identity_store),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
 ) -> AddMemberResponse:
     """Add an existing user (by email) to ``org_id`` under a Role (Req 2.2)."""
@@ -157,6 +186,14 @@ async def add_member(
         raise _not_found_user(payload.email)
     membership = await run_in_threadpool(
         identity.add_membership, user.id, org_id, payload.role
+    )
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.MEMBER_ADDED,
+        target_type="member",
+        target_id=str(membership.user_id),
+        metadata={"email": payload.email, "role": membership.role.value},
     )
     return AddMemberResponse(
         user_id=membership.user_id, org_id=membership.org_id, role=membership.role
@@ -194,6 +231,7 @@ async def update_member_role(
     user_id: UUID,
     payload: UpdateMemberRoleRequest,
     identity: Identity_Store = Depends(get_identity_store),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
 ) -> MemberSummary:
     """Reassign a member's Role within ``org_id`` (Req 2.2, 3.4).
@@ -208,6 +246,17 @@ async def update_member_role(
     if membership is None:
         raise _not_found_member(user_id)
     user = await run_in_threadpool(identity.get_user, user_id)
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.MEMBER_ROLE_CHANGED,
+        target_type="member",
+        target_id=str(membership.user_id),
+        metadata={
+            "email": user.email if user is not None else None,
+            "role": membership.role.value,
+        },
+    )
     return MemberSummary(
         user_id=membership.user_id,
         email=user.email if user is not None else None,
@@ -224,6 +273,7 @@ async def remove_member(
     org_id: UUID,
     user_id: UUID,
     identity: Identity_Store = Depends(get_identity_store),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
 ) -> Response:
     """Remove a member from ``org_id``, together with their Team_Memberships (Req 2.5).
@@ -232,9 +282,20 @@ async def remove_member(
     ``AppError("last_owner", 400)``.
     """
     _ensure_same_org(principal, org_id)
+    # Resolved BEFORE the removal: afterwards the membership is gone, and an audit row that
+    # only carried an opaque id would be materially less useful to read.
+    removed_user = await run_in_threadpool(identity.get_user, user_id)
     removed = await run_in_threadpool(identity.remove_membership, user_id, org_id)
     if not removed:
         raise _not_found_member(user_id)
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.MEMBER_REMOVED,
+        target_type="member",
+        target_id=str(user_id),
+        metadata={"email": removed_user.email if removed_user is not None else None},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -247,11 +308,20 @@ async def create_team(
     org_id: UUID,
     payload: CreateTeamRequest,
     identity: Identity_Store = Depends(get_identity_store),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
 ) -> CreateTeamResponse:
     """Create an org-scoped Team within ``org_id`` (Req 2.3)."""
     _ensure_same_org(principal, org_id)
     team = await run_in_threadpool(identity.create_team, org_id, payload.name)
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.TEAM_CREATED,
+        target_type="team",
+        target_id=str(team.id),
+        metadata={"name": team.name},
+    )
     return CreateTeamResponse(
         team_id=team.id, name=team.name, created_at=team.created_at
     )
@@ -279,13 +349,23 @@ async def delete_team(
     org_id: UUID,
     team_id: UUID,
     identity: Identity_Store = Depends(get_identity_store),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
 ) -> Response:
     """Delete a Team from ``org_id`` with its Team_Memberships; unknown/cross-org is 404."""
     _ensure_same_org(principal, org_id)
+    doomed = await run_in_threadpool(identity.get_team, org_id, team_id)
     deleted = await run_in_threadpool(identity.delete_team, org_id, team_id)
     if not deleted:
         raise _not_found_team(team_id)
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.TEAM_DELETED,
+        target_type="team",
+        target_id=str(team_id),
+        metadata={"name": doomed.name if doomed is not None else None},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -299,6 +379,7 @@ async def add_team_member(
     team_id: UUID,
     payload: AddTeamMemberRequest,
     identity: Identity_Store = Depends(get_identity_store),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
 ) -> AddTeamMemberResponse:
     """Add a user (by email) to a Team (Req 2.4, 2.5).
@@ -318,6 +399,14 @@ async def add_team_member(
     if user is None:
         raise _not_found_user(payload.email)
     membership = await run_in_threadpool(identity.add_team_member, team_id, user.id)
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.TEAM_MEMBER_ADDED,
+        target_type="team_member",
+        target_id=str(membership.user_id),
+        metadata={"team_id": str(team_id), "email": payload.email},
+    )
     return AddTeamMemberResponse(
         team_id=membership.team_id, user_id=membership.user_id
     )
@@ -358,6 +447,7 @@ async def remove_team_member(
     team_id: UUID,
     user_id: UUID,
     identity: Identity_Store = Depends(get_identity_store),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
 ) -> Response:
     """Remove a User from a Team within ``org_id``; unknown/cross-org target is 404.
@@ -375,6 +465,14 @@ async def remove_team_member(
         if team is None:
             raise _not_found_team(team_id)
         raise _not_found_member(user_id)
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.TEAM_MEMBER_REMOVED,
+        target_type="team_member",
+        target_id=str(user_id),
+        metadata={"team_id": str(team_id)},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -387,11 +485,22 @@ async def create_api_key(
     org_id: UUID,
     payload: CreateApiKeyRequest,
     keys: API_Key_Service = Depends(get_api_key_service),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(require_permission(Permission.MANAGE_API_KEYS)),
 ) -> CreateApiKeyResponse:
     """Issue an org-scoped API key; return the plaintext secret **once** (Req 5.1, 5.2)."""
     _ensure_same_org(principal, org_id)
     key, secret = await run_in_threadpool(keys.create, org_id, payload.role)
+    # The prefix identifies WHICH key without being usable as one; the secret never appears
+    # in an audit row (the metadata admission policy would refuse a "secret"-named key too).
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.API_KEY_CREATED,
+        target_type="api_key",
+        target_id=str(key.id),
+        metadata={"role": key.role.value, "key_prefix": key.key_prefix},
+    )
     return CreateApiKeyResponse(
         api_key_id=key.id,
         secret=secret,
@@ -430,6 +539,7 @@ async def revoke_api_key(
     org_id: UUID,
     key_id: UUID,
     keys: API_Key_Service = Depends(get_api_key_service),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(require_permission(Permission.MANAGE_API_KEYS)),
 ) -> Response:
     """Revoke an API key; an unknown or cross-org key is a 404 (Req 5.5, 5.7)."""
@@ -442,4 +552,12 @@ async def revoke_api_key(
             status.HTTP_404_NOT_FOUND,
             {"key_id": str(key_id)},
         )
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.API_KEY_REVOKED,
+        target_type="api_key",
+        target_id=str(key_id),
+        metadata={"key_prefix": revoked.key_prefix},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

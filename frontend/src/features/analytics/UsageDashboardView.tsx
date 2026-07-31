@@ -38,6 +38,7 @@ import { RANGE_PRESETS } from "./rangePresets";
 import { UsageTotals } from "./UsageTotals";
 import { UsageBreakdownTable } from "./UsageBreakdownTable";
 import { BreakdownBoundary } from "./BreakdownBoundary";
+import { BudgetCard } from "./BudgetCard";
 import { CostRatesPanel } from "./CostRatesPanel";
 
 // Code-split the charting layer: kept out of the initial bundle and mocked in
@@ -248,6 +249,11 @@ export function UsageDashboardView(): JSX.Element {
               </div>
             </div>
           )}
+
+          {/* The budget is governance, not usage: it renders whether or not this range
+              recorded anything, because setting a ceiling is most useful before the spend
+              happens. */}
+          <BudgetCard />
 
           {/* Pricing is deployment configuration, not usage, so it renders
               regardless of whether this range recorded anything — an operator

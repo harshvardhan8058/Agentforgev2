@@ -36,12 +36,12 @@
 - **Purpose:** Run a single agent with a tool loop (RAG/web tools), stream reasoning, view an ordered trace.
 - **Backend modules:** `agent/orchestrator`, `agent/graph` (LangGraph, bounded iterations), `tools` (registry, `rag_tool`, `web_search_tool`), `memory`, `conversation`, `streaming/sse`, `tracing`, `api/routers/agent.py`.
 - **Frontend:** `features/agent/SingleAgentRunView`, `TraceTimeline`/`TraceView`, `useSseRun`, `api/sse` transport + `singleAgentReducer`; StreamingCursor + markdown/citations.
-- **Endpoints:** `POST /agent/run`, `POST /agent/stream` (SSE), `GET /agent/runs/{run_id}/trace`.
+- **Endpoints:** `POST /agent/run`, `POST /agent/stream` (SSE), `GET /agent/runs`, `GET /agent/runs/{run_id}/trace`.
 - **User workflow:** Submit task → live token stream (step/tool_call/delta) → completion (answer+citations+termination_reason) → open trace timeline; cancel supported.
 - **Status:** Fully working.
 - **Keyless:** Yes (deterministic fallback reasoning; Web Search tool disabled without key).
 - **Optional credentials:** `GROQ_API_KEY`, `SEARCH_API_KEY` (enables Web Search tool).
-- **Limitations:** Trace detail marked "unavailable" when tracing is NoOp; web tool absent keyless.
+- **Limitations:** a run with no recorded steps renders as "trace detail unavailable"; the web tool is absent keyless. Whether traces are also *exported* externally is reported beneath every trace (see the observability section) rather than left ambiguous.
 
 ## 4. Multi-Agent
 
@@ -95,6 +95,33 @@
 - **Keyless:** Yes (no preset ⇒ every call costs exactly `Decimal("0")`, which is accurate for the local Fallback provider; usage is still recorded).
 - **Optional credentials:** None.
 - **Limitations:** Preset rates are the vendor's public list prices at the date in the preset name — indicative, not authoritative — so negotiated/batch/cached-input pricing needs per-pair overrides; meaningful volume requires runs.
+
+## 7b. Cost governance (v1.1)
+
+**Spend budgets with enforcement**
+- **Purpose:** turn cost *observability* into cost *control*. The platform could measure spend
+  and do nothing about it; an owner can now set a monthly ceiling that warns or blocks.
+- **Backend modules:** `observability/budget.py` (`Spend_Budget`, `Budget_Store` with
+  in-memory + Postgres implementations, `Budget_Guard`, `current_period`),
+  `api/routers/budget.py`, the `enforce_budget` dependency in `api/deps.py`, migration `0014`.
+- **Frontend:** `features/analytics/BudgetCard` on the Analytics page — spent/limit/remaining
+  rendered verbatim, a native `<progress>`, an explicit `role="alert"` notice while blocking,
+  and an owner-only set/remove form.
+- **Endpoints:** `GET /budget` (`read`), `PUT /budget` and `DELETE /budget` (`manage_budget`,
+  owner-only). Both mutations are audited (`budget.set`, `budget.removed`).
+- **Enforcement:** `402 budget_exceeded` on the spending entry points only (`/query`,
+  `/agent/run`, `/agent/stream`, `/multi-agent/runs`, `/multi-agent/runs/{id}/stream`). Reads
+  and approval decisions are never blocked.
+- **Period:** calendar month in UTC, computed per request — no stored period, no rollover job.
+- **Guarantees:** money is `Decimal` end to end and crosses the API as exact strings; the
+  enforced total is the same one `/analytics/usage` shows; `warn` never refuses; a metering
+  failure fails open; raising a ceiling takes effect immediately.
+- **Status:** Fully working.
+- **Keyless:** Yes (in-memory store; Postgres when the domain stores persist).
+- **Optional credentials:** None. Costs are only non-zero once pricing is configured (§7).
+- **Limitations:** see `docs/KNOWN_LIMITATIONS.md` — one budget per org (no per-user, per-team
+  or per-project ceilings), calendar months only, bounded overshoot within
+  `BUDGET_CACHE_SECONDS`, and no notification when a threshold is crossed.
 
 ## 8. Guardrails
 
@@ -151,6 +178,39 @@
 - **Invariants:** an organization always retains at least one `owner` — a demotion or removal that would remove the last one is refused with `last_owner` (400), checked inside the writing transaction; removing a member also drops their team memberships in that org only; every team read/write is scoped by `org_id`, so another tenant's team is 404.
 - **Limitations:** roles are the fixed set `owner|admin|member|viewer` (no custom roles); there is no invite flow — a user must already exist before being added by email; `manage_members` is granted to `owner` only; API-key secret shown once, never persisted client-side.
 
+## 11b. Audit trail (v1.1)
+
+**Append-only administrative audit log**
+- **Purpose:** answer "who changed this, and when" — the first question of every compliance
+  review, access-related support ticket and incident postmortem. Usage records answer what a
+  run cost and traces answer what an agent did; neither answers this.
+- **Backend modules:** `enterprise/audit.py` (`Audit_Action` vocabulary, `admit_metadata`
+  policy, `Audit_Service`, `InMemory_Audit_Log`, `Pg_Audit_Log`), the `Audit_Log` seam in
+  `enterprise/base.py`, `api/routers/audit.py`, migration `0013`.
+- **Frontend:** `features/audit/AuditLogView` — filterable table (action, page size), newest
+  first, destructive actions badged, actor labels resolved, skeleton/empty/error states,
+  `read_audit_log`-gated nav entry and route.
+- **Endpoints:** `GET /audit-events?action=&actor_id=&start=&end=&before=&before_id=&limit=` (`read_audit_log`). Keyset-paginated on `(created_at, id)`; `actor_id` matches a user **or** an API-key actor.
+- **Audited actions:** `org.created`; `member.added|role_changed|removed`;
+  `team.created|deleted`; `team_member.added|removed`; `api_key.created|revoked`;
+  `integration_connection.created|updated|deleted`. The vocabulary is a server-side enum
+  published through OpenAPI, so the console's filter options are generated rather than
+  hardcoded.
+- **RBAC:** `read_audit_log`, **owner-only** — deliberately matching `GET /orgs/{id}/members`, since the trail's member events carry the same emails and roles.
+- **Guarantees:** append-only (the seam has no update or delete); org-scoped in SQL with no
+  org parameter on the endpoint; only *successful* actions recorded; `metadata` admits
+  non-secret scalars only and refuses credential-named keys; an API-key event records the key
+  prefix, never the secret; an event survives its actor's deletion (`ON DELETE SET NULL`) and
+  is reported with an unresolvable actor rather than reattributed.
+- **Failure posture:** `AUDIT_LOG_REQUIRED=false` (default) logs at ERROR and lets the action
+  succeed; `true` fails the action instead.
+- **Status:** Fully working.
+- **Keyless:** Yes (in-memory trail; Postgres when the domain stores persist).
+- **Optional credentials:** None.
+- **Limitations:** see `docs/KNOWN_LIMITATIONS.md` — append-only is enforced by the
+  application rather than by database grants, there is no retention policy or export, and
+  authentication events (logins) are not audited.
+
 ## 12. Deployment (Phase 9)
 
 **One-command Docker stack, production overlay, CI/CD**
@@ -167,14 +227,16 @@
 ## Cross-cutting capabilities
 
 - **Uniform error envelope** `AppError { error: {code, message, details} }` across all APIs; frontend normalizes via `mapError`/`ErrorBanner`.
+- **Cost governance** (see §7b): a monthly spend ceiling per org that warns or blocks, enforced in front of every spending endpoint.
+- **Audit trail** over every administrative mutation (see §11b): append-only, org-scoped, credential-free, with a configurable fail-open/fail-closed posture.
 - **SSE streaming** with exactly-one-terminal invariant (single & multi-agent).
 - **Conversation context** (`POST /conversations`, `GET /conversations/{id}`) threading `conversation_id` into agent + multi-agent runs.
 - **Premium frontend platform:** dark/light theming (design tokens, no-FOWT), command palette (⌘K, RBAC-gated), keyboard shortcuts, responsive app shell, skeleton/empty/error states, markdown+citations, Monaco, charts — all lazy-loaded.
-- **Observability everywhere:** trace recorder + pluggable exporter (NoOp keyless / LangSmith with key), never changes run outcomes.
-- **Testing posture:** backend keyless lane (**741** tests) + Hypothesis properties; frontend `npm run ci` (**440**); Playwright e2e (**20**, real production build with the API mocked at the network layer); all deterministic and keyless. A live-PostgreSQL integration lane (`pytest -m integration`) runs in CI against an ephemeral `pgvector` service container.
+- **Observability everywhere:** trace recorder + pluggable exporter (NoOp keyless / LangSmith / OTLP), invoked on **every** completed run — single-agent sync and streamed, multi-agent sync and streamed, and the approval decision that terminates a run. Export runs after the response (background task) or after the stream's single terminal event (completion hook), swallows every failure, and short-circuits before touching the trace store when it is off, so it never changes run outcomes or adds latency. `GET /observability/status` reports the active destination.
+- **Testing posture:** backend keyless lane (**793** tests) + Hypothesis properties; frontend `npm run ci` (**445**); Playwright e2e (**20**, real production build with the API mocked at the network layer); all deterministic and keyless. A live-PostgreSQL integration lane (`pytest -m integration`) runs in CI against an ephemeral `pgvector` service container.
 
 ## Known v1.0 limitations / open items
 
-- LLM output deterministic without `GROQ_API_KEY`; tracing export NoOp without `LANGSMITH_API_KEY`; web search & all integrations disabled without their keys.
+- LLM output deterministic without `GROQ_API_KEY`; trace export is off (recording still on) without `LANGSMITH_API_KEY` or `OTEL_EXPORTER_ENDPOINT`; web search & all integrations disabled without their keys.
 - Manual final checkpoints (frontend Task 30, deployment Task 13) left unchecked for human sign-off; deployment Properties 2 & 3 run only in the integration lane / real Docker host.
 - Backend container image size: CPU-only torch keeps it under the 4 GB CI budget, but a genuinely slim (~1 GB) image would need the embedding model moved out of the image.

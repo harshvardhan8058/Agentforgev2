@@ -10,10 +10,12 @@ injected fakes.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from uuid import UUID
 
 from fastapi import Depends, Request, status
+from fastapi.concurrency import run_in_threadpool
 
 from agentforge.agent.orchestrator import Agent_Orchestrator
 from agentforge.api.errors import AppError
@@ -30,7 +32,8 @@ from agentforge.config.settings import Settings
 from agentforge.conversation.base import Conversation_Store
 from agentforge.enterprise.api_keys import API_Key_Service
 from agentforge.enterprise.auth import Auth_Service
-from agentforge.enterprise.base import Identity_Store, Rate_Limiter
+from agentforge.enterprise.audit import Audit_Service
+from agentforge.enterprise.base import Audit_Log, Identity_Store, Rate_Limiter
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.principal import PrincipalKind, principal_key
 from agentforge.enterprise.rbac import Permission, RBAC_Policy
@@ -43,12 +46,20 @@ from agentforge.observability.evaluation.base import Evaluation_Store
 from agentforge.observability.evaluation.framework import Evaluation_Framework
 from agentforge.observability.guardrails.base import Guardrail_Pipeline
 from agentforge.observability.prompt_registry.registry import Prompt_Registry
+from agentforge.observability.budget import Budget_Guard, Budget_Store
+from agentforge.observability.trace_export import (
+    Trace_Export_Service,
+    disabled_trace_export_service,
+)
 from agentforge.observability.tracing_exporter import Tracing_Exporter
 from agentforge.rag.service import RAG_Service
 from agentforge.storage.base import DocumentStore
 from agentforge.streaming.sse import SSE_Streaming_Service
 from agentforge.tracing.base import Trace_Recorder
 from agentforge.vectorstore.base import Vector_Store
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_app_context(request: Request) -> AppContext:
@@ -186,6 +197,16 @@ def get_api_key_service(request: Request) -> API_Key_Service:
 def get_rbac_policy(request: Request) -> RBAC_Policy:
     """Return the wired RBAC_Policy."""
     return get_enterprise_context(request).rbac
+
+
+def get_audit_log(request: Request) -> Audit_Log:
+    """Return the wired Audit_Log (the append-only administrative trail)."""
+    return get_enterprise_context(request).audit_log
+
+
+def get_audit_service(request: Request) -> Audit_Service:
+    """Return the wired Audit_Service, which records events for the acting Principal."""
+    return get_enterprise_context(request).audit_service
 
 
 def get_rate_limiter(request: Request) -> Rate_Limiter:
@@ -356,6 +377,89 @@ def get_observability_context(request: Request) -> ObservabilityContext:
 def get_tracing_exporter(request: Request) -> Tracing_Exporter:
     """Return the wired Tracing_Exporter."""
     return get_observability_context(request).tracing_exporter
+
+
+def get_trace_export_service(request: Request) -> Trace_Export_Service:
+    """Return the wired Trace_Export_Service, or a disabled one if none is wired.
+
+    Unlike every other observability accessor, this one does **not** raise when the context
+    is missing. It is consumed by the *run* endpoints, and the whole point of the export
+    path is that it can never affect a run: turning a missing observability context into a
+    500 on ``POST /agent/run`` would make an observability concern fail the very work it is
+    supposed to be observing. A partially-wired app (a focused test, or a future entry
+    point that composes only the agentic graph) therefore runs agents normally with export
+    reported as unavailable.
+
+    The observability *routers* keep using :func:`get_observability_context`, where a
+    missing context is a genuine misconfiguration and must still fail loudly.
+    """
+    ctx = getattr(request.app.state, "observability_context", None)
+    if ctx is None:
+        return disabled_trace_export_service()
+    return ctx.trace_export_service
+
+
+async def enforce_budget(
+    request: Request,
+    principal: Principal = Depends(get_current_principal),
+) -> Principal:
+    """Refuse new work when the org is over a **blocking** spend budget (Req 3.x, 8.x).
+
+    Applied to the endpoints that *spend* — RAG query, agent run/stream, multi-agent run/stream
+    — and to nothing else: reading a trace or listing documents costs nothing, and blocking
+    those would punish an over-budget tenant by hiding the very data that explains the
+    overage.
+
+    Returns the Principal so an endpoint can depend on this *instead of* re-declaring the
+    principal, keeping the dependency list honest about what it enforces.
+
+    Deliberately not enforced here:
+
+    * a ``warn`` budget never refuses anything — it is a reporting posture, and turning it
+      into enforcement would make an operator's monitoring choice break their traffic;
+    * if spend cannot be computed the guard reports zero and this passes, because a metering
+      outage must not become a platform outage (the guard logs it).
+
+    The refusal is ``402 Payment Required`` with ``budget_exceeded``: the request was
+    well-formed and authorized, and what stands in its way is a spending limit — which is
+    precisely what 402 means. A 429 would claim a rate problem that retrying could solve.
+    """
+    ctx = getattr(request.app.state, "observability_context", None)
+    if ctx is None:
+        # No governance graph wired (a focused test, or an entry point that composes only the
+        # agentic graph). Enforcing nothing is the correct fail-open: a *missing* budget is an
+        # unlimited one, and a governance concern must never be the reason work cannot run.
+        return principal
+    status_ = await run_in_threadpool(ctx.budget_guard.status, principal.org_id)
+    if status_.blocked:
+        logger.warning(
+            "Refusing work for org %s: spend %s has reached the budget of %s.",
+            principal.org_id,
+            status_.spent,
+            status_.limit_amount,
+        )
+        raise AppError(
+            "budget_exceeded",
+            "This organization has reached its spend budget for the current period. "
+            "New runs are blocked until the period resets or the budget is raised.",
+            status.HTTP_402_PAYMENT_REQUIRED,
+            {
+                "spent": str(status_.spent),
+                "limit_amount": str(status_.limit_amount),
+                "period_end": status_.period_end.isoformat(),
+            },
+        )
+    return principal
+
+
+def get_budget_store(request: Request) -> Budget_Store:
+    """Return the wired Budget_Store (the org's spend ceiling)."""
+    return get_observability_context(request).budget_store
+
+
+def get_budget_guard(request: Request) -> Budget_Guard:
+    """Return the wired Budget_Guard (spend status + the enforcement decision)."""
+    return get_observability_context(request).budget_guard
 
 
 def get_analytics_service(request: Request) -> Analytics_Service:

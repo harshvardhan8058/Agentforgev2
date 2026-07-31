@@ -24,6 +24,13 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from agentforge.config.settings import Settings
 
 
+# The sentinel name of the "export nothing" implementation. Named because three places
+# compare against it (the factory, the settings predicate's return value, and the
+# Trace_Export_Service's `enabled` check) and a typo in any of them would silently turn
+# export off — or, worse, claim it is on.
+NOOP_EXPORTER_NAME = "noop"
+
+
 class Tracing_Exporter(ABC):
     """Abstract contract for forwarding a completed Trace to an external destination."""
 
@@ -42,13 +49,30 @@ class Tracing_Exporter(ABC):
         """
         raise NotImplementedError
 
+    def available(self) -> bool:
+        """Whether this exporter can actually deliver a span right now.
+
+        Concrete, not abstract, and ``True`` by default: an implementation whose
+        prerequisites are satisfied by its own construction has nothing to report. It exists
+        because an exporter can be *configured* and still be unable to deliver — an optional
+        client library that was never installed being the case that matters — and a status
+        surface that reported such a deployment as "exporting" would recreate exactly the
+        defect this seam's first real caller was written to fix.
+
+        Must not raise, and must not perform network I/O: it answers "could I", not "is the
+        destination healthy". Deliverability of a *configured, importable* destination
+        (a wrong URL, a revoked key) is not knowable without sending something, and is
+        documented as outside this signal.
+        """
+        return True
+
 
 class NoOp_Tracing_Exporter(Tracing_Exporter):
     """Keyless default: makes no external call and produces no external side effect."""
 
     @property
     def name(self) -> str:
-        return "noop"
+        return NOOP_EXPORTER_NAME
 
     def export(self, trace: Trace, *, org_id: UUID, user_id: UUID | None) -> None:
         return  # intentionally does nothing (Req 1.3)
@@ -138,11 +162,25 @@ def build_tracing_exporter(settings: Settings) -> Tracing_Exporter:
 
     Returns :class:`NoOp_Tracing_Exporter` when
     ``settings.active_tracing_exporter() == "noop"`` (the keyless default, so no external
-    tracer is constructed), otherwise a :class:`LangSmith_Tracing_Exporter` reading the
-    Tracing_Credential (Req 1.2, 1.4).
+    tracer is constructed), a ``LangSmith_Tracing_Exporter`` reading the
+    Tracing_Credential, or an ``OTLP_Tracing_Exporter`` for a configured collector
+    endpoint (Req 1.2, 1.4). The settings predicate owns the precedence; this function only
+    constructs what it names.
     """
-    if settings.active_tracing_exporter() == "noop":
+    active = settings.active_tracing_exporter()
+    if active == NOOP_EXPORTER_NAME:
         return NoOp_Tracing_Exporter()
+    if active == "otlp":
+        # Imported here, not at module scope: this module is imported on every boot, and
+        # the OTLP exporter's own module must stay free to import lazily itself.
+        from agentforge.observability.otel_exporter import OTLP_Tracing_Exporter
+
+        headers = settings.otel_headers
+        return OTLP_Tracing_Exporter(
+            endpoint=settings.otel_exporter_endpoint or "",
+            service_name=settings.otel_service_name,
+            headers=headers.get_secret_value() if headers is not None else None,
+        )
     return LangSmith_Tracing_Exporter(
         api_key=settings.langsmith_api_key.get_secret_value(),
         project=settings.langsmith_project,

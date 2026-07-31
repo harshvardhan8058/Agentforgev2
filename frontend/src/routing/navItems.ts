@@ -13,6 +13,7 @@ import {
   ClipboardCheck,
   FileText,
   KeyRound,
+  ScrollText,
   LayoutDashboard,
   MessagesSquare,
   Plug,
@@ -157,6 +158,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: "API Keys",
     icon: KeyRound,
     permission: "manage_api_keys",
+    group: "Administration",
+  },
+  {
+    id: "nav-audit",
+    path: "/audit",
+    label: "Audit Log",
+    icon: ScrollText,
+    permission: "read_audit_log",
     group: "Administration",
   },
 ];

@@ -21,6 +21,12 @@ export interface paths {
          *     guardrail raises ``AppError("guardrail_blocked", 400)`` and the agent loop is never
          *     reached (Req 5.4). The output pipeline runs on the final answer and its flags are
          *     attached to the response without blocking (Req 5.5, 5.6).
+         *
+         *     The completed run's trace is handed to the Trace_Export_Service as a **background
+         *     task**, i.e. after the response has been sent: export is best-effort observability, so
+         *     it must add nothing to the caller's latency and must not be able to fail the run
+         *     (Req 10.2). With the keyless NoOp exporter the task returns immediately without
+         *     touching the trace store.
          */
         post: operations["run_agent_agent_run_post"];
         delete?: never;
@@ -85,6 +91,11 @@ export interface paths {
         /**
          * Stream Agent
          * @description Stream the agent run over Server-Sent Events, scoped to the caller's org (Req 9.1-9.9).
+         *
+         *     A streamed run cannot use a background task (the response is the stream), so export is
+         *     attached as the streaming service's completion hook: it runs after the terminal event
+         *     has been handed to the client, and a failure there is swallowed rather than becoming a
+         *     second terminal event (Req 9.6, 10.2).
          */
         post: operations["stream_agent_agent_stream_post"];
         delete?: never;
@@ -142,6 +153,30 @@ export interface paths {
          *     as a zero total.
          */
         get: operations["get_usage_analytics_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Audit Events
+         * @description Return the caller org's audit events, newest first (Req 4.3, 4.4).
+         *
+         *     Pagination is keyset, not offset: pass the last row's ``created_at`` and ``id`` back as
+         *     ``before`` / ``before_id`` to get the next page. Both or neither — a timestamp alone
+         *     cannot separate two events written in the same request.
+         */
+        get: operations["list_audit_events_audit_events_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -213,6 +248,41 @@ export interface paths {
          */
         post: operations["register_self_auth_register_self_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Budget
+         * @description Return this organization's spend standing for the current calendar month (UTC).
+         *
+         *     ``limit_amount`` is ``null`` when no budget is set, which is the unlimited default —
+         *     distinguishable from a budget of ``"0"``, which means "spend nothing" and is reported as
+         *     fully used.
+         */
+        get: operations["get_budget_budget_get"];
+        /**
+         * Set Budget
+         * @description Set (or replace) the monthly ceiling and its action. Idempotent — hence ``PUT``.
+         */
+        put: operations["set_budget_budget_put"];
+        post?: never;
+        /**
+         * Delete Budget
+         * @description Remove the ceiling, returning the organization to unlimited spend.
+         *
+         *     Idempotent: removing an absent budget is a 204, not a 404. The desired end state — no
+         *     ceiling — is what the caller asked for, and it holds either way.
+         */
+        delete: operations["delete_budget_budget_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -603,6 +673,9 @@ export interface paths {
          *     is invoked: a blocking guardrail raises ``AppError("guardrail_blocked", 400)`` and the
          *     downstream multi-agent orchestrator is never reached (Req 5.4). The output pipeline
          *     runs on the terminal output and its flags are attached to the response (Req 5.5, 5.6).
+         *
+         *     The completed run's trace is exported as a **background task** — after the response is
+         *     sent, so it adds no latency and cannot fail the run (Req 10.2).
          */
         post: operations["start_multi_agent_run_multi_agent_runs_post"];
         delete?: never;
@@ -652,6 +725,15 @@ export interface paths {
          *     * A decision to a run that is not currently awaiting approval is rejected with a
          *       ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt
          *       has already been recorded in the trace by the gate (Req 5.5).
+         *
+         *     Deliberately **not** gated on the spend budget, unlike starting a run: a paused run has
+         *     already spent most of what it will spend, and refusing the decision that finishes it would
+         *     strand it at a checkpoint forever while wasting everything already paid for. A budget stops
+         *     *new* work.
+         *
+         *     When the resumed run reaches a terminal state, its trace is exported as a background
+         *     task — the approval gate's own steps are part of that trace, so exporting on the
+         *     decision that ends the run is what captures them (Req 10.2).
          */
         post: operations["submit_approval_multi_agent_runs__run_id__approval_post"];
         delete?: never;
@@ -678,6 +760,30 @@ export interface paths {
          *     event (``completion`` or ``error``) as guaranteed by :class:`Multi_Agent_Streaming_Service`.
          */
         post: operations["stream_multi_agent_run_multi_agent_runs__run_id__stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/observability/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Observability Status
+         * @description Report how this deployment handles run telemetry (Req 1.2, 10.2).
+         *
+         *     ``trace_export.enabled`` is the authoritative signal: it is false for the keyless NoOp
+         *     exporter and false if a real exporter was configured without a trace recorder, so a
+         *     client can never be told export is on while nothing leaves the process.
+         */
+        get: operations["get_observability_status_observability_status_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1186,6 +1292,56 @@ export interface components {
             /** Termination Reason */
             termination_reason?: ("completed" | "max-rounds-reached" | "max-revisions-reached" | "rejected" | "aborted") | null;
         };
+        /**
+         * AuditEventResponse
+         * @description One row of ``GET /audit-events`` — an administrative action that was taken.
+         *
+         *     ``actor_email`` is resolved at read time and is ``None`` for an API-key actor (a key has
+         *     no display name) or for a user who has since been deleted; the audit row itself survives
+         *     either way, which is the whole point of an append-only trail. ``metadata`` holds
+         *     non-secret scalars only — an audit event records *that* an API key was created, never
+         *     the secret.
+         */
+        AuditEventResponse: {
+            action: components["schemas"]["Audit_Action"];
+            /** Actor Email */
+            actor_email?: string | null;
+            /** Actor Id */
+            actor_id?: string | null;
+            /**
+             * Actor Kind
+             * @enum {string}
+             */
+            actor_kind: "user" | "api_key";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: string | number | boolean | null;
+            };
+            /** Target Id */
+            target_id?: string | null;
+            /** Target Type */
+            target_type: string;
+        };
+        /**
+         * Audit_Action
+         * @description The closed vocabulary of audited administrative actions.
+         *
+         *     Dotted ``subject.verb`` in the past tense. A ``str`` enum so it serialises as its value
+         *     in the API contract (and therefore reaches the generated client as a union type), while
+         *     still being a single authoritative list on the server.
+         * @enum {string}
+         */
+        Audit_Action: "org.created" | "member.added" | "member.role_changed" | "member.removed" | "team.created" | "team.deleted" | "team_member.added" | "team_member.removed" | "api_key.created" | "api_key.revoked" | "budget.set" | "budget.removed" | "integration_connection.created" | "integration_connection.updated" | "integration_connection.deleted";
         /** Body_ingest_document_documents_post */
         Body_ingest_document_documents_post: {
             /**
@@ -1195,6 +1351,47 @@ export interface components {
             file: string;
             /** Filename */
             filename?: string | null;
+        };
+        /**
+         * BudgetStatusResponse
+         * @description Where an organization stands against its spend budget this period.
+         *
+         *     Every monetary field is an exact decimal **string**, rendered verbatim by the client for
+         *     the same reason `total_cost` is: a cost of ``0.00013`` is not representable as a float
+         *     without drift. ``limit_amount``/``remaining``/``percent_used``/``action`` are ``null``
+         *     when no budget is set — the unlimited default.
+         */
+        BudgetStatusResponse: {
+            /** Action */
+            action?: ("warn" | "block") | null;
+            /**
+             * Blocked
+             * @default false
+             */
+            blocked: boolean;
+            /**
+             * Exceeded
+             * @default false
+             */
+            exceeded: boolean;
+            /** Limit Amount */
+            limit_amount?: string | null;
+            /** Percent Used */
+            percent_used?: string | null;
+            /**
+             * Period End
+             * Format: date-time
+             */
+            period_end: string;
+            /**
+             * Period Start
+             * Format: date-time
+             */
+            period_start: string;
+            /** Remaining */
+            remaining?: string | null;
+            /** Spent */
+            spent: string;
         };
         /** CitationModel */
         CitationModel: {
@@ -1723,6 +1920,17 @@ export interface components {
             termination_reason?: string | null;
         };
         /**
+         * ObservabilityStatusResponse
+         * @description Deployment-wide telemetry handling — the response of ``GET /observability/status``.
+         *
+         *     Deliberately a nested object rather than flat fields: trace export is the first of
+         *     several things a client may need to know about how a deployment is instrumented, and a
+         *     nested shape lets the next one be added without re-reading the meaning of the others.
+         */
+        ObservabilityStatusResponse: {
+            trace_export: components["schemas"]["TraceExportStatus"];
+        };
+        /**
          * PromptVersionResponse
          * @description A resolved Prompt_Version (latest or a specific number) (Req 4.3, 4.4).
          */
@@ -1821,6 +2029,24 @@ export interface components {
          */
         Role: "owner" | "admin" | "member" | "viewer";
         /**
+         * SetBudgetRequest
+         * @description Body for ``PUT /budget`` — the monthly ceiling and what happens at it.
+         *
+         *     ``limit_amount`` is a ``Decimal`` parsed from a JSON number *or* string, so a client can
+         *     send an exact value without a float round trip; ``0`` is a valid ceiling meaning "spend
+         *     nothing" and is distinct from having no budget at all.
+         */
+        SetBudgetRequest: {
+            /**
+             * Action
+             * @default warn
+             * @enum {string}
+             */
+            action: "warn" | "block";
+            /** Limit Amount */
+            limit_amount: number | string;
+        };
+        /**
          * StartMultiAgentRunRequest
          * @description Request body for starting a Multi_Agent_Run (Req 9.1).
          */
@@ -1911,6 +2137,22 @@ export interface components {
             step_type: string;
             /** Tool Name */
             tool_name?: string | null;
+        };
+        /**
+         * TraceExportStatus
+         * @description Whether, and where, completed run traces are exported.
+         *
+         *     ``enabled`` is derived from the wired export service, not from configuration alone: a
+         *     credentialed exporter with no trace recorder behind it reports ``False``, because
+         *     nothing would actually leave the process.
+         */
+        TraceExportStatus: {
+            /** Destination */
+            destination?: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Exporter */
+            exporter: string;
         };
         /** TraceResponse */
         TraceResponse: {
@@ -2190,6 +2432,49 @@ export interface operations {
             };
         };
     };
+    list_audit_events_audit_events_get: {
+        parameters: {
+            query?: {
+                /** @description Restrict to these actions. Repeat the parameter to pass several. */
+                action?: components["schemas"]["Audit_Action"][] | null;
+                /** @description Restrict to events performed by this actor — a user id or an API-key id, matching the `actor_id` reported on each event. */
+                actor_id?: string | null;
+                /** @description Only events at or after this instant (inclusive). */
+                start?: string | null;
+                /** @description Only events at or before this instant (inclusive). */
+                end?: string | null;
+                /** @description Keyset cursor: the `created_at` of the last event of the previous page. Must be sent together with `before_id`. */
+                before?: string | null;
+                /** @description Keyset cursor: the `id` of the last event of the previous page. Paired with `before` so a page boundary cannot repeat or skip events that share a timestamp. */
+                before_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEventResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     login_auth_login_post: {
         parameters: {
             query?: never;
@@ -2273,6 +2558,77 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    get_budget_budget_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetStatusResponse"];
+                };
+            };
+        };
+    };
+    set_budget_budget_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetBudgetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_budget_budget_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3019,6 +3375,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_observability_status_observability_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservabilityStatusResponse"];
                 };
             };
         };

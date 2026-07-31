@@ -5,6 +5,7 @@
         "description": "Body for ``POST /orgs/{id}/members`` \u2014 add an existing user under a Role (Req 2.2).",
         "properties": {
           "email": {
+            "maxLength": 320,
             "minLength": 1,
             "title": "Email",
             "type": "string"
@@ -49,6 +50,7 @@
         "description": "Body for ``POST /orgs/{id}/teams/{tid}/members`` \u2014 add a user by email (Req 2.4).",
         "properties": {
           "email": {
+            "maxLength": 320,
             "minLength": 1,
             "title": "Email",
             "type": "string"
@@ -338,6 +340,124 @@
         "title": "ApprovalDecisionResponse",
         "type": "object"
       },
+      "AuditEventResponse": {
+        "description": "One row of ``GET /audit-events`` \u2014 an administrative action that was taken.\n\n``actor_email`` is resolved at read time and is ``None`` for an API-key actor (a key has\nno display name) or for a user who has since been deleted; the audit row itself survives\neither way, which is the whole point of an append-only trail. ``metadata`` holds\nnon-secret scalars only \u2014 an audit event records *that* an API key was created, never\nthe secret.",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/Audit_Action"
+          },
+          "actor_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Email"
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id"
+          },
+          "actor_kind": {
+            "enum": [
+              "user",
+              "api_key"
+            ],
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_type": {
+            "title": "Target Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "actor_kind",
+          "target_type",
+          "created_at"
+        ],
+        "title": "AuditEventResponse",
+        "type": "object"
+      },
+      "Audit_Action": {
+        "description": "The closed vocabulary of audited administrative actions.\n\nDotted ``subject.verb`` in the past tense. A ``str`` enum so it serialises as its value\nin the API contract (and therefore reaches the generated client as a union type), while\nstill being a single authoritative list on the server.",
+        "enum": [
+          "org.created",
+          "member.added",
+          "member.role_changed",
+          "member.removed",
+          "team.created",
+          "team.deleted",
+          "team_member.added",
+          "team_member.removed",
+          "api_key.created",
+          "api_key.revoked",
+          "budget.set",
+          "budget.removed",
+          "integration_connection.created",
+          "integration_connection.updated",
+          "integration_connection.deleted"
+        ],
+        "title": "Audit_Action",
+        "type": "string"
+      },
       "Body_ingest_document_documents_post": {
         "properties": {
           "file": {
@@ -361,6 +481,90 @@
           "file"
         ],
         "title": "Body_ingest_document_documents_post",
+        "type": "object"
+      },
+      "BudgetStatusResponse": {
+        "description": "Where an organization stands against its spend budget this period.\n\nEvery monetary field is an exact decimal **string**, rendered verbatim by the client for\nthe same reason `total_cost` is: a cost of ``0.00013`` is not representable as a float\nwithout drift. ``limit_amount``/``remaining``/``percent_used``/``action`` are ``null``\nwhen no budget is set \u2014 the unlimited default.",
+        "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "enum": [
+                  "warn",
+                  "block"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "blocked": {
+            "default": false,
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "exceeded": {
+            "default": false,
+            "title": "Exceeded",
+            "type": "boolean"
+          },
+          "limit_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Amount"
+          },
+          "percent_used": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent Used"
+          },
+          "period_end": {
+            "format": "date-time",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date-time",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "remaining": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining"
+          },
+          "spent": {
+            "title": "Spent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period_start",
+          "period_end",
+          "spent"
+        ],
+        "title": "BudgetStatusResponse",
         "type": "object"
       },
       "CitationModel": {
@@ -590,6 +794,7 @@
             "type": "array"
           },
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
@@ -663,6 +868,7 @@
         "description": "Body for ``POST /orgs`` \u2014 an authenticated user creates an org they own.",
         "properties": {
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
@@ -698,6 +904,7 @@
             "type": "string"
           },
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
@@ -721,6 +928,7 @@
         "description": "Body for ``POST /orgs/{id}/teams`` \u2014 create an org-scoped Team (Req 2.3).",
         "properties": {
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
@@ -1189,6 +1397,7 @@
         "description": "Login body: verifies credentials to issue an Access_Token (Req 1.2, 1.3).",
         "properties": {
           "email": {
+            "maxLength": 320,
             "minLength": 1,
             "title": "Email",
             "type": "string"
@@ -1370,6 +1579,19 @@
         "title": "MultiAgentRunSummaryResponse",
         "type": "object"
       },
+      "ObservabilityStatusResponse": {
+        "description": "Deployment-wide telemetry handling \u2014 the response of ``GET /observability/status``.\n\nDeliberately a nested object rather than flat fields: trace export is the first of\nseveral things a client may need to know about how a deployment is instrumented, and a\nnested shape lets the next one be added without re-reading the meaning of the others.",
+        "properties": {
+          "trace_export": {
+            "$ref": "#/components/schemas/TraceExportStatus"
+          }
+        },
+        "required": [
+          "trace_export"
+        ],
+        "title": "ObservabilityStatusResponse",
+        "type": "object"
+      },
       "PromptVersionResponse": {
         "description": "A resolved Prompt_Version (latest or a specific number) (Req 4.3, 4.4).",
         "properties": {
@@ -1510,11 +1732,13 @@
         "description": "Self-registration body: bootstraps a new Organization + owner User (Req 1.1).",
         "properties": {
           "email": {
+            "maxLength": 320,
             "minLength": 1,
             "title": "Email",
             "type": "string"
           },
           "org_name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Org Name",
             "type": "string"
@@ -1592,6 +1816,37 @@
         ],
         "title": "Role",
         "type": "string"
+      },
+      "SetBudgetRequest": {
+        "description": "Body for ``PUT /budget`` \u2014 the monthly ceiling and what happens at it.\n\n``limit_amount`` is a ``Decimal`` parsed from a JSON number *or* string, so a client can\nsend an exact value without a float round trip; ``0`` is a valid ceiling meaning \"spend\nnothing\" and is distinct from having no budget at all.",
+        "properties": {
+          "action": {
+            "default": "warn",
+            "enum": [
+              "warn",
+              "block"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "limit_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Limit Amount"
+          }
+        },
+        "required": [
+          "limit_amount"
+        ],
+        "title": "SetBudgetRequest",
+        "type": "object"
       },
       "StartMultiAgentRunRequest": {
         "description": "Request body for starting a Multi_Agent_Run (Req 9.1).",
@@ -1782,6 +2037,36 @@
           "step_type"
         ],
         "title": "TraceEntryModel",
+        "type": "object"
+      },
+      "TraceExportStatus": {
+        "description": "Whether, and where, completed run traces are exported.\n\n``enabled`` is derived from the wired export service, not from configuration alone: a\ncredentialed exporter with no trace recorder behind it reports ``False``, because\nnothing would actually leave the process.",
+        "properties": {
+          "destination": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "exporter": {
+            "title": "Exporter",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "exporter"
+        ],
+        "title": "TraceExportStatus",
         "type": "object"
       },
       "TraceResponse": {
@@ -1980,7 +2265,7 @@
   "paths": {
     "/agent/run": {
       "post": {
-        "description": "Run the bounded agent loop and return its grounded result (Req 1.7, 8.5).\n\nThe input guardrail pipeline runs **before** the orchestrator is invoked: a blocking\nguardrail raises ``AppError(\"guardrail_blocked\", 400)`` and the agent loop is never\nreached (Req 5.4). The output pipeline runs on the final answer and its flags are\nattached to the response without blocking (Req 5.5, 5.6).",
+        "description": "Run the bounded agent loop and return its grounded result (Req 1.7, 8.5).\n\nThe input guardrail pipeline runs **before** the orchestrator is invoked: a blocking\nguardrail raises ``AppError(\"guardrail_blocked\", 400)`` and the agent loop is never\nreached (Req 5.4). The output pipeline runs on the final answer and its flags are\nattached to the response without blocking (Req 5.5, 5.6).\n\nThe completed run's trace is handed to the Trace_Export_Service as a **background\ntask**, i.e. after the response has been sent: export is best-effort observability, so\nit must add nothing to the caller's latency and must not be able to fail the run\n(Req 10.2). With the keyless NoOp exporter the task returns immediately without\ntouching the trace store.",
         "operationId": "run_agent_agent_run_post",
         "requestBody": {
           "content": {
@@ -2115,7 +2400,7 @@
     },
     "/agent/stream": {
       "post": {
-        "description": "Stream the agent run over Server-Sent Events, scoped to the caller's org (Req 9.1-9.9).",
+        "description": "Stream the agent run over Server-Sent Events, scoped to the caller's org (Req 9.1-9.9).\n\nA streamed run cannot use a background task (the response is the stream), so export is\nattached as the streaming service's completion hook: it runs after the terminal event\nhas been handed to the client, and a failure there is swallowed rather than becoming a\nsecond terminal event (Req 9.6, 10.2).",
         "operationId": "stream_agent_agent_stream_post",
         "requestBody": {
           "content": {
@@ -2243,6 +2528,172 @@
         ]
       }
     },
+    "/audit-events": {
+      "get": {
+        "description": "Return the caller org's audit events, newest first (Req 4.3, 4.4).\n\nPagination is keyset, not offset: pass the last row's ``created_at`` and ``id`` back as\n``before`` / ``before_id`` to get the next page. Both or neither \u2014 a timestamp alone\ncannot separate two events written in the same request.",
+        "operationId": "list_audit_events_audit_events_get",
+        "parameters": [
+          {
+            "description": "Restrict to these actions. Repeat the parameter to pass several.",
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/Audit_Action"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict to these actions. Repeat the parameter to pass several.",
+              "title": "Action"
+            }
+          },
+          {
+            "description": "Restrict to events performed by this actor \u2014 a user id or an API-key id, matching the `actor_id` reported on each event.",
+            "in": "query",
+            "name": "actor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict to events performed by this actor \u2014 a user id or an API-key id, matching the `actor_id` reported on each event.",
+              "title": "Actor Id"
+            }
+          },
+          {
+            "description": "Only events at or after this instant (inclusive).",
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events at or after this instant (inclusive).",
+              "title": "Start"
+            }
+          },
+          {
+            "description": "Only events at or before this instant (inclusive).",
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events at or before this instant (inclusive).",
+              "title": "End"
+            }
+          },
+          {
+            "description": "Keyset cursor: the `created_at` of the last event of the previous page. Must be sent together with `before_id`.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keyset cursor: the `created_at` of the last event of the previous page. Must be sent together with `before_id`.",
+              "title": "Before"
+            }
+          },
+          {
+            "description": "Keyset cursor: the `id` of the last event of the previous page. Paired with `before` so a page boundary cannot repeat or skip events that share a timestamp.",
+            "in": "query",
+            "name": "before_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keyset cursor: the `id` of the last event of the previous page. Paired with `before` so a page boundary cannot repeat or skip events that share a timestamp.",
+              "title": "Before Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditEventResponse"
+                  },
+                  "title": "Response List Audit Events Audit Events Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Audit Events",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
     "/auth/login": {
       "post": {
         "description": "Verify credentials and return a bearer Access_Token (Req 1.2, 1.3).\n\nAn unknown email or a password mismatch raises ``AppError(\"auth_failed\", 401)``.",
@@ -2346,6 +2797,81 @@
         "summary": "Register Self",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/budget": {
+      "delete": {
+        "description": "Remove the ceiling, returning the organization to unlimited spend.\n\nIdempotent: removing an absent budget is a 204, not a 404. The desired end state \u2014 no\nceiling \u2014 is what the caller asked for, and it holds either way.",
+        "operationId": "delete_budget_budget_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Delete Budget",
+        "tags": [
+          "budget"
+        ]
+      },
+      "get": {
+        "description": "Return this organization's spend standing for the current calendar month (UTC).\n\n``limit_amount`` is ``null`` when no budget is set, which is the unlimited default \u2014\ndistinguishable from a budget of ``\"0\"``, which means \"spend nothing\" and is reported as\nfully used.",
+        "operationId": "get_budget_budget_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Budget",
+        "tags": [
+          "budget"
+        ]
+      },
+      "put": {
+        "description": "Set (or replace) the monthly ceiling and its action. Idempotent \u2014 hence ``PUT``.",
+        "operationId": "set_budget_budget_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBudgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Budget",
+        "tags": [
+          "budget"
         ]
       }
     },
@@ -3156,7 +3682,7 @@
         ]
       },
       "post": {
-        "description": "Start a Multi_Agent_Run, persist it, and run it synchronously to completion.\n\nUnder the keyless auto-approve default the orchestrator terminates on the same\nrequest; streaming is exposed separately by :func:`stream_multi_agent_run`. The run\nis persisted before the orchestrator runs (Req 10.1), the terminal ``Final_Output``\nand ``Termination_Reason`` are persisted on completion (Req 10.5), and a start-time\nfailure surfaces through the existing uniform error envelope (Req 9.1).\n\nThe input guardrail pipeline runs **before** the run is created and the orchestrator\nis invoked: a blocking guardrail raises ``AppError(\"guardrail_blocked\", 400)`` and the\ndownstream multi-agent orchestrator is never reached (Req 5.4). The output pipeline\nruns on the terminal output and its flags are attached to the response (Req 5.5, 5.6).",
+        "description": "Start a Multi_Agent_Run, persist it, and run it synchronously to completion.\n\nUnder the keyless auto-approve default the orchestrator terminates on the same\nrequest; streaming is exposed separately by :func:`stream_multi_agent_run`. The run\nis persisted before the orchestrator runs (Req 10.1), the terminal ``Final_Output``\nand ``Termination_Reason`` are persisted on completion (Req 10.5), and a start-time\nfailure surfaces through the existing uniform error envelope (Req 9.1).\n\nThe input guardrail pipeline runs **before** the run is created and the orchestrator\nis invoked: a blocking guardrail raises ``AppError(\"guardrail_blocked\", 400)`` and the\ndownstream multi-agent orchestrator is never reached (Req 5.4). The output pipeline\nruns on the terminal output and its flags are attached to the response (Req 5.5, 5.6).\n\nThe completed run's trace is exported as a **background task** \u2014 after the response is\nsent, so it adds no latency and cannot fail the run (Req 10.2).",
         "operationId": "start_multi_agent_run_multi_agent_runs_post",
         "requestBody": {
           "content": {
@@ -3241,7 +3767,7 @@
     },
     "/multi-agent/runs/{run_id}/approval": {
       "post": {
-        "description": "Forward an ``Approval_Decision`` to the ``Human_Approval_Gate`` (Req 9.3).\n\n* Unknown ``run_id`` -> ``404 not_found`` via the envelope (Req 9.6).\n* A decision to a run that is not currently awaiting approval is rejected with a\n  ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt\n  has already been recorded in the trace by the gate (Req 5.5).",
+        "description": "Forward an ``Approval_Decision`` to the ``Human_Approval_Gate`` (Req 9.3).\n\n* Unknown ``run_id`` -> ``404 not_found`` via the envelope (Req 9.6).\n* A decision to a run that is not currently awaiting approval is rejected with a\n  ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt\n  has already been recorded in the trace by the gate (Req 5.5).\n\nDeliberately **not** gated on the spend budget, unlike starting a run: a paused run has\nalready spent most of what it will spend, and refusing the decision that finishes it would\nstrand it at a checkpoint forever while wasting everything already paid for. A budget stops\n*new* work.\n\nWhen the resumed run reaches a terminal state, its trace is exported as a background\ntask \u2014 the approval gate's own steps are part of that trace, so exporting on the\ndecision that ends the run is what captures them (Req 10.2).",
         "operationId": "submit_approval_multi_agent_runs__run_id__approval_post",
         "parameters": [
           {
@@ -3330,6 +3856,28 @@
         "summary": "Stream Multi Agent Run",
         "tags": [
           "multi-agent"
+        ]
+      }
+    },
+    "/observability/status": {
+      "get": {
+        "description": "Report how this deployment handles run telemetry (Req 1.2, 10.2).\n\n``trace_export.enabled`` is the authoritative signal: it is false for the keyless NoOp\nexporter and false if a real exporter was configured without a trace recorder, so a\nclient can never be told export is on while nothing leaves the process.",
+        "operationId": "get_observability_status_observability_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservabilityStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Observability Status",
+        "tags": [
+          "observability"
         ]
       }
     },

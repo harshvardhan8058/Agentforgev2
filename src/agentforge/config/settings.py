@@ -14,7 +14,13 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -128,6 +134,19 @@ class Settings(BaseSettings):
     argon2_memory_cost: int = 64 * 1024  # KiB; [8 * 1024, 1_048_576]
     argon2_parallelism: int = 2  # [1, 8]
 
+    # --- cost governance: spend budgets ---
+    # How long a computed month-to-date spend is reused before recomputing. The budget check
+    # runs before every agent/RAG request, so this keeps a SUM over the tenant's month off the
+    # request path; the cost is a bounded overshoot within the window (docs/CONFIGURATION.md).
+    budget_cache_seconds: float = 30.0
+
+    # --- enterprise: audit trail ---
+    # Failure posture for an audit write. False (default) = fail OPEN: a failed write is
+    # logged at ERROR and the audited request still succeeds, because an audit store outage
+    # must not become a platform outage. True = fail CLOSED: the request fails, which is what
+    # a regulated deployment needs when an unrecorded action is worse than a refused one.
+    audit_log_required: bool = False
+
     # --- enterprise: per-principal rate limiting (Redis-backed) ---
     # ``rate_limit_enabled=False`` forces the NoOp_Rate_Limiter regardless of Redis, so
     # the keyless/test lane is deterministic (Req 6.5).
@@ -143,6 +162,26 @@ class Settings(BaseSettings):
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "agentforge"
     tracing_export_enabled: bool = True
+
+    # Vendor-neutral OTLP export (an OpenTelemetry Collector, Tempo, Jaeger, Honeycomb,
+    # ...). Selected only when an endpoint is configured, so the keyless path is unchanged.
+    # ``otel_headers`` follows the OTLP convention ("k=v,k2=v2") and may carry an ingest
+    # key, so it is a SecretStr and never appears in logs or model_dump.
+    # The OpenTelemetry spec's own variable names are accepted as aliases, because a pod
+    # with a collector sidecar typically has OTEL_EXPORTER_OTLP_ENDPOINT injected already.
+    # Without the alias that deployment would configure nothing, get no export, and get no
+    # warning either — a silent no-op is the worst possible outcome for a telemetry setting.
+    otel_exporter_endpoint: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "otel_exporter_endpoint", "otel_exporter_otlp_endpoint"
+        ),
+    )
+    otel_service_name: str = "agentforge"
+    otel_headers: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("otel_headers", "otel_exporter_otlp_headers"),
+    )
 
     # Cost model (the default rate is applied when a (provider, model) pair is unlisted).
     # Decimal-as-string so no float drift; the keyless default is free (Req 2.5).
@@ -258,7 +297,13 @@ class Settings(BaseSettings):
         toggle = getattr(self, f"{name}_enabled")
         return credential is not None and toggle is not False
 
-    @field_validator("cost_rate_preset", "cost_rate_table_json", "groq_model", mode="before")
+    @field_validator(
+        "cost_rate_preset",
+        "cost_rate_table_json",
+        "groq_model",
+        "otel_exporter_endpoint",
+        mode="before",
+    )
     @classmethod
     def _blank_is_unset(cls, value: object) -> object:
         """Treat an empty/whitespace-only string as "unset" for optional string settings.
@@ -275,17 +320,30 @@ class Settings(BaseSettings):
         return value
 
     def active_tracing_exporter(self) -> str:
-        """Return the active Tracing_Exporter name based on credential presence.
+        """Return the active Tracing_Exporter name based on configuration presence.
 
-        Returns ``"langsmith"`` iff a Tracing_Credential is configured **and** export is
-        enabled, else ``"noop"`` — so no external tracer is constructed on the keyless
-        path and trace export never occurs without a credential (Req 1.2, 1.4, 10.2).
+        Resolution, in order:
+
+        * ``"noop"`` when ``tracing_export_enabled`` is false, or when neither destination
+          is configured — so no external tracer is constructed on the keyless path and
+          trace export never occurs without explicit configuration (Req 1.2, 1.4, 10.2);
+        * ``"langsmith"`` when a Tracing_Credential is present. It takes precedence for
+          compatibility: a deployment that already sets ``LANGSMITH_API_KEY`` must keep
+          exporting exactly where it did before this setting existed;
+        * ``"otlp"`` when an OTLP endpoint is configured.
+
+        Exactly one destination is active. Fanning out to several would need a composite
+        exporter and a way to report partial failure, neither of which any caller asks for
+        yet; configuring both is therefore reported at startup rather than silently
+        halving the export.
         """
-        return (
-            "langsmith"
-            if self.tracing_export_enabled and self.langsmith_api_key is not None
-            else "noop"
-        )
+        if not self.tracing_export_enabled:
+            return "noop"
+        if self.langsmith_api_key is not None:
+            return "langsmith"
+        if self.otel_exporter_endpoint:
+            return "otlp"
+        return "noop"
 
 
 # Required non-secret settings that must be present at startup. Anything with a

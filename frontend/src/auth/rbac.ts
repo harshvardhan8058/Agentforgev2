@@ -15,6 +15,8 @@ export type Permission =
   | "ingest_documents"
   | "manage_api_keys"
   | "manage_integrations"
+  | "manage_budget"
+  | "read_audit_log"
   | "manage_members";
 
 // Built incrementally so the nesting is explicit and cannot silently drift,
@@ -36,6 +38,8 @@ const ADMIN: ReadonlySet<Permission> = new Set<Permission>([
 ]);
 const OWNER: ReadonlySet<Permission> = new Set<Permission>([
   ...ADMIN,
+  "read_audit_log",
+  "manage_budget",
   "manage_members",
 ]);
 

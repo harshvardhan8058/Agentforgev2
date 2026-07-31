@@ -15,16 +15,18 @@ blocking the event loop.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from agentforge.agent.orchestrator import Agent_Orchestrator, extract_citations
 from agentforge.api.deps import (
+    enforce_budget,
     get_conversation_store,
     get_optional_guardrail_pipeline,
     get_orchestrator,
     get_streaming_service,
+    get_trace_export_service,
     get_trace_recorder,
     require_permission,
 )
@@ -44,6 +46,7 @@ from agentforge.observability.guardrails.base import (
     Guardrail_Pipeline,
     apply_input_guardrail,
 )
+from agentforge.observability.trace_export import Trace_Export_Service
 from agentforge.streaming.base import AgentRunInput
 from agentforge.streaming.sse import SSE_Streaming_Service
 from agentforge.tracing.base import Trace_Recorder
@@ -61,10 +64,13 @@ def _resolve_conversation(
 @router.post("/agent/run", response_model=AgentRunResponse)
 async def run_agent(
     payload: AgentRunRequest,
+    background: BackgroundTasks,
     orchestrator: Agent_Orchestrator = Depends(get_orchestrator),
     store: Conversation_Store = Depends(get_conversation_store),
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
+    trace_export: Trace_Export_Service = Depends(get_trace_export_service),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
+    _budget: Principal = Depends(enforce_budget),
 ) -> AgentRunResponse:
     """Run the bounded agent loop and return its grounded result (Req 1.7, 8.5).
 
@@ -72,6 +78,12 @@ async def run_agent(
     guardrail raises ``AppError("guardrail_blocked", 400)`` and the agent loop is never
     reached (Req 5.4). The output pipeline runs on the final answer and its flags are
     attached to the response without blocking (Req 5.5, 5.6).
+
+    The completed run's trace is handed to the Trace_Export_Service as a **background
+    task**, i.e. after the response has been sent: export is best-effort observability, so
+    it must add nothing to the caller's latency and must not be able to fail the run
+    (Req 10.2). With the keyless NoOp exporter the task returns immediately without
+    touching the trace store.
     """
 
     org_id = principal.org_id
@@ -118,7 +130,14 @@ async def run_agent(
             flags=flags,
         )
 
-    return await run_in_threadpool(_run)
+    response = await run_in_threadpool(_run)
+    background.add_task(
+        trace_export.export_run,
+        response.run_id,
+        org_id=org_id,
+        user_id=principal.user_id,
+    )
+    return response
 
 
 @router.post("/agent/stream")
@@ -126,9 +145,17 @@ async def stream_agent(
     payload: AgentRunRequest,
     streaming: SSE_Streaming_Service = Depends(get_streaming_service),
     store: Conversation_Store = Depends(get_conversation_store),
+    trace_export: Trace_Export_Service = Depends(get_trace_export_service),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
+    _budget: Principal = Depends(enforce_budget),
 ) -> StreamingResponse:
-    """Stream the agent run over Server-Sent Events, scoped to the caller's org (Req 9.1-9.9)."""
+    """Stream the agent run over Server-Sent Events, scoped to the caller's org (Req 9.1-9.9).
+
+    A streamed run cannot use a background task (the response is the stream), so export is
+    attached as the streaming service's completion hook: it runs after the terminal event
+    has been handed to the client, and a failure there is swallowed rather than becoming a
+    second terminal event (Req 9.6, 10.2).
+    """
     org_id = principal.org_id
     conversation_id = await run_in_threadpool(
         _resolve_conversation, store, org_id, payload.conversation_id
@@ -142,8 +169,11 @@ async def stream_agent(
         conversation_context=context,
         org_id=org_id,
     )
+    def _export(run_id: str) -> None:
+        trace_export.export_run(run_id, org_id=org_id, user_id=principal.user_id)
+
     return StreamingResponse(
-        streaming.iter_sse_frames(run_input),
+        streaming.iter_sse_frames(run_input, on_complete=_export),
         media_type="text/event-stream",
     )
 

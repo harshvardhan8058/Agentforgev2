@@ -8,7 +8,7 @@ or a plaintext API-key secret** — only the irreversible hash crosses the bound
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
@@ -76,6 +76,28 @@ class API_Key:
     key_hash: str  # argon2id hash of the secret; never the plaintext (Req 5.2, 8.5)
     revoked_at: datetime | None  # None => active
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class Audit_Event:
+    """One append-only record of an administrative action within an Organization.
+
+    Holds an actor **id**, not a label: emails are immutable in this system, so the API
+    resolves a display name at read time in one batched lookup and renders an unresolvable
+    actor honestly when the user has since been deleted. Nothing here can hold a credential
+    — ``metadata`` is admitted by ``enterprise/audit.admit_metadata`` before any write.
+    """
+
+    id: UUID
+    org_id: UUID
+    actor_kind: Literal["user", "api_key"]
+    actor_user_id: UUID | None  # set iff actor_kind == "user"
+    actor_key_id: UUID | None  # set iff actor_kind == "api_key"
+    action: str  # from the Audit_Action vocabulary
+    target_type: str
+    target_id: str | None
+    metadata: dict = field(default_factory=dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass(frozen=True)

@@ -3,9 +3,14 @@
  *
  * Calls `GET /agent/runs/{run_id}/trace` and renders the entries as a
  * `TraceTimeline` ordered by `ordinal`. A `404 not_found` presents the trace as
- * not found (Req 9.6). When the run exists but exposes no trace detail (NoOp
- * tracing), the empty entry list renders as "trace detail unavailable" rather
- * than an error (Req 6.3).
+ * not found (Req 9.6). An empty entry list renders as "trace detail
+ * unavailable" rather than an error (Req 6.3).
+ *
+ * Beneath the timeline, `TraceExportNotice` states whether this deployment
+ * forwards traces anywhere. Recording and exporting are separate concerns —
+ * traces are always recorded, export needs a server credential — and without
+ * that line a user cannot tell an unexported trace from one that has not
+ * arrived upstream yet.
  */
 import type { JSX } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -18,6 +23,7 @@ import { useSession } from "../../auth/useSession";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { Skeleton } from "../../components/ui/Skeleton";
+import { TraceExportNotice } from "./TraceExportNotice";
 import { TraceTimeline, type TraceEntry } from "./TraceTimeline";
 
 interface TraceResponse {
@@ -61,5 +67,10 @@ export function TraceView({ runId }: { runId: string }): JSX.Element {
     return <ErrorBanner error={trace.error} onRetry={() => void trace.refetch()} />;
   }
 
-  return <TraceTimeline entries={trace.data?.entries ?? []} />;
+  return (
+    <div>
+      <TraceTimeline entries={trace.data?.entries ?? []} />
+      <TraceExportNotice />
+    </div>
+  );
 }

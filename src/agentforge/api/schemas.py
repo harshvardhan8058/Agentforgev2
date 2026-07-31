@@ -8,12 +8,19 @@ routers that use them are wired in later tasks.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from agentforge.enterprise.audit import Audit_Action as AuditAction
 from agentforge.enterprise.rbac import Role as RbacRole
+
+# A JSON scalar: the value type for every free-form mapping this API accepts or returns.
+# Declaring it precisely (rather than as an opaque object) states what the server actually
+# accepts, rejects nesting at the transport layer, and gives generated clients a usable type.
+JsonScalar = str | int | float | bool | None
 
 
 # --- error envelope ---
@@ -209,15 +216,15 @@ class MultiAgentRunResult(BaseModel):
 class RegisterSelfRequest(BaseModel):
     """Self-registration body: bootstraps a new Organization + owner User (Req 1.1)."""
 
-    email: str = Field(..., min_length=1)
+    email: str = Field(..., min_length=1, max_length=320)
     password: str = Field(..., min_length=1)
-    org_name: str = Field(..., min_length=1)
+    org_name: str = Field(..., min_length=1, max_length=200)
 
 
 class LoginRequest(BaseModel):
     """Login body: verifies credentials to issue an Access_Token (Req 1.2, 1.3)."""
 
-    email: str = Field(..., min_length=1)
+    email: str = Field(..., min_length=1, max_length=320)
     password: str = Field(..., min_length=1)
 
 
@@ -234,7 +241,7 @@ class TokenResponse(BaseModel):
 class CreateOrgRequest(BaseModel):
     """Body for ``POST /orgs`` — an authenticated user creates an org they own."""
 
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=200)
 
 
 class CreateOrgResponse(BaseModel):
@@ -246,7 +253,7 @@ class CreateOrgResponse(BaseModel):
 class AddMemberRequest(BaseModel):
     """Body for ``POST /orgs/{id}/members`` — add an existing user under a Role (Req 2.2)."""
 
-    email: str = Field(..., min_length=1)
+    email: str = Field(..., min_length=1, max_length=320)
     role: RbacRole
 
 
@@ -261,7 +268,7 @@ class AddMemberResponse(BaseModel):
 class CreateTeamRequest(BaseModel):
     """Body for ``POST /orgs/{id}/teams`` — create an org-scoped Team (Req 2.3)."""
 
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=200)
 
 
 class CreateTeamResponse(BaseModel):
@@ -280,7 +287,7 @@ class CreateTeamResponse(BaseModel):
 class AddTeamMemberRequest(BaseModel):
     """Body for ``POST /orgs/{id}/teams/{tid}/members`` — add a user by email (Req 2.4)."""
 
-    email: str = Field(..., min_length=1)
+    email: str = Field(..., min_length=1, max_length=320)
 
 
 class AddTeamMemberResponse(BaseModel):
@@ -478,7 +485,7 @@ class CostRatesResponse(BaseModel):
 class CreatePromptVersionRequest(BaseModel):
     """Body for ``POST /prompts`` — append a new immutable Prompt_Version (Req 4.1)."""
 
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=200)
     body: str = Field(..., min_length=1)
     variables: list[str] = Field(default_factory=list)
 
@@ -552,7 +559,7 @@ class EvaluationItemRequest(BaseModel):
 class CreateDatasetRequest(BaseModel):
     """Body for ``POST /evaluations/datasets`` — a named dataset + its items (Req 6.1)."""
 
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=200)
     items: list[EvaluationItemRequest] = Field(default_factory=list)
 
 
@@ -614,11 +621,9 @@ class IntegrationStatusEntry(BaseModel):
     enabled: bool
 
 
-# A connection config value is a JSON scalar. Declaring it precisely (rather than as an
-# opaque object) makes the contract state what the admission policy actually accepts, gives
-# generated clients a usable type, and rejects nested structures at the transport layer
-# before the policy has to.
-IntegrationConfigValue = str | int | float | bool | None
+# A connection config value is a JSON scalar (see ``JsonScalar`` above); named separately
+# because the integration admission policy documents itself in terms of this alias.
+IntegrationConfigValue = JsonScalar
 
 
 class CreateIntegrationConnectionRequest(BaseModel):
@@ -659,6 +664,90 @@ class IntegrationConnectionResponse(BaseModel):
     # field that never occurs.
     config: dict[str, IntegrationConfigValue]
     created_at: datetime
+
+
+class SetBudgetRequest(BaseModel):
+    """Body for ``PUT /budget`` — the monthly ceiling and what happens at it.
+
+    ``limit_amount`` is a ``Decimal`` parsed from a JSON number *or* string, so a client can
+    send an exact value without a float round trip; ``0`` is a valid ceiling meaning "spend
+    nothing" and is distinct from having no budget at all.
+    """
+
+    limit_amount: Decimal = Field(..., ge=0)
+    # "warn" reports the overage and lets runs continue; "block" refuses new runs for the
+    # rest of the period. Defaulting to "warn" is deliberate: setting a budget should not
+    # silently start refusing a customer's traffic.
+    action: Literal["warn", "block"] = "warn"
+
+
+class BudgetStatusResponse(BaseModel):
+    """Where an organization stands against its spend budget this period.
+
+    Every monetary field is an exact decimal **string**, rendered verbatim by the client for
+    the same reason `total_cost` is: a cost of ``0.00013`` is not representable as a float
+    without drift. ``limit_amount``/``remaining``/``percent_used``/``action`` are ``null``
+    when no budget is set — the unlimited default.
+    """
+
+    period_start: datetime
+    period_end: datetime
+    spent: str
+    limit_amount: str | None = None
+    remaining: str | None = None
+    percent_used: str | None = None
+    action: Literal["warn", "block"] | None = None
+    # `exceeded` is "at or over the ceiling"; `blocked` is that AND an action of "block", so a
+    # client can tell "you are over budget" from "we are refusing new runs".
+    exceeded: bool = False
+    blocked: bool = False
+
+
+class AuditEventResponse(BaseModel):
+    """One row of ``GET /audit-events`` — an administrative action that was taken.
+
+    ``actor_email`` is resolved at read time and is ``None`` for an API-key actor (a key has
+    no display name) or for a user who has since been deleted; the audit row itself survives
+    either way, which is the whole point of an append-only trail. ``metadata`` holds
+    non-secret scalars only — an audit event records *that* an API key was created, never
+    the secret.
+    """
+
+    id: UUID
+    action: AuditAction
+    actor_kind: Literal["user", "api_key"]
+    actor_id: UUID | None = None
+    actor_email: str | None = None
+    target_type: str
+    target_id: str | None = None
+    metadata: dict[str, JsonScalar] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class TraceExportStatus(BaseModel):
+    """Whether, and where, completed run traces are exported.
+
+    ``enabled`` is derived from the wired export service, not from configuration alone: a
+    credentialed exporter with no trace recorder behind it reports ``False``, because
+    nothing would actually leave the process.
+    """
+
+    enabled: bool
+    # Stable exporter identifier: "noop" when export is off, else e.g. "langsmith".
+    exporter: str
+    # Non-secret destination label (a project name), or null when there is none.
+    destination: str | None = None
+
+
+class ObservabilityStatusResponse(BaseModel):
+    """Deployment-wide telemetry handling — the response of ``GET /observability/status``.
+
+    Deliberately a nested object rather than flat fields: trace export is the first of
+    several things a client may need to know about how a deployment is instrumented, and a
+    nested shape lets the next one be added without re-reading the meaning of the others.
+    """
+
+    trace_export: TraceExportStatus
 
 
 class IntegrationStatusResponse(BaseModel):

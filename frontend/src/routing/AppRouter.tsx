@@ -76,6 +76,9 @@ const EvaluationsView = lazy(() =>
 const MembersView = lazy(() =>
   import("../features/orgs/MembersView").then((m) => ({ default: m.MembersView })),
 );
+const AuditLogView = lazy(() =>
+  import("../features/audit/AuditLogView").then((m) => ({ default: m.AuditLogView })),
+);
 const ApiKeysView = lazy(() =>
   import("../features/orgs/ApiKeysView").then((m) => ({ default: m.ApiKeysView })),
 );
@@ -119,6 +122,7 @@ export function AppRouter(): JSX.Element {
           <Route path="/integrations" element={<IntegrationsView />} />
           <Route path="/members" element={<MembersView />} />
           <Route path="/api-keys" element={<ApiKeysView />} />
+          <Route path="/audit" element={<AuditLogView />} />
           <Route path="*" element={<NotFoundView />} />
         </Route>
       </Routes>

@@ -119,9 +119,36 @@ async def _unhandled_exception_handler(_: Request, exc: Exception) -> JSONRespon
     )
 
 
+async def _audit_unavailable_handler(_: Request, exc: Exception) -> JSONResponse:
+    """Report an applied-but-unrecorded change distinctly (``audit_log_required``).
+
+    503 with its own code rather than a generic 500, for two reasons a client can act on:
+    the failure is upstream-and-transient (the audit store), and the mutation **was**
+    applied — nothing spans the action's store and the audit store, so this is a refusal to
+    acknowledge the change, not a rollback. A client that retried a generic 500 would create
+    a duplicate; this tells it not to.
+    """
+    from agentforge.enterprise.audit import AuditUnavailableError
+
+    assert isinstance(exc, AuditUnavailableError)
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=error_body(
+            "audit_unavailable",
+            "The change was applied but could not be recorded in the audit log, and this "
+            "deployment requires every administrative change to be recorded. Do not retry; "
+            "verify the current state and the audit store.",
+            {"action": getattr(exc, "action", None), "applied": True},
+        ),
+    )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Register all exception handlers on the FastAPI app."""
+    from agentforge.enterprise.audit import AuditUnavailableError
+
     app.add_exception_handler(AppError, _app_error_handler)
+    app.add_exception_handler(AuditUnavailableError, _audit_unavailable_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_exception_handler)
     app.add_exception_handler(Exception, _unhandled_exception_handler)

@@ -119,6 +119,108 @@ Notes and guarantees:
   fact as `cost_rates_configured`, which is how the console distinguishes "nothing spent"
   from "nothing priced". Both are shown on the Analytics page.
 
+## Spend budgets (`BUDGET_CACHE_SECONDS`)
+
+The ceiling itself is **not** configuration — an owner sets it per organization through
+`PUT /budget` (`manage_budget`), and it is stored in `spend_budgets`. Only the enforcement
+cache is an environment setting.
+
+How it works:
+
+- The period is the **calendar month in UTC**, computed from the request's own timestamp. There
+  is no stored period and no rollover job, which is the most common source of bugs in this kind
+  of feature. Rolling windows and per-tenant billing anchors need a billing model the platform
+  does not have.
+- `action: "warn"` reports the overage and lets traffic continue; `action: "block"` refuses
+  **new** work with `402 budget_exceeded` (the request is well-formed and authorized — a
+  spending limit is exactly what 402 describes). Setting a budget defaults to `warn`, so
+  enabling one cannot silently start refusing a customer's traffic.
+- Only the endpoints that *spend* are gated: RAG query, agent run/stream, multi-agent
+  run/stream. Reads are never blocked — hiding the data that explains an overage would be
+  perverse — and neither is an **approval decision**, because a paused run has already spent
+  most of what it will spend and stranding it at a checkpoint wastes that.
+- The enforced number is the same month-to-date total `GET /analytics/usage` reports, so a
+  refusal is always explicable from the dashboard. `GET /budget` (only `read`) shows spent,
+  limit, remaining, percent used, and whether the org is `exceeded` / `blocked`.
+- **`BUDGET_CACHE_SECONDS` (default 30)** bounds the cost of enforcement: without it every run
+  would put a `SUM` over the tenant's month in front of itself. The trade is a bounded
+  overshoot — a burst inside the window can exceed the ceiling slightly. Raising a ceiling
+  invalidates the cache immediately, so an owner unblocking their own org never waits.
+- **Metering fails open.** If spend cannot be computed the guard reports zero and work
+  continues (logged at WARNING): an analytics outage must not become a total outage for every
+  budgeted tenant.
+- Setting and removing a budget are recorded in the audit trail (`budget.set`,
+  `budget.removed`), so "who raised the ceiling" is answerable.
+
+## Audit trail (`AUDIT_LOG_REQUIRED`)
+
+Optional in both profiles, and **not** a credential. Every administrative mutation
+(`/orgs/*` members, teams and API keys; `/integrations/connections`) appends an append-only
+`audit_events` row for the acting principal, readable at `GET /audit-events` by a principal
+holding `read_audit_log` (**owner-only**, matching the owner-only member roster the trail's
+metadata would otherwise expose).
+
+`AUDIT_LOG_REQUIRED` selects the **failure posture**, which is the only genuinely contested
+decision here:
+
+- **`false` (default) — fail open.** A failed audit write is logged at `ERROR` and the audited
+  request still succeeds. An audit store outage must not become a platform outage.
+- **`true` — fail closed.** The audited request is reported as failed when its event cannot be
+  recorded: `503 audit_unavailable` with `details.applied = true`. Be precise about what this
+  does — the mutation and its audit row are written by different stores in different
+  transactions, so the change is **not rolled back**; the deployment refuses to *acknowledge*
+  a change it could not record, and the response says so explicitly (and says not to retry, so
+  a client cannot duplicate the change). Coupling the admin surface's availability to the
+  trail's is the cost.
+
+Guarantees that do not depend on configuration:
+
+- **Nothing recorded is a credential.** `metadata` admits non-secret scalars only, and a
+  credential-named key (`token`, `api_key`, `client_secret`, even `password_hash`) is refused
+  before any write. An API-key event records the key's **prefix**, never its secret.
+- **The trail is org-scoped and unreachable across tenants.** The store takes `org_id` as a
+  query parameter and the endpoint has no org parameter at all, so a caller cannot name
+  another tenant's trail.
+- **Only successful actions are recorded.** Events are appended after the action succeeds, so
+  a refused or failed request leaves no entry claiming otherwise.
+- **Persistence follows the data.** The audit log is Postgres-backed exactly when the other
+  domain stores are (`USE_DATABASE` / the production profile); the keyless lane keeps an
+  in-memory trail so auditing is testable without infrastructure.
+
+## Trace export (`TRACING_EXPORT_ENABLED`, `LANGSMITH_API_KEY`, `OTEL_EXPORTER_ENDPOINT`)
+
+All optional in both profiles. **Recording and exporting are separate**: every run's trace is
+recorded by the `Trace_Recorder` and served by `GET /agent/runs/{run_id}/trace` with no
+configuration at all. These settings decide whether a *finished* run is additionally
+forwarded to an external destination.
+
+Exactly one destination is active, resolved in this order:
+
+1. `TRACING_EXPORT_ENABLED=false` → no export, whatever else is set.
+2. `LANGSMITH_API_KEY` present → LangSmith, into `LANGSMITH_PROJECT`. It takes precedence so
+   that a deployment which was already exporting keeps exporting to the same place.
+3. `OTEL_EXPORTER_ENDPOINT` present → OTLP/HTTP to that endpoint, with `OTEL_SERVICE_NAME` as
+   the `service.name` resource attribute and `OTEL_HEADERS` (`k=v,k2=v2`, secret) as headers.
+   Requires the optional extra: `pip install -e ".[otel]"`.
+4. Otherwise → no export (the keyless default).
+
+Guarantees:
+
+- **Export can never affect a run.** It happens after the response is sent (a background
+  task) or after the stream's single terminal event (a completion hook), and every failure —
+  a missing dependency, an unreachable collector, an exporter that breaks its own contract —
+  is swallowed and logged. A failed export never changes an answer, a termination reason, or
+  the SSE terminal event.
+- **Off costs nothing.** With no destination configured the export path short-circuits before
+  reading the trace store, so the keyless default adds no work per run.
+- **Only structural data leaves.** Exported spans carry the run id, tenant and user ids, step
+  ordinal, step type, tool name, outcome, and multi-agent `role_id`. The trace `detail`
+  payload — which can hold prompt and observation text — is **not** exported.
+- **Verify at runtime.** `GET /observability/status` (requires `read`) reports the active
+  exporter, whether export is really on, and the destination label; the console prints the
+  same fact beneath every trace. It reports the wired service rather than the settings, so a
+  destination configured without a trace recorder behind it is reported as *off*.
+
 ## See also
 
 - `.env.example` — every `local` setting with placeholder values.

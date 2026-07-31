@@ -25,7 +25,17 @@ from agentforge.chunking.chunker import Chunker
 from agentforge.config.settings import ConfigError, Settings
 from agentforge.enterprise.api_keys import API_Key_Service, InMemory_API_Key_Store
 from agentforge.enterprise.auth import Auth_Service
-from agentforge.enterprise.base import API_Key_Store, Identity_Store, Rate_Limiter
+from agentforge.enterprise.audit import (
+    Audit_Service,
+    InMemory_Audit_Log,
+    Pg_Audit_Log,
+)
+from agentforge.enterprise.base import (
+    API_Key_Store,
+    Audit_Log,
+    Identity_Store,
+    Rate_Limiter,
+)
 from agentforge.enterprise.identity import InMemory_Identity_Store
 from agentforge.enterprise.rate_limit import NoOp_Rate_Limiter, Redis_Rate_Limiter
 from agentforge.enterprise.rbac import RBAC_Policy
@@ -124,6 +134,13 @@ from agentforge.observability.prompt_registry.store import (
     InMemory_Prompt_Store,
     Pg_Prompt_Store,
 )
+from agentforge.observability.budget import (
+    Budget_Guard,
+    Budget_Store,
+    InMemory_Budget_Store,
+    Pg_Budget_Store,
+)
+from agentforge.observability.trace_export import Trace_Export_Service
 from agentforge.observability.tracing_exporter import (
     Tracing_Exporter,
     build_tracing_exporter,
@@ -958,6 +975,8 @@ class EnterpriseContext:
     api_key_store: API_Key_Store
     api_key_service: API_Key_Service
     rate_limiter: Rate_Limiter
+    audit_log: Audit_Log
+    audit_service: Audit_Service
 
 
 def build_enterprise_context(
@@ -975,8 +994,9 @@ def build_enterprise_context(
     verifier (Req 1.6, 5.2, 9.5).
 
     Supported ``overrides`` keys (all optional): ``rbac``, ``identity_store``,
-    ``auth_service``, ``api_key_store``, ``api_key_service``, ``rate_limiter``, and
-    ``clock`` (forwarded to :func:`build_rate_limiter`).
+    ``auth_service``, ``api_key_store``, ``api_key_service``, ``rate_limiter``,
+    ``audit_log``, ``audit_service``, and ``clock`` (forwarded to
+    :func:`build_rate_limiter`).
     """
     rbac: RBAC_Policy = overrides.get("rbac") or build_rbac_policy()
     identity_store: Identity_Store = (
@@ -996,6 +1016,11 @@ def build_enterprise_context(
         settings, redis, clock=overrides.get("clock")
     )
 
+    audit_log: Audit_Log = overrides.get("audit_log") or build_audit_log(settings)
+    audit_service: Audit_Service = overrides.get("audit_service") or Audit_Service(
+        audit_log, required=settings.audit_log_required
+    )
+
     return EnterpriseContext(
         settings=settings,
         rbac=rbac,
@@ -1004,7 +1029,32 @@ def build_enterprise_context(
         api_key_store=api_key_store,
         api_key_service=api_key_service,
         rate_limiter=rate_limiter,
+        audit_log=audit_log,
+        audit_service=audit_service,
     )
+
+
+def build_budget_store(settings: Settings) -> Budget_Store:
+    """Return the Budget_Store: Postgres when the domain stores persist, in-memory otherwise.
+
+    A budget that vanished on restart would be a cost control in name only, so it follows the
+    same persistence predicate as every other domain store.
+    """
+    if settings.persist_domain_stores():
+        return Pg_Budget_Store(settings.database_url)
+    return InMemory_Budget_Store()
+
+
+def build_audit_log(settings: Settings) -> Audit_Log:
+    """Return the Audit_Log: Postgres when the domain stores persist, in-memory otherwise.
+
+    Same predicate as every other domain store (``persist_domain_stores()``), so an audit
+    trail is durable exactly when the data it describes is. The keyless unit lane keeps an
+    in-memory trail, which is what makes auditing testable without infrastructure.
+    """
+    if settings.persist_domain_stores():
+        return Pg_Audit_Log(settings.database_url)
+    return InMemory_Audit_Log()
 
 
 
@@ -1140,6 +1190,9 @@ class ObservabilityContext:
 
     settings: Settings
     tracing_exporter: Tracing_Exporter
+    trace_export_service: Trace_Export_Service
+    budget_store: Budget_Store
+    budget_guard: Budget_Guard
     usage_store: Usage_Store
     cost_model: Cost_Model
     usage_recorder: Usage_Recorder
@@ -1157,6 +1210,7 @@ def build_observability_context(
     settings: Settings,
     *,
     app: AppContext | None = None,
+    trace_recorder: Trace_Recorder | None = None,
     **overrides,
 ) -> ObservabilityContext:
     """Compose the Phase 6 observability object graph from settings.
@@ -1173,7 +1227,13 @@ def build_observability_context(
     model, registry, pipeline, and framework, so a new implementation is a builder edit
     here — never a router or core-flow change (Req 7.3, 9.7).
 
-    Supported ``overrides`` keys (all optional): ``tracing_exporter``, ``usage_store``,
+    ``trace_recorder`` is the recorder the export service reads completed traces back
+    from; the composition root passes the agentic context's instance so both read one
+    store. Omitting it leaves trace export unavailable (reported as such rather than
+    silently exporting nothing), which is only correct for the keyless NoOp exporter.
+
+    Supported ``overrides`` keys (all optional): ``tracing_exporter``,
+    ``trace_export_service``, ``budget_store``, ``budget_guard``, ``usage_store``,
     ``cost_model``, ``usage_recorder``, ``usage_sink``, ``analytics_service``,
     ``prompt_store``, ``prompt_registry``, ``guardrail_pipeline``, ``evaluation_store``,
     ``evaluators``, ``pipeline_runner``, and ``evaluation_framework``.
@@ -1181,6 +1241,13 @@ def build_observability_context(
     tracing_exporter: Tracing_Exporter = (
         overrides.get("tracing_exporter") or build_tracing_exporter(settings)
     )
+    # The export service bridges the exporter to the Trace_Recorder that OWNS the traces.
+    # The recorder is passed in rather than built here because the agentic context already
+    # holds the one instance (and, on the Postgres path, its engine) — building a second
+    # would open a second connection pool to read the same rows.
+    trace_export_service: Trace_Export_Service = overrides.get(
+        "trace_export_service"
+    ) or Trace_Export_Service(tracing_exporter, trace_recorder)
 
     # Reuse the app's usage store/sink when available so the provider and analytics share
     # one store; otherwise build the profile-selected defaults.
@@ -1226,9 +1293,19 @@ def build_observability_context(
         settings, evaluation_store, pipeline_runner, evaluators
     )
 
+    budget_store: Budget_Store = overrides.get("budget_store") or build_budget_store(
+        settings
+    )
+    budget_guard: Budget_Guard = overrides.get("budget_guard") or Budget_Guard(
+        budget_store, analytics_service, cache_seconds=settings.budget_cache_seconds
+    )
+
     return ObservabilityContext(
         settings=settings,
         tracing_exporter=tracing_exporter,
+        trace_export_service=trace_export_service,
+        budget_store=budget_store,
+        budget_guard=budget_guard,
         usage_store=usage_store,
         cost_model=cost_model,
         usage_recorder=usage_recorder,

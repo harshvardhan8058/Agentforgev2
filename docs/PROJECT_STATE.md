@@ -11,13 +11,17 @@ open_prs:
   - number: 2
     title: "v1.1: complete member/team administration + named cost-rate presets"
     branch: feat/v1.1-admin-crud-and-cost-defaults
-    head_sha: 43093b2
+    head_sha: f3a3039
     state: open
     contains:
       - "member/team admin CRUD (store + 7 endpoints + MembersView) incl. a cross-tenant write fix"
       - "named cost-rate presets + GET /analytics/cost-rates + CostRatesPanel"
       - "self-review fixes (8 findings, each with a regression test)"
+      - "trace-export self-review fixes (6 fixed with tests, 4 documented as bounds)"
       - "integration connection config API + UI + manage_integrations permission"
+      - "trace export made real (the Tracing_Exporter seam had no caller), GET /observability/status, OTLP exporter"
+      - "enterprise audit trail (migration 0013): Audit_Log seam, GET /audit-events, owner-only read_audit_log, console page, 15 audited actions"
+      - "spend budgets (migration 0014): monthly ceiling per org, 402 enforcement on spending endpoints only, Budget card on Analytics"
     migrations_required: none
 
 completed_phases:
@@ -34,6 +38,9 @@ completed_phases:
 
 v1_1_roadmap_status:
   done_on_branch:
+    - "Enterprise audit trail - the top-ranked MISSING enterprise capability, not a roadmap leftover: nothing answered 'who changed this'. Append-only Audit_Log seam (in-memory + Pg), Audit_Service, GET /audit-events (owner-only read_audit_log), 15 audited actions across members/teams/API keys/integration connections/budgets, console page whose filter vocabulary is generated from the contract, and a configurable fail-open/fail-closed posture (503 audit_unavailable when required)."
+    - "Spend budgets - cost observability became cost control. PUT/GET/DELETE /budget (manage_budget, owner-only), calendar-month period computed per request, 402 budget_exceeded on the five spending endpoints only, warn-vs-block postures, Decimal end to end, enforcement cached (BUDGET_CACHE_SECONDS) with documented bounded overshoot, budget changes audited."
+    - "Trace export polish - AND trace export itself: the Tracing_Exporter seam had no caller in src/, so LANGSMITH_API_KEY exported nothing. A Trace_Export_Service now runs on all four run paths off the critical path; GET /observability/status plus a console notice distinguish 'export off' from 'no traces yet'; an OTLP exporter makes the seam vendor-neutral (optional 'otel' extra)."
     - "Admin CRUD completion — list/update/remove members, list/delete teams, team-member list/remove, plus the UI."
     - "Analytics cost defaults — named presets (groq-public-2026-07), GROQ_MODEL, GET /analytics/cost-rates, pricing panel."
     - "Integrations management UI — per-org NON-SECRET connection config over /integrations/connections (this also gave the Phase 8 Integration_Connection store its first HTTP surface; it previously had none)."
@@ -41,24 +48,26 @@ v1_1_roadmap_status:
     - "OpenAPI contract refresh + CI freshness check (production hardening B6)."
     - "Integrations status page (docs claiming no integrations UI were stale)."
   not_started:
+    - "Export durability: export is fire-and-forget (no retry/queue), so a collector that is down during a run loses that run's export; and exactly one destination can be active (no fan-out). Both are documented limitations, not bugs."
+    - "Budget notifications / a webhook seam: crossing a threshold is visible in the API and the console but nothing alerts. One seam would serve budget thresholds, guardrail blocks and run completion - the highest-value next capability."
+    - "Audit export + retention: a SIEM/CSV export and a retention policy are what an auditor asks for after 'do you have a trail'; the keyset cursor they need already exists."
     - "CPU-slim backend image (~1 GB) — would require serving embeddings from outside the image; the current image is CPU-only and CI-gated at <= 4 GB."
-    - "Trace export polish — graceful UI when tracing is NoOp; optional OpenTelemetry exporter alongside LangSmith."
     - "Docs & DX — DEPLOYMENT.md rollback runbooks, a quickstart, documenting the integration lane."
 
 test_status:
   backend:
     command: "pytest -m 'not integration' -q"
-    tests_passing: 741
+    tests_passing: 891
     result: pass
     note: "Deterministic + credential-free. ~2 min. Loads the real embedding model once (test_embedding_dimension), so the first run downloads ~90 MB."
   frontend:
     command: "cd frontend && npm run ci"
     stages: [codegen:check, lint, typecheck, test, build, scan:bundle]
-    tests_passing: 440
+    tests_passing: 467
     result: pass
   e2e:
     command: "cd frontend && npm run e2e"
-    tests_passing: 20
+    tests_passing: 21
     result: pass
     note: "Playwright chromium against the REAL production build with the API mocked at the network layer; includes full-page axe WCAG 2.1 AA scans."
   contract:
@@ -74,6 +83,8 @@ test_status:
     newly_added_and_never_executed:
       - "tests/integration/test_enterprise_identity_integration.py::test_pg_admin_crud_parity"
       - "tests/integration/test_integration_connection_store_integration.py::test_pg_connection_update_and_delete_are_org_scoped"
+      - "tests/integration/test_audit_log_integration.py (migration 0013, JSONB metadata, composed filters, keyset cursor, ON DELETE SET NULL, org cascade)"
+      - "NOTE: Pg_Budget_Store (migration 0014) has NO integration test yet - the next session should add one (upsert/ON CONFLICT, NUMERIC exactness, org cascade)."
 
 architectural_constraints:
   backend:
@@ -88,6 +99,8 @@ architectural_constraints:
     - "Domain invariants live next to the write (Identity_Store), not in the router: last_owner and the Req 2.5 team-membership rule are enforced inside the writing transaction."
     - "Additive migrations only (0001-0012), tracked by schema_migrations; the runner uses the asyncpg simple query protocol for multi-statement scripts."
     - "Cost is Decimal end-to-end and crosses the API as exact strings; pricing resolves default rates -> named preset -> explicit table."
+    - "Governance side channels must never fail the work they govern: an audit write is fail-open by default (fail-closed reports 503 audit_unavailable on an APPLIED change rather than pretending to roll it back), a budget check that cannot compute spend allows the run, and both degrade to no-ops when their context is unwired."
+    - "Observability side channels must never affect the work they observe: trace export runs after the response (background task) or after the SSE terminal event (completion hook), swallows every failure, short-circuits before any store read when off, and its DI accessor degrades to a disabled service rather than 500-ing a run when no observability context is wired."
     - "Integration enablement is a pure function of Settings; stored connection config never grants a capability and never holds a credential."
   frontend:
     - "UI-only: consume shipped contracts; omit any affordance lacking a contract."
@@ -114,7 +127,7 @@ not_yet_verified_on_a_real_docker_host:
   - "Production overlay boot with real secrets."
 
 resume_checkpoint:
-  state: "v1.0 on main; v1.1 work complete and pushed on feat/v1.1-admin-crud-and-cost-defaults (PR #2). All local gates green: backend 741, frontend 440, e2e 20, contract + secret scans clean. No migration needed."
+  state: "v1.0 on main; v1.1 work complete and pushed on feat/v1.1-admin-crud-and-cost-defaults (PR #2), now including two enterprise capabilities beyond the original list (audit trail, spend budgets). All local gates green: backend 891, frontend 467, e2e 21, contract + secret scans clean. Migrations 0013 and 0014 are additive and idempotent; their live-Postgres behaviour has NOT been executed (no database available in the authoring sandbox)."
   next: "1) Land PR #2 (watch the integration lane in CI — it is the first execution of the two new Pg suites). 2) Then pick from v1_1_roadmap_status.not_started; trace-export polish is the cheapest real feature, DEPLOYMENT rollback runbooks the cheapest docs win. 3) The Docker-host validation checklist in docs/SESSION_HANDOFF.md is still the gate on calling the stack runtime-verified."
   see_also: docs/SESSION_HANDOFF.md
 ---
@@ -150,9 +163,9 @@ required by that work.
 
 | Lane | Command | Result |
 |---|---|---|
-| Backend (keyless) | `pytest -m 'not integration' -q` | **741 passed** |
-| Frontend | `cd frontend && npm run ci` | **440 passed** |
-| Browser | `cd frontend && npm run e2e` | **20 passed** |
+| Backend (keyless) | `pytest -m 'not integration' -q` | **891 passed** |
+| Frontend | `cd frontend && npm run ci` | **467 passed** |
+| Browser | `cd frontend && npm run e2e` | **21 passed** |
 | Contract | `python scripts/check_openapi.py` | pass |
 | Secrets | `python scripts/scan_secrets.py` | pass |
 | Live PostgreSQL | `pytest -m integration` | **not run locally** — runs in CI |

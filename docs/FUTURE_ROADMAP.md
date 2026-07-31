@@ -22,6 +22,12 @@ machine-readable form.
   deliberately stays a server-credential decision, so there is no in-app "toggle" — the UI
   reports enablement and manages configuration. This also gave the Phase 8
   `Integration_Connection` store its first HTTP surface.
+- ~~**Trace export polish:**~~ and, first, trace export at all — the `Tracing_Exporter` seam
+  had **no caller anywhere in `src/`**, so `LANGSMITH_API_KEY` changed a log line and
+  exported nothing. Every completed run now goes through a `Trace_Export_Service` (all four
+  run paths, off the critical path, failures swallowed); `GET /observability/status` plus a
+  notice under every trace remove the "export off vs no traces yet" ambiguity; and an
+  OTLP exporter makes the seam vendor-neutral.
 
 **Already delivered earlier** (the entries below predated production hardening B6):
 
@@ -29,16 +35,36 @@ machine-readable form.
   `scripts/check_openapi.py` (server side) and `frontend/scripts/check-codegen.mjs` (client
   side) fail CI on drift.
 
+**Added in this cycle, beyond the original v1.1 list** (the audit found gaps that outranked
+the leftovers):
+
+- ~~**Enterprise audit trail:**~~ append-only, org-scoped, credential-free record of every
+  administrative action, with an owner-only console page and a configurable fail-open /
+  fail-closed posture. This was the top-ranked *missing enterprise capability*: every product
+  AgentForge is measured against has one, and nothing here answered "who changed this".
+- ~~**Spend budgets:**~~ a monthly ceiling per organization that warns or blocks, enforced in
+  front of every spending endpoint. Cost was measurable and unlimitable, which is the
+  difference between an observability feature and a governance one.
+
 **Remaining:**
 
 - **CPU-slim backend image:** the shipped image is already CPU-only (no CUDA/NVIDIA packages,
   CI-gated at ≤ 4 GB). Going materially smaller means serving embeddings from outside the
   image — a design change rather than a packaging tweak.
-- **Trace export polish:** graceful UI when tracing is NoOp (today a client cannot tell
-  "tracing is off" from "no traces yet"); optional OpenTelemetry exporter behind the existing
-  `Tracing_Exporter` seam, alongside LangSmith.
 - **Docs & DX:** expand `DEPLOYMENT.md` rollback runbooks, add a quickstart, and document the
   integration-lane test suite (credential-free, but needs a `pgvector` database).
+- **Budget notifications (new, from the budget work):** crossing a threshold is visible on the
+  dashboard and in the API, but nothing emails, webhooks, or alerts — and an owner who has to
+  look is an owner who finds out late. A webhook/notification seam would serve budget
+  thresholds, guardrail blocks, and run completion at once, and is the natural next capability.
+- **Audit export + retention (new, from the audit work):** a SIEM/CSV export and a retention
+  policy are what an auditor asks for after "do you have a trail". Both are small next to the
+  trail itself, and the keyset cursor they need already exists.
+- **Export durability (new, from the trace-export work):** export is fire-and-forget with no
+  retry or queue, so a collector that is down during a run loses that run's export (the
+  recorded trace is unaffected). A bounded retry, or a "re-export a run" endpoint, is the
+  natural follow-up; so is fanning out to several destinations at once, which today is a
+  documented single-destination limitation.
 
 ## v2.0 — Real integrations & production scale
 
@@ -50,7 +76,8 @@ Goal: move from deterministic stand-ins to real external connectivity and cloud-
 - **Evaluation expansion:** LLM-as-judge evaluators, regression gating in CI, and dataset versioning.
 - **Vector store scale:** managed pgvector/dedicated vector DB options, hybrid (BM25 + dense) retrieval, and re-ranking.
 - **Multi-region & HA:** stateless backend replicas, read-replica DB support, and Redis clustering.
-- **Observability:** full OpenTelemetry traces/metrics/logs, dashboards, and SLO alerting.
+- **Observability:** full OpenTelemetry **metrics and logs** (traces already export over OTLP
+  as of v1.1), dashboards, and SLO alerting.
 
 ## v3.0 — Platform & ecosystem (vision)
 

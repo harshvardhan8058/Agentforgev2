@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Response, status
 from fastapi.concurrency import run_in_threadpool
 
 from agentforge.api.deps import (
+    get_audit_service,
     get_integration_connection_store,
     get_integration_status_service,
     require_permission,
@@ -32,6 +33,7 @@ from agentforge.api.schemas import (
     IntegrationStatusResponse,
     UpdateIntegrationConnectionRequest,
 )
+from agentforge.enterprise.audit import Audit_Action, Audit_Service
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.rbac import Permission
 from agentforge.integrations import INTEGRATION_NAMES
@@ -53,6 +55,26 @@ def _to_response(connection: Integration_Connection) -> IntegrationConnectionRes
         config=connection.config,
         created_at=connection.created_at,
     )
+
+
+# An audit metadata value is bounded; the config admission policy allows up to 20 keys of 64
+# characters, whose joined names would blow past that. The count is the fact worth recording,
+# and the names are a best-effort detail, so the count is always exact and the list is what
+# fits.
+_MAX_AUDITED_SETTING_NAMES = 8
+
+
+def _settings_metadata(integration: str, config: dict) -> dict[str, object]:
+    """Audit metadata for a connection write: which integration, and which settings."""
+    names = sorted(config)
+    shown = names[:_MAX_AUDITED_SETTING_NAMES]
+    return {
+        "integration": integration,
+        "setting_count": len(names),
+        "settings": (
+            ", ".join(shown) + (", …" if len(names) > len(shown) else "") or None
+        ),
+    }
 
 
 def _not_found(connection_id: UUID) -> AppError:
@@ -137,6 +159,7 @@ async def list_integration_connections(
 async def create_integration_connection(
     payload: CreateIntegrationConnectionRequest,
     store: Integration_Connection_Store = Depends(get_integration_connection_store),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(
         require_permission(Permission.MANAGE_INTEGRATIONS)
     ),
@@ -152,6 +175,17 @@ async def create_integration_connection(
     config = _validated_config(payload.config)
     connection = await run_in_threadpool(
         store.create, principal.org_id, integration, config
+    )
+    # The settings' KEYS are recorded, not their values: which fields were configured is the
+    # auditable fact, and a value could be operationally sensitive even when it is not a
+    # credential (the admission policy already refused those).
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.INTEGRATION_CONNECTION_CREATED,
+        target_type="integration_connection",
+        target_id=str(connection.id),
+        metadata=_settings_metadata(connection.integration, config),
     )
     return _to_response(connection)
 
@@ -180,6 +214,7 @@ async def update_integration_connection(
     connection_id: UUID,
     payload: UpdateIntegrationConnectionRequest,
     store: Integration_Connection_Store = Depends(get_integration_connection_store),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(
         require_permission(Permission.MANAGE_INTEGRATIONS)
     ),
@@ -191,6 +226,14 @@ async def update_integration_connection(
     )
     if updated is None:
         raise _not_found(connection_id)
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.INTEGRATION_CONNECTION_UPDATED,
+        target_type="integration_connection",
+        target_id=str(connection_id),
+        metadata=_settings_metadata(updated.integration, config),
+    )
     return _to_response(updated)
 
 
@@ -201,12 +244,22 @@ async def update_integration_connection(
 async def delete_integration_connection(
     connection_id: UUID,
     store: Integration_Connection_Store = Depends(get_integration_connection_store),
+    audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(
         require_permission(Permission.MANAGE_INTEGRATIONS)
     ),
 ) -> Response:
     """Delete a connection owned by the caller's org; unknown/cross-tenant is 404."""
+    doomed = await run_in_threadpool(store.get, principal.org_id, connection_id)
     deleted = await run_in_threadpool(store.delete, principal.org_id, connection_id)
     if not deleted:
         raise _not_found(connection_id)
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.INTEGRATION_CONNECTION_DELETED,
+        target_type="integration_connection",
+        target_id=str(connection_id),
+        metadata={"integration": doomed.integration if doomed is not None else None},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

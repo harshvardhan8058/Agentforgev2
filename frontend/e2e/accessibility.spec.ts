@@ -92,6 +92,29 @@ test.describe("accessibility (axe, WCAG 2.1 AA)", () => {
     expect(results.violations).toEqual([]);
   });
 
+  test("audit log view has no serious violations", async ({ page }) => {
+    await mockCommon(page);
+    await seedAuth(page, { role: "owner" });
+    await mockJson(page, "/audit-events**", [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        action: "member.removed",
+        actor_kind: "user",
+        actor_id: "22222222-2222-4222-8222-222222222222",
+        actor_email: "owner@example.com",
+        target_type: "member",
+        target_id: "33333333-3333-4333-8333-333333333333",
+        metadata: { email: "gone@example.com" },
+        created_at: "2026-08-01T10:00:00Z",
+      },
+    ]);
+
+    await page.goto("/audit");
+    await expect(page.getByTestId("audit-table")).toBeVisible();
+    const results = await scan(page);
+    expect(results.violations).toEqual([]);
+  });
+
   test("query view has no serious violations", async ({ page }) => {
     await mockCommon(page);
     await seedAuth(page, { role: "member" });
