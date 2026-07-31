@@ -661,6 +661,32 @@ class IntegrationConnectionResponse(BaseModel):
     created_at: datetime
 
 
+class TraceExportStatus(BaseModel):
+    """Whether, and where, completed run traces are exported.
+
+    ``enabled`` is derived from the wired export service, not from configuration alone: a
+    credentialed exporter with no trace recorder behind it reports ``False``, because
+    nothing would actually leave the process.
+    """
+
+    enabled: bool
+    # Stable exporter identifier: "noop" when export is off, else e.g. "langsmith".
+    exporter: str
+    # Non-secret destination label (a project name), or null when there is none.
+    destination: str | None = None
+
+
+class ObservabilityStatusResponse(BaseModel):
+    """Deployment-wide telemetry handling — the response of ``GET /observability/status``.
+
+    Deliberately a nested object rather than flat fields: trace export is the first of
+    several things a client may need to know about how a deployment is instrumented, and a
+    nested shape lets the next one be added without re-reading the meaning of the others.
+    """
+
+    trace_export: TraceExportStatus
+
+
 class IntegrationStatusResponse(BaseModel):
     """The org-scoped Integration_Status view: one ``{name, enabled}`` entry per integration.
 

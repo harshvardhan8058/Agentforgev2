@@ -16,6 +16,30 @@ existing tables.
 
 ### Added
 
+- **Trace export actually happens.** The `Tracing_Exporter` seam shipped in Phase 6 with a
+  NoOp implementation, a LangSmith implementation, a settings-driven factory, a DI accessor
+  and its own tests — and **no caller anywhere in `src/`**. Setting `LANGSMITH_API_KEY`
+  changed one startup log line and exported nothing. A new `Trace_Export_Service` bridges the
+  exporter to the `Trace_Recorder` that owns the traces, and every completed run now goes
+  through it: `POST /agent/run`, `POST /agent/stream`, `POST /multi-agent/runs`,
+  `POST /multi-agent/runs/{id}/stream`, and the approval decision that terminates a run.
+  Export attaches as a background task (after the response is sent) or as the stream's
+  completion hook (after the single terminal event), so it adds no latency and cannot change
+  a run's outcome; with no destination configured it short-circuits before even reading the
+  trace store.
+- **`GET /observability/status`** (`read`) reporting whether trace export is on, which
+  exporter is active, and its destination label — derived from the wired service, so a
+  destination configured without a recorder behind it reports `enabled: false` rather than
+  claiming to work. A notice beneath every trace in the console states the same thing, which
+  is what removes the "export is off" vs "no traces yet" ambiguity the v1.1 roadmap named.
+- **OTLP trace exporter** (`OTEL_EXPORTER_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_HEADERS`)
+  behind the same seam, so traces can reach any OpenTelemetry collector instead of one SaaS
+  vendor. One span per run with one child span per trace entry, carrying only structural
+  attributes — the trace `detail` payload, which can hold prompt and observation text, is
+  never exported. The OpenTelemetry SDK is an optional `otel` extra, imported lazily; without
+  it the exporter logs once and exports nothing rather than failing runs. LangSmith keeps
+  precedence when both are configured, so an existing deployment is never silently
+  re-pointed.
 - **Member and team administration.** The org surface was create-and-add only; there was no
   way to see who was in an organization, change a role, or remove anybody. Added
   `GET /orgs/{id}/members`, `PATCH|DELETE /orgs/{id}/members/{user_id}`,
@@ -52,6 +76,15 @@ existing tables.
   the server grants but the client omits hides a control the caller is authorized to use.
 - **Accessibility coverage** for the administration surfaces: axe in jsdom for the populated
   member/team and API-key views, plus a full-page Playwright axe scan of `/members`.
+
+### Changed
+
+- `POST /agent/stream` gained an internal completion hook on the streaming service
+  (`on_complete`), invoked with the finished run id after the terminal event. A hook failure
+  is swallowed: emitting a second terminal event because a side effect failed would break the
+  single-terminal guarantee the stream contract rests on.
+- Validation errors no longer echo the submitted value (see below), and
+  `active_tracing_exporter()` now resolves three destinations instead of two.
 
 ### Fixed
 
@@ -135,8 +168,8 @@ with `role=admin` gain the capability on deploy**.
 
 ### Verification
 
-Every gate below was run on the branch: backend `pytest -m 'not integration' -q` → **741
-passed**; `cd frontend && npm run ci` → **440 passed**; `cd frontend && npm run e2e` →
+Every gate below was run on the branch: backend `pytest -m 'not integration' -q` → **786
+passed**; `cd frontend && npm run ci` → **445 passed**; `cd frontend && npm run e2e` →
 **20 passed**; `python scripts/check_openapi.py` and `python scripts/scan_secrets.py` clean.
 
 The live-PostgreSQL lane (`pytest -m integration`) was **not** run: no database could be

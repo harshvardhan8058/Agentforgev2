@@ -24,6 +24,13 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from agentforge.config.settings import Settings
 
 
+# The sentinel name of the "export nothing" implementation. Named because three places
+# compare against it (the factory, the settings predicate's return value, and the
+# Trace_Export_Service's `enabled` check) and a typo in any of them would silently turn
+# export off — or, worse, claim it is on.
+NOOP_EXPORTER_NAME = "noop"
+
+
 class Tracing_Exporter(ABC):
     """Abstract contract for forwarding a completed Trace to an external destination."""
 
@@ -48,7 +55,7 @@ class NoOp_Tracing_Exporter(Tracing_Exporter):
 
     @property
     def name(self) -> str:
-        return "noop"
+        return NOOP_EXPORTER_NAME
 
     def export(self, trace: Trace, *, org_id: UUID, user_id: UUID | None) -> None:
         return  # intentionally does nothing (Req 1.3)
@@ -138,11 +145,25 @@ def build_tracing_exporter(settings: Settings) -> Tracing_Exporter:
 
     Returns :class:`NoOp_Tracing_Exporter` when
     ``settings.active_tracing_exporter() == "noop"`` (the keyless default, so no external
-    tracer is constructed), otherwise a :class:`LangSmith_Tracing_Exporter` reading the
-    Tracing_Credential (Req 1.2, 1.4).
+    tracer is constructed), a ``LangSmith_Tracing_Exporter`` reading the
+    Tracing_Credential, or an ``OTLP_Tracing_Exporter`` for a configured collector
+    endpoint (Req 1.2, 1.4). The settings predicate owns the precedence; this function only
+    constructs what it names.
     """
-    if settings.active_tracing_exporter() == "noop":
+    active = settings.active_tracing_exporter()
+    if active == NOOP_EXPORTER_NAME:
         return NoOp_Tracing_Exporter()
+    if active == "otlp":
+        # Imported here, not at module scope: this module is imported on every boot, and
+        # the OTLP exporter's own module must stay free to import lazily itself.
+        from agentforge.observability.otel_exporter import OTLP_Tracing_Exporter
+
+        headers = settings.otel_headers
+        return OTLP_Tracing_Exporter(
+            endpoint=settings.otel_exporter_endpoint or "",
+            service_name=settings.otel_service_name,
+            headers=headers.get_secret_value() if headers is not None else None,
+        )
     return LangSmith_Tracing_Exporter(
         api_key=settings.langsmith_api_key.get_secret_value(),
         project=settings.langsmith_project,

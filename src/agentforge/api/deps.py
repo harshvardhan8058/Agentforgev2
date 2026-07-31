@@ -43,6 +43,10 @@ from agentforge.observability.evaluation.base import Evaluation_Store
 from agentforge.observability.evaluation.framework import Evaluation_Framework
 from agentforge.observability.guardrails.base import Guardrail_Pipeline
 from agentforge.observability.prompt_registry.registry import Prompt_Registry
+from agentforge.observability.trace_export import (
+    Trace_Export_Service,
+    disabled_trace_export_service,
+)
 from agentforge.observability.tracing_exporter import Tracing_Exporter
 from agentforge.rag.service import RAG_Service
 from agentforge.storage.base import DocumentStore
@@ -356,6 +360,26 @@ def get_observability_context(request: Request) -> ObservabilityContext:
 def get_tracing_exporter(request: Request) -> Tracing_Exporter:
     """Return the wired Tracing_Exporter."""
     return get_observability_context(request).tracing_exporter
+
+
+def get_trace_export_service(request: Request) -> Trace_Export_Service:
+    """Return the wired Trace_Export_Service, or a disabled one if none is wired.
+
+    Unlike every other observability accessor, this one does **not** raise when the context
+    is missing. It is consumed by the *run* endpoints, and the whole point of the export
+    path is that it can never affect a run: turning a missing observability context into a
+    500 on ``POST /agent/run`` would make an observability concern fail the very work it is
+    supposed to be observing. A partially-wired app (a focused test, or a future entry
+    point that composes only the agentic graph) therefore runs agents normally with export
+    reported as unavailable.
+
+    The observability *routers* keep using :func:`get_observability_context`, where a
+    missing context is a genuine misconfiguration and must still fail loudly.
+    """
+    ctx = getattr(request.app.state, "observability_context", None)
+    if ctx is None:
+        return disabled_trace_export_service()
+    return ctx.trace_export_service
 
 
 def get_analytics_service(request: Request) -> Analytics_Service:

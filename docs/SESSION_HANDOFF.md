@@ -2,7 +2,7 @@
 
 **Repo:** `harshvardhan8058/Agentforgev2` · **Branch of record:** `main` ·
 **Work in flight:** `feat/v1.1-admin-crud-and-cost-defaults` ([PR #2](https://github.com/harshvardhan8058/Agentforgev2/pull/2)) ·
-**Last updated:** 2026-07-31
+**Last updated:** 2026-08-01
 
 > Self-contained: a new session can continue from this file alone. Treat git/PR history as
 > truth over prose. `docs/PROJECT_STATE.md` holds the same state in machine-readable form;
@@ -13,7 +13,7 @@
 - `main` is v1.0: Phases 1–9 plus the production-hardening pass, all merged.
 - **PR #2 is open** with three v1.1 roadmap items complete (head `43093b2`, four commits).
   It requires **no migration**. All local gates are green:
-  backend **741**, frontend **440**, Playwright **20**, `check_openapi.py`, `scan_secrets.py`.
+  backend **786**, frontend **445**, Playwright **20**, `check_openapi.py`, `scan_secrets.py`.
 - The **live-PostgreSQL lane was not run locally** (see §4). PR #2's CI run is its first
   execution, and two of its suites are brand new.
 
@@ -55,7 +55,32 @@ credential-shaped keys/values, nesting and oversized payloads — the schema can
 secret, but nothing stopped an operator pasting a token in under a key like `token`, where
 anyone with `read` could then see it.
 
-**d. Self-review fixes** — eight findings from a behavioural review of (a) and (b), each with
+**d. Trace export — the seam that was never called** (`observability/trace_export.py`,
+`routers/observability.py`, `observability/otel_exporter.py`)
+
+The audit that opened this session looked for seams with no HTTP surface (the pattern that
+found the integration-connection gap) and found something worse: `grep -rn "\.export(" src`
+returned **zero** call sites. The `Tracing_Exporter` seam had a NoOp implementation, a
+LangSmith implementation, a settings factory, a DI accessor, unit tests and property tests —
+and nothing ever invoked it. `LANGSMITH_API_KEY` changed one startup log line and exported
+nothing, while the docs described tracing export as a working, credential-gated feature.
+
+Fixed by a `Trace_Export_Service` that bridges the exporter to the `Trace_Recorder` (the
+component that actually owns assembled traces) and is invoked from every run path. The
+attachment differs per path so that the run is always finished and its result already
+delivered first: a FastAPI background task for the three request/response paths, the
+streaming service's new `on_complete` hook for `POST /agent/stream`, and after the frame
+iterator for the multi-agent stream. Failures are swallowed at every layer, the path
+short-circuits before any store read when export is off, and the DI accessor returns a
+*disabled* service when no observability context is wired — an observability concern must
+never be able to fail the work it observes.
+
+Then the roadmap's two sub-items: `GET /observability/status` plus a notice under every trace
+(so "export is off" is distinguishable from "this run has no steps"), and an OTLP exporter
+(one span per run, one child per step, structural attributes only — never the `detail`
+payload) behind the same seam, with the OpenTelemetry SDK as an optional `otel` extra.
+
+**e. Self-review fixes** — eight findings from a behavioural review of (a) and (b), each with
 a regression test. The two worth knowing about: `COST_RATE_PRESET=` (shipped empty in
 `.env.production.example`) made `load_settings` abort, so the production template was
 unbootable; and the last-owner predicate froze an *already* ownerless organization, refusing
@@ -67,10 +92,10 @@ even the removal of an unrelated member.
 python -m venv .venv && . .venv/bin/activate       # Python 3.11
 pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.5.1"
 pip install -e ".[dev]" -c constraints.txt
-pytest -m "not integration" -q                      # expect 741 passed, ~2 min
+pytest -m "not integration" -q                      # expect 786 passed, ~2.5 min
 
 cd frontend && npm ci
-npm run ci                                          # expect 440 passed
+npm run ci                                          # expect 445 passed
 npx playwright install chromium && npm run e2e       # expect 20 passed
 cd .. && python scripts/check_openapi.py && python scripts/scan_secrets.py
 ```
@@ -103,14 +128,31 @@ embedding model once, so its first run downloads ~90 MB.
    back to the default (zero) rate while the pricing panel shows a priced table. Worth one
    check with a real `GROQ_API_KEY`.
 
+## 4b. Notes for whoever runs this next
+
+* **Playwright browsers are not stable across sandboxes.** The pinned Playwright expects
+  build `chromium-1228`; a refreshed image shipped `1232`, and every e2e test then failed in
+  ~4 ms with "Executable doesn't exist". `npx playwright install chromium` fixes it in a
+  couple of minutes — do that before concluding the e2e lane is broken.
+* **`npm` may not be on `PATH`** in a fresh shell. Use
+  `export PATH="/root/.nvm/versions/node/v22.23.1/bin:$PATH"`.
+* **Verify trace export against a real destination.** Everything about the export path is
+  covered by tests through the real app with a capturing exporter, but no LangSmith project
+  and no OTLP collector has ever received a span from this code. The OTLP mapping is asserted
+  against real OpenTelemetry SDK spans via an in-memory exporter, and the LangSmith payload
+  by its pre-existing property test, so the risk is in transport/auth, not shape:
+  set `OTEL_EXPORTER_ENDPOINT` at a local collector (`docker run otel/opentelemetry-collector`)
+  and confirm one `agent.run` span with its children arrives.
+
 ## 5. Recommended next steps, in order
 
 1. **Land PR #2.** Watch the `integration` lane specifically (§4.1). If a store method fails
    there, it will be a SQL/type detail, not a design problem — the in-memory equivalents are
-   covered by 741 passing tests.
-2. **Trace-export polish** (unstarted v1.1 item, cheapest real feature). Two halves: the UI
-   currently cannot tell "tracing is off" from "no traces yet", and an OpenTelemetry exporter
-   alongside the LangSmith one would drop in behind the existing `Tracing_Exporter` seam.
+   covered by 786 passing tests.
+2. **Export durability** (new, and the natural follow-up to the trace-export work). Export is
+   fire-and-forget: a collector that is down during a run loses that run's export, and only
+   one destination can be active. A bounded retry, a "re-export this run" endpoint, or a
+   fan-out composite exporter are all small, well-bounded additions behind the existing seam.
 3. **Deployment DX** (unstarted): rollback runbooks in `DEPLOYMENT.md`, a quickstart, and
    documentation of the integration lane (it is credential-free but needs `pgvector`).
 4. **CPU-slim image** (unstarted): the image is already CPU-only and CI-gated at ≤ 4 GB;

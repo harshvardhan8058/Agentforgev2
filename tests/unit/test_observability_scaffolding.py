@@ -22,6 +22,8 @@ _SUBMODULES = [
     "agentforge.observability",
     "agentforge.observability.models",
     "agentforge.observability.tracing_exporter",
+    "agentforge.observability.trace_export",
+    "agentforge.observability.otel_exporter",
     "agentforge.observability.cost",
     "agentforge.observability.analytics",
     "agentforge.observability.usage",

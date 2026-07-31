@@ -28,6 +28,7 @@ from agentforge.api.routers import health as health_router
 from agentforge.api.routers import ingest as ingest_router
 from agentforge.api.routers import integrations as integrations_router
 from agentforge.api.routers import multi_agent as multi_agent_router
+from agentforge.api.routers import observability as observability_router
 from agentforge.api.routers import orgs as orgs_router
 from agentforge.api.routers import prompts as prompts_router
 from agentforge.api.routers import query as query_router
@@ -137,12 +138,17 @@ async def lifespan(app: FastAPI):
     #    wrapping, and the downstream LLM provider is the Instrumented_Provider wired by
     #    build_app_context, so every downstream flow emits usage transparently.
     if getattr(app.state, "observability_context", None) is None:
+        # The agentic context's Trace_Recorder is handed over so the export service reads
+        # completed traces from the same store the API serves them from.
         app.state.observability_context = build_observability_context(
-            settings, app=app.state.app_context
+            settings,
+            app=app.state.app_context,
+            trace_recorder=app.state.agent_context.trace_recorder,
         )
         logger.info(
-            "Observability context ready (tracing_exporter=%s)",
+            "Observability context ready (tracing_exporter=%s, trace_export_enabled=%s)",
             settings.active_tracing_exporter(),
+            app.state.observability_context.trace_export_service.enabled,
         )
 
     try:
@@ -187,6 +193,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(orgs_router.router)
     # Phase 6 observability routers (analytics + prompts + guardrails + evaluations).
     app.include_router(analytics_router.router)
+    # Reports how the deployment handles run telemetry (is trace export on, and where to).
+    app.include_router(observability_router.router)
     app.include_router(prompts_router.router)
     app.include_router(guardrails_router.router)
     app.include_router(evaluations_router.router)

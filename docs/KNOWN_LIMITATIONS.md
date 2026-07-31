@@ -25,6 +25,7 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
 - **Multi-Agent:** the human-approval gate is opt-in (`approval_policy=human`); keyless runs auto-approve. Generated content is deterministic without an LLM key.
 - **Documents:** upload size is bounded by `max_document_bytes`; error envelopes (413/415/400/422/500) are surfaced but very large corpora are not performance-tuned.
 - **Prompt Registry:** prompt-version creation is gated behind the `ingest_documents` permission; versions are immutable by design (no edit/delete).
+- **Trace export:** traces are always recorded locally; *export* is off until a destination is configured (`LANGSMITH_API_KEY` or `OTEL_EXPORTER_ENDPOINT`), which `GET /observability/status` and the console both state explicitly. Bounds worth knowing: exactly **one** destination is active (LangSmith wins if both are set — there is no fan-out to several backends); export is fire-and-forget with no retry or queue, so a collector that is down during a run loses that run's export (the trace itself is unaffected, and re-export is not implemented); only structural span attributes are exported, never the trace `detail` payload; and the OTLP path needs the optional `otel` extra, without which it logs once and exports nothing.
 - **Analytics:** costs are `0.0` until pricing is configured (`COST_RATE_PRESET`, or `COST_RATE_TABLE_JSON` for per-model rates) — the console says so explicitly rather than presenting an unpriced deployment's `$0.00` as a real total, and `GET /analytics/cost-rates` reports the effective rates. Shipped preset rates are the vendor's public list prices at the date in the preset name, so a deployment with negotiated, batch, or cached-input pricing must override the affected pairs. Meaningful charts require actual run volume.
 - **Guardrails:** the default pipeline is deterministic and simple (max-input-length + optional static blocklist) — not ML/classifier-based moderation.
 - **Evaluations:** evaluators are deterministic; dataset/run creation is gated behind `run_agents`.
@@ -43,7 +44,7 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
 ## 4. Contract & testing gaps
 
 - **Contract freshness is enforced, not assumed:** `scripts/check_openapi.py` fails if `frontend/openapi.json` differs from the mounted routes, and `frontend/scripts/check-codegen.mjs` fails if `schema.d.ts` differs from that contract. Both run in CI, so the client cannot reference an endpoint or field the server does not serve.
-- **Deterministic test posture:** the keyless backend lane (**741** tests + Hypothesis properties), `frontend npm run ci` (**440**) and the keyless Playwright lane (**20**) are the source of truth. The live-PostgreSQL integration lane (`pytest -m integration`) is credential-free but needs a `pgvector` database, so it runs in CI rather than in the fast local lane.
+- **Deterministic test posture:** the keyless backend lane (**786** tests + Hypothesis properties), `frontend npm run ci` (**445**) and the keyless Playwright lane (**20**) are the source of truth. The live-PostgreSQL integration lane (`pytest -m integration`) is credential-free but needs a `pgvector` database, so it runs in CI rather than in the fast local lane.
 
 ## 5. Manual sign-off items (intentionally open)
 

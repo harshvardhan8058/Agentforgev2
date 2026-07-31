@@ -23,7 +23,7 @@ flowchart TB
         emb[Hosted embeddings]
         search[Web search]
         integ[Slack / Gmail / Drive / GitHub]
-        trace[LangSmith tracing]
+        trace[Trace export<br/>LangSmith / OTLP collector]
     end
 
     user --> nginx
@@ -79,7 +79,7 @@ flowchart TB
     appctx --> agentctx[AgentContext<br/>build_agent_context<br/>orchestrator, tools, memory, conversation, streaming, tracing]
     agentctx --> multictx[MultiAgentContext<br/>build_multi_agent_context<br/>roles, approval policy+gate, run store, streaming]
     settings --> entctx[EnterpriseContext<br/>build_enterprise_context<br/>auth, identity, RBAC, API keys, rate limiter]
-    appctx --> obsctx[ObservabilityContext<br/>build_observability_context<br/>tracing, usage, cost, analytics, prompts, guardrails, evals]
+    appctx --> obsctx[ObservabilityContext<br/>build_observability_context<br/>tracing exporter + trace export service, usage, cost, analytics, prompts, guardrails, evals]
 
     subgraph routers[Routers depend on app.state contexts]
         r1[query]
@@ -140,6 +140,7 @@ sequenceDiagram
     participant O as Agent orchestrator (bounded)
     participant T as Tool registry (RAG / web)
     participant TR as Trace recorder
+    participant X as Trace exporter (optional)
 
     U->>A: POST /agent/stream {task}
     loop bounded reason -> act -> observe
@@ -152,7 +153,25 @@ sequenceDiagram
     end
     A-->>U: event: completed {answer, citations, termination_reason}
     note over A,U: Exactly one terminal event (invariant)
+    A->>TR: read the completed trace
+    A->>X: export (best-effort, after the terminal event)
 ```
+
+**Post-run trace export.** Every finished run is handed to the configured
+`Tracing_Exporter` (NoOp / LangSmith / OTLP) through the `Trace_Export_Service`, which reads
+the assembled trace back from the recorder — the same trace the API serves. The attachment
+point differs per path, and the reason is always the same: the run must already be complete
+and its result already delivered.
+
+| Run path | How export attaches |
+|---|---|
+| `POST /agent/run`, `POST /multi-agent/runs`, terminating approval decision | FastAPI **background task** — runs after the response is sent |
+| `POST /agent/stream` | the streaming service's **completion hook** — after the single terminal event |
+| `POST /multi-agent/runs/{id}/stream` | after the service's frame iterator is exhausted |
+
+Every failure is swallowed (a broken exporter, an unreachable collector, a failing trace
+read), the export short-circuits before touching the trace store when it is off, and
+`GET /observability/status` reports which destination — if any — is active.
 
 ## 6. Multi-agent supervisor with human approval
 

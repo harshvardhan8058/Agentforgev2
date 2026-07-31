@@ -36,12 +36,12 @@
 - **Purpose:** Run a single agent with a tool loop (RAG/web tools), stream reasoning, view an ordered trace.
 - **Backend modules:** `agent/orchestrator`, `agent/graph` (LangGraph, bounded iterations), `tools` (registry, `rag_tool`, `web_search_tool`), `memory`, `conversation`, `streaming/sse`, `tracing`, `api/routers/agent.py`.
 - **Frontend:** `features/agent/SingleAgentRunView`, `TraceTimeline`/`TraceView`, `useSseRun`, `api/sse` transport + `singleAgentReducer`; StreamingCursor + markdown/citations.
-- **Endpoints:** `POST /agent/run`, `POST /agent/stream` (SSE), `GET /agent/runs/{run_id}/trace`.
+- **Endpoints:** `POST /agent/run`, `POST /agent/stream` (SSE), `GET /agent/runs`, `GET /agent/runs/{run_id}/trace`.
 - **User workflow:** Submit task → live token stream (step/tool_call/delta) → completion (answer+citations+termination_reason) → open trace timeline; cancel supported.
 - **Status:** Fully working.
 - **Keyless:** Yes (deterministic fallback reasoning; Web Search tool disabled without key).
 - **Optional credentials:** `GROQ_API_KEY`, `SEARCH_API_KEY` (enables Web Search tool).
-- **Limitations:** Trace detail marked "unavailable" when tracing is NoOp; web tool absent keyless.
+- **Limitations:** a run with no recorded steps renders as "trace detail unavailable"; the web tool is absent keyless. Whether traces are also *exported* externally is reported beneath every trace (see the observability section) rather than left ambiguous.
 
 ## 4. Multi-Agent
 
@@ -170,11 +170,11 @@
 - **SSE streaming** with exactly-one-terminal invariant (single & multi-agent).
 - **Conversation context** (`POST /conversations`, `GET /conversations/{id}`) threading `conversation_id` into agent + multi-agent runs.
 - **Premium frontend platform:** dark/light theming (design tokens, no-FOWT), command palette (⌘K, RBAC-gated), keyboard shortcuts, responsive app shell, skeleton/empty/error states, markdown+citations, Monaco, charts — all lazy-loaded.
-- **Observability everywhere:** trace recorder + pluggable exporter (NoOp keyless / LangSmith with key), never changes run outcomes.
-- **Testing posture:** backend keyless lane (**741** tests) + Hypothesis properties; frontend `npm run ci` (**440**); Playwright e2e (**20**, real production build with the API mocked at the network layer); all deterministic and keyless. A live-PostgreSQL integration lane (`pytest -m integration`) runs in CI against an ephemeral `pgvector` service container.
+- **Observability everywhere:** trace recorder + pluggable exporter (NoOp keyless / LangSmith / OTLP), invoked on **every** completed run — single-agent sync and streamed, multi-agent sync and streamed, and the approval decision that terminates a run. Export runs after the response (background task) or after the stream's single terminal event (completion hook), swallows every failure, and short-circuits before touching the trace store when it is off, so it never changes run outcomes or adds latency. `GET /observability/status` reports the active destination.
+- **Testing posture:** backend keyless lane (**786** tests) + Hypothesis properties; frontend `npm run ci` (**445**); Playwright e2e (**20**, real production build with the API mocked at the network layer); all deterministic and keyless. A live-PostgreSQL integration lane (`pytest -m integration`) runs in CI against an ephemeral `pgvector` service container.
 
 ## Known v1.0 limitations / open items
 
-- LLM output deterministic without `GROQ_API_KEY`; tracing export NoOp without `LANGSMITH_API_KEY`; web search & all integrations disabled without their keys.
+- LLM output deterministic without `GROQ_API_KEY`; trace export is off (recording still on) without `LANGSMITH_API_KEY` or `OTEL_EXPORTER_ENDPOINT`; web search & all integrations disabled without their keys.
 - Manual final checkpoints (frontend Task 30, deployment Task 13) left unchecked for human sign-off; deployment Properties 2 & 3 run only in the integration lane / real Docker host.
 - Backend container image size: CPU-only torch keeps it under the 4 GB CI budget, but a genuinely slim (~1 GB) image would need the embedding model moved out of the image.

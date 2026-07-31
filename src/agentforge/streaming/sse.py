@@ -18,7 +18,8 @@ as SSE frames for a FastAPI ``StreamingResponse``.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import logging
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING
 
 from agentforge.agent.orchestrator import extract_citations
@@ -29,6 +30,8 @@ from agentforge.streaming.base import (
     StreamEventType,
     format_sse_frame,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, avoids an import cycle at runtime
     from agentforge.agent.orchestrator import Agent_Orchestrator
@@ -48,8 +51,21 @@ class SSE_Streaming_Service:
         # successful completion (Req 8.5). Streaming works without it.
         self._conversation_store = conversation_store
 
-    def run_stream(self, run_input: AgentRunInput) -> Iterator[StreamEvent]:
-        """Yield ordered events ending in exactly one terminal event (Req 9.4, 9.6, 9.9)."""
+    def run_stream(
+        self,
+        run_input: AgentRunInput,
+        *,
+        on_complete: Callable[[str], None] | None = None,
+    ) -> Iterator[StreamEvent]:
+        """Yield ordered events ending in exactly one terminal event (Req 9.4, 9.6, 9.9).
+
+        ``on_complete`` is invoked with the finished run's id **after** the terminal
+        completion event has been handed to the consumer, and only for a successful run.
+        It is how post-run work (trace export) attaches to a streamed run without this
+        service knowing what that work is. A hook failure is swallowed: emitting a second
+        terminal event because a side effect failed would break the single-terminal
+        guarantee the whole stream contract rests on (Req 9.6).
+        """
         sequence = 0
         try:
             generator = self._orchestrator.stream_run(
@@ -73,6 +89,7 @@ class SSE_Streaming_Service:
 
             answer = (final_state.final_answer or "") if final_state else ""
             self._persist_final_answer(final_state, answer, run_input.org_id)
+            completed_run_id = final_state.run_id if final_state else None
             yield StreamEvent(
                 type=StreamEventType.COMPLETION,
                 data={
@@ -90,6 +107,9 @@ class SSE_Streaming_Service:
                 },
                 sequence=sequence,
             )
+            # Reached once the consumer asks for the frame after the terminal one, i.e.
+            # after the client already holds the completion event.
+            self._notify_complete(completed_run_id, on_complete)
         except Exception as exc:  # noqa: BLE001 - any failure becomes one error event
             # Exactly one terminal error event, and no completion for this stream
             # (Req 9.8). ``sequence`` continues monotonically from the last event.
@@ -99,7 +119,12 @@ class SSE_Streaming_Service:
                 sequence=sequence,
             )
 
-    def iter_sse_frames(self, run_input: AgentRunInput) -> Iterator[str]:
+    def iter_sse_frames(
+        self,
+        run_input: AgentRunInput,
+        *,
+        on_complete: Callable[[str], None] | None = None,
+    ) -> Iterator[str]:
         """Render :meth:`run_stream` events as SSE frames for a StreamingResponse.
 
         Starlette advances synchronous response iterators in an AnyIO worker context.
@@ -108,7 +133,7 @@ class SSE_Streaming_Service:
         explicit tenant before every nested-generator advance so streamed tool and trace
         work remains scoped after each yield boundary.
         """
-        events = self.run_stream(run_input)
+        events = self.run_stream(run_input, on_complete=on_complete)
         while True:
             if run_input.org_id is not None:
                 set_current_org(run_input.org_id)
@@ -117,6 +142,20 @@ class SSE_Streaming_Service:
             except StopIteration:
                 return
             yield format_sse_frame(event)
+
+    @staticmethod
+    def _notify_complete(
+        run_id: str | None, on_complete: Callable[[str], None] | None
+    ) -> None:
+        """Run the completion hook, absorbing every failure (Req 9.6, 10.2)."""
+        if on_complete is None or run_id is None:
+            return
+        try:
+            on_complete(run_id)
+        except Exception:  # noqa: BLE001 - a side effect must not alter the stream
+            logger.warning(
+                "Stream completion hook failed for run %s.", run_id, exc_info=True
+            )
 
     def _persist_final_answer(self, final_state, answer: str, org_id) -> None:
         """Persist the final assistant message when a store and conversation exist (Req 8.5)."""

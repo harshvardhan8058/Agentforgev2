@@ -144,6 +144,14 @@ class Settings(BaseSettings):
     langsmith_project: str = "agentforge"
     tracing_export_enabled: bool = True
 
+    # Vendor-neutral OTLP export (an OpenTelemetry Collector, Tempo, Jaeger, Honeycomb,
+    # ...). Selected only when an endpoint is configured, so the keyless path is unchanged.
+    # ``otel_headers`` follows the OTLP convention ("k=v,k2=v2") and may carry an ingest
+    # key, so it is a SecretStr and never appears in logs or model_dump.
+    otel_exporter_endpoint: str | None = None
+    otel_service_name: str = "agentforge"
+    otel_headers: SecretStr | None = None
+
     # Cost model (the default rate is applied when a (provider, model) pair is unlisted).
     # Decimal-as-string so no float drift; the keyless default is free (Req 2.5).
     cost_default_prompt_per_1k: str = "0.0"
@@ -258,7 +266,13 @@ class Settings(BaseSettings):
         toggle = getattr(self, f"{name}_enabled")
         return credential is not None and toggle is not False
 
-    @field_validator("cost_rate_preset", "cost_rate_table_json", "groq_model", mode="before")
+    @field_validator(
+        "cost_rate_preset",
+        "cost_rate_table_json",
+        "groq_model",
+        "otel_exporter_endpoint",
+        mode="before",
+    )
     @classmethod
     def _blank_is_unset(cls, value: object) -> object:
         """Treat an empty/whitespace-only string as "unset" for optional string settings.
@@ -275,17 +289,30 @@ class Settings(BaseSettings):
         return value
 
     def active_tracing_exporter(self) -> str:
-        """Return the active Tracing_Exporter name based on credential presence.
+        """Return the active Tracing_Exporter name based on configuration presence.
 
-        Returns ``"langsmith"`` iff a Tracing_Credential is configured **and** export is
-        enabled, else ``"noop"`` — so no external tracer is constructed on the keyless
-        path and trace export never occurs without a credential (Req 1.2, 1.4, 10.2).
+        Resolution, in order:
+
+        * ``"noop"`` when ``tracing_export_enabled`` is false, or when neither destination
+          is configured — so no external tracer is constructed on the keyless path and
+          trace export never occurs without explicit configuration (Req 1.2, 1.4, 10.2);
+        * ``"langsmith"`` when a Tracing_Credential is present. It takes precedence for
+          compatibility: a deployment that already sets ``LANGSMITH_API_KEY`` must keep
+          exporting exactly where it did before this setting existed;
+        * ``"otlp"`` when an OTLP endpoint is configured.
+
+        Exactly one destination is active. Fanning out to several would need a composite
+        exporter and a way to report partial failure, neither of which any caller asks for
+        yet; configuring both is therefore reported at startup rather than silently
+        halving the export.
         """
-        return (
-            "langsmith"
-            if self.tracing_export_enabled and self.langsmith_api_key is not None
-            else "noop"
-        )
+        if not self.tracing_export_enabled:
+            return "noop"
+        if self.langsmith_api_key is not None:
+            return "langsmith"
+        if self.otel_exporter_endpoint:
+            return "otlp"
+        return "noop"
 
 
 # Required non-secret settings that must be present at startup. Anything with a

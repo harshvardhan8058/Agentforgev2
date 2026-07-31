@@ -20,6 +20,12 @@ const BASE = "http://localhost:8000";
 // `onUnhandledRequest` guard stays satisfied without every test opting in.
 const server = setupServer(
   http.get(`${BASE}/agent/runs`, () => HttpResponse.json([])),
+  // Expanding a run renders TraceView, which asks whether traces are exported.
+  http.get(`${BASE}/observability/status`, () =>
+    HttpResponse.json({
+      trace_export: { enabled: false, exporter: "noop", destination: null },
+    }),
+  ),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));

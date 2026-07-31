@@ -1370,6 +1370,19 @@
         "title": "MultiAgentRunSummaryResponse",
         "type": "object"
       },
+      "ObservabilityStatusResponse": {
+        "description": "Deployment-wide telemetry handling \u2014 the response of ``GET /observability/status``.\n\nDeliberately a nested object rather than flat fields: trace export is the first of\nseveral things a client may need to know about how a deployment is instrumented, and a\nnested shape lets the next one be added without re-reading the meaning of the others.",
+        "properties": {
+          "trace_export": {
+            "$ref": "#/components/schemas/TraceExportStatus"
+          }
+        },
+        "required": [
+          "trace_export"
+        ],
+        "title": "ObservabilityStatusResponse",
+        "type": "object"
+      },
       "PromptVersionResponse": {
         "description": "A resolved Prompt_Version (latest or a specific number) (Req 4.3, 4.4).",
         "properties": {
@@ -1784,6 +1797,36 @@
         "title": "TraceEntryModel",
         "type": "object"
       },
+      "TraceExportStatus": {
+        "description": "Whether, and where, completed run traces are exported.\n\n``enabled`` is derived from the wired export service, not from configuration alone: a\ncredentialed exporter with no trace recorder behind it reports ``False``, because\nnothing would actually leave the process.",
+        "properties": {
+          "destination": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "exporter": {
+            "title": "Exporter",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "exporter"
+        ],
+        "title": "TraceExportStatus",
+        "type": "object"
+      },
       "TraceResponse": {
         "properties": {
           "entries": {
@@ -1980,7 +2023,7 @@
   "paths": {
     "/agent/run": {
       "post": {
-        "description": "Run the bounded agent loop and return its grounded result (Req 1.7, 8.5).\n\nThe input guardrail pipeline runs **before** the orchestrator is invoked: a blocking\nguardrail raises ``AppError(\"guardrail_blocked\", 400)`` and the agent loop is never\nreached (Req 5.4). The output pipeline runs on the final answer and its flags are\nattached to the response without blocking (Req 5.5, 5.6).",
+        "description": "Run the bounded agent loop and return its grounded result (Req 1.7, 8.5).\n\nThe input guardrail pipeline runs **before** the orchestrator is invoked: a blocking\nguardrail raises ``AppError(\"guardrail_blocked\", 400)`` and the agent loop is never\nreached (Req 5.4). The output pipeline runs on the final answer and its flags are\nattached to the response without blocking (Req 5.5, 5.6).\n\nThe completed run's trace is handed to the Trace_Export_Service as a **background\ntask**, i.e. after the response has been sent: export is best-effort observability, so\nit must add nothing to the caller's latency and must not be able to fail the run\n(Req 10.2). With the keyless NoOp exporter the task returns immediately without\ntouching the trace store.",
         "operationId": "run_agent_agent_run_post",
         "requestBody": {
           "content": {
@@ -2115,7 +2158,7 @@
     },
     "/agent/stream": {
       "post": {
-        "description": "Stream the agent run over Server-Sent Events, scoped to the caller's org (Req 9.1-9.9).",
+        "description": "Stream the agent run over Server-Sent Events, scoped to the caller's org (Req 9.1-9.9).\n\nA streamed run cannot use a background task (the response is the stream), so export is\nattached as the streaming service's completion hook: it runs after the terminal event\nhas been handed to the client, and a failure there is swallowed rather than becoming a\nsecond terminal event (Req 9.6, 10.2).",
         "operationId": "stream_agent_agent_stream_post",
         "requestBody": {
           "content": {
@@ -3156,7 +3199,7 @@
         ]
       },
       "post": {
-        "description": "Start a Multi_Agent_Run, persist it, and run it synchronously to completion.\n\nUnder the keyless auto-approve default the orchestrator terminates on the same\nrequest; streaming is exposed separately by :func:`stream_multi_agent_run`. The run\nis persisted before the orchestrator runs (Req 10.1), the terminal ``Final_Output``\nand ``Termination_Reason`` are persisted on completion (Req 10.5), and a start-time\nfailure surfaces through the existing uniform error envelope (Req 9.1).\n\nThe input guardrail pipeline runs **before** the run is created and the orchestrator\nis invoked: a blocking guardrail raises ``AppError(\"guardrail_blocked\", 400)`` and the\ndownstream multi-agent orchestrator is never reached (Req 5.4). The output pipeline\nruns on the terminal output and its flags are attached to the response (Req 5.5, 5.6).",
+        "description": "Start a Multi_Agent_Run, persist it, and run it synchronously to completion.\n\nUnder the keyless auto-approve default the orchestrator terminates on the same\nrequest; streaming is exposed separately by :func:`stream_multi_agent_run`. The run\nis persisted before the orchestrator runs (Req 10.1), the terminal ``Final_Output``\nand ``Termination_Reason`` are persisted on completion (Req 10.5), and a start-time\nfailure surfaces through the existing uniform error envelope (Req 9.1).\n\nThe input guardrail pipeline runs **before** the run is created and the orchestrator\nis invoked: a blocking guardrail raises ``AppError(\"guardrail_blocked\", 400)`` and the\ndownstream multi-agent orchestrator is never reached (Req 5.4). The output pipeline\nruns on the terminal output and its flags are attached to the response (Req 5.5, 5.6).\n\nThe completed run's trace is exported as a **background task** \u2014 after the response is\nsent, so it adds no latency and cannot fail the run (Req 10.2).",
         "operationId": "start_multi_agent_run_multi_agent_runs_post",
         "requestBody": {
           "content": {
@@ -3241,7 +3284,7 @@
     },
     "/multi-agent/runs/{run_id}/approval": {
       "post": {
-        "description": "Forward an ``Approval_Decision`` to the ``Human_Approval_Gate`` (Req 9.3).\n\n* Unknown ``run_id`` -> ``404 not_found`` via the envelope (Req 9.6).\n* A decision to a run that is not currently awaiting approval is rejected with a\n  ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt\n  has already been recorded in the trace by the gate (Req 5.5).",
+        "description": "Forward an ``Approval_Decision`` to the ``Human_Approval_Gate`` (Req 9.3).\n\n* Unknown ``run_id`` -> ``404 not_found`` via the envelope (Req 9.6).\n* A decision to a run that is not currently awaiting approval is rejected with a\n  ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt\n  has already been recorded in the trace by the gate (Req 5.5).\n\nWhen the resumed run reaches a terminal state, its trace is exported as a background\ntask \u2014 the approval gate's own steps are part of that trace, so exporting on the\ndecision that ends the run is what captures them (Req 10.2).",
         "operationId": "submit_approval_multi_agent_runs__run_id__approval_post",
         "parameters": [
           {
@@ -3330,6 +3373,28 @@
         "summary": "Stream Multi Agent Run",
         "tags": [
           "multi-agent"
+        ]
+      }
+    },
+    "/observability/status": {
+      "get": {
+        "description": "Report how this deployment handles run telemetry (Req 1.2, 10.2).\n\n``trace_export.enabled`` is the authoritative signal: it is false for the keyless NoOp\nexporter and false if a real exporter was configured without a trace recorder, so a\nclient can never be told export is on while nothing leaves the process.",
+        "operationId": "get_observability_status_observability_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservabilityStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Observability Status",
+        "tags": [
+          "observability"
         ]
       }
     },

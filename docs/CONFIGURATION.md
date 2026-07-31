@@ -119,6 +119,40 @@ Notes and guarantees:
   fact as `cost_rates_configured`, which is how the console distinguishes "nothing spent"
   from "nothing priced". Both are shown on the Analytics page.
 
+## Trace export (`TRACING_EXPORT_ENABLED`, `LANGSMITH_API_KEY`, `OTEL_EXPORTER_ENDPOINT`)
+
+All optional in both profiles. **Recording and exporting are separate**: every run's trace is
+recorded by the `Trace_Recorder` and served by `GET /agent/runs/{run_id}/trace` with no
+configuration at all. These settings decide whether a *finished* run is additionally
+forwarded to an external destination.
+
+Exactly one destination is active, resolved in this order:
+
+1. `TRACING_EXPORT_ENABLED=false` → no export, whatever else is set.
+2. `LANGSMITH_API_KEY` present → LangSmith, into `LANGSMITH_PROJECT`. It takes precedence so
+   that a deployment which was already exporting keeps exporting to the same place.
+3. `OTEL_EXPORTER_ENDPOINT` present → OTLP/HTTP to that endpoint, with `OTEL_SERVICE_NAME` as
+   the `service.name` resource attribute and `OTEL_HEADERS` (`k=v,k2=v2`, secret) as headers.
+   Requires the optional extra: `pip install -e ".[otel]"`.
+4. Otherwise → no export (the keyless default).
+
+Guarantees:
+
+- **Export can never affect a run.** It happens after the response is sent (a background
+  task) or after the stream's single terminal event (a completion hook), and every failure —
+  a missing dependency, an unreachable collector, an exporter that breaks its own contract —
+  is swallowed and logged. A failed export never changes an answer, a termination reason, or
+  the SSE terminal event.
+- **Off costs nothing.** With no destination configured the export path short-circuits before
+  reading the trace store, so the keyless default adds no work per run.
+- **Only structural data leaves.** Exported spans carry the run id, tenant and user ids, step
+  ordinal, step type, tool name, outcome, and multi-agent `role_id`. The trace `detail`
+  payload — which can hold prompt and observation text — is **not** exported.
+- **Verify at runtime.** `GET /observability/status` (requires `read`) reports the active
+  exporter, whether export is really on, and the destination label; the console prints the
+  same fact beneath every trace. It reports the wired service rather than the settings, so a
+  destination configured without a trace recorder behind it is reported as *off*.
+
 ## See also
 
 - `.env.example` — every `local` setting with placeholder values.

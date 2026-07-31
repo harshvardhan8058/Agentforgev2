@@ -22,6 +22,12 @@ machine-readable form.
   deliberately stays a server-credential decision, so there is no in-app "toggle" — the UI
   reports enablement and manages configuration. This also gave the Phase 8
   `Integration_Connection` store its first HTTP surface.
+- ~~**Trace export polish:**~~ and, first, trace export at all — the `Tracing_Exporter` seam
+  had **no caller anywhere in `src/`**, so `LANGSMITH_API_KEY` changed a log line and
+  exported nothing. Every completed run now goes through a `Trace_Export_Service` (all four
+  run paths, off the critical path, failures swallowed); `GET /observability/status` plus a
+  notice under every trace remove the "export off vs no traces yet" ambiguity; and an
+  OTLP exporter makes the seam vendor-neutral.
 
 **Already delivered earlier** (the entries below predated production hardening B6):
 
@@ -34,11 +40,13 @@ machine-readable form.
 - **CPU-slim backend image:** the shipped image is already CPU-only (no CUDA/NVIDIA packages,
   CI-gated at ≤ 4 GB). Going materially smaller means serving embeddings from outside the
   image — a design change rather than a packaging tweak.
-- **Trace export polish:** graceful UI when tracing is NoOp (today a client cannot tell
-  "tracing is off" from "no traces yet"); optional OpenTelemetry exporter behind the existing
-  `Tracing_Exporter` seam, alongside LangSmith.
 - **Docs & DX:** expand `DEPLOYMENT.md` rollback runbooks, add a quickstart, and document the
   integration-lane test suite (credential-free, but needs a `pgvector` database).
+- **Export durability (new, from the trace-export work):** export is fire-and-forget with no
+  retry or queue, so a collector that is down during a run loses that run's export (the
+  recorded trace is unaffected). A bounded retry, or a "re-export a run" endpoint, is the
+  natural follow-up; so is fanning out to several destinations at once, which today is a
+  documented single-destination limitation.
 
 ## v2.0 — Real integrations & production scale
 
@@ -50,7 +58,8 @@ Goal: move from deterministic stand-ins to real external connectivity and cloud-
 - **Evaluation expansion:** LLM-as-judge evaluators, regression gating in CI, and dataset versioning.
 - **Vector store scale:** managed pgvector/dedicated vector DB options, hybrid (BM25 + dense) retrieval, and re-ranking.
 - **Multi-region & HA:** stateless backend replicas, read-replica DB support, and Redis clustering.
-- **Observability:** full OpenTelemetry traces/metrics/logs, dashboards, and SLO alerting.
+- **Observability:** full OpenTelemetry **metrics and logs** (traces already export over OTLP
+  as of v1.1), dashboards, and SLO alerting.
 
 ## v3.0 — Platform & ecosystem (vision)
 

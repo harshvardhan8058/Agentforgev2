@@ -21,6 +21,12 @@ export interface paths {
          *     guardrail raises ``AppError("guardrail_blocked", 400)`` and the agent loop is never
          *     reached (Req 5.4). The output pipeline runs on the final answer and its flags are
          *     attached to the response without blocking (Req 5.5, 5.6).
+         *
+         *     The completed run's trace is handed to the Trace_Export_Service as a **background
+         *     task**, i.e. after the response has been sent: export is best-effort observability, so
+         *     it must add nothing to the caller's latency and must not be able to fail the run
+         *     (Req 10.2). With the keyless NoOp exporter the task returns immediately without
+         *     touching the trace store.
          */
         post: operations["run_agent_agent_run_post"];
         delete?: never;
@@ -85,6 +91,11 @@ export interface paths {
         /**
          * Stream Agent
          * @description Stream the agent run over Server-Sent Events, scoped to the caller's org (Req 9.1-9.9).
+         *
+         *     A streamed run cannot use a background task (the response is the stream), so export is
+         *     attached as the streaming service's completion hook: it runs after the terminal event
+         *     has been handed to the client, and a failure there is swallowed rather than becoming a
+         *     second terminal event (Req 9.6, 10.2).
          */
         post: operations["stream_agent_agent_stream_post"];
         delete?: never;
@@ -603,6 +614,9 @@ export interface paths {
          *     is invoked: a blocking guardrail raises ``AppError("guardrail_blocked", 400)`` and the
          *     downstream multi-agent orchestrator is never reached (Req 5.4). The output pipeline
          *     runs on the terminal output and its flags are attached to the response (Req 5.5, 5.6).
+         *
+         *     The completed run's trace is exported as a **background task** — after the response is
+         *     sent, so it adds no latency and cannot fail the run (Req 10.2).
          */
         post: operations["start_multi_agent_run_multi_agent_runs_post"];
         delete?: never;
@@ -652,6 +666,10 @@ export interface paths {
          *     * A decision to a run that is not currently awaiting approval is rejected with a
          *       ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt
          *       has already been recorded in the trace by the gate (Req 5.5).
+         *
+         *     When the resumed run reaches a terminal state, its trace is exported as a background
+         *     task — the approval gate's own steps are part of that trace, so exporting on the
+         *     decision that ends the run is what captures them (Req 10.2).
          */
         post: operations["submit_approval_multi_agent_runs__run_id__approval_post"];
         delete?: never;
@@ -678,6 +696,30 @@ export interface paths {
          *     event (``completion`` or ``error``) as guaranteed by :class:`Multi_Agent_Streaming_Service`.
          */
         post: operations["stream_multi_agent_run_multi_agent_runs__run_id__stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/observability/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Observability Status
+         * @description Report how this deployment handles run telemetry (Req 1.2, 10.2).
+         *
+         *     ``trace_export.enabled`` is the authoritative signal: it is false for the keyless NoOp
+         *     exporter and false if a real exporter was configured without a trace recorder, so a
+         *     client can never be told export is on while nothing leaves the process.
+         */
+        get: operations["get_observability_status_observability_status_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1723,6 +1765,17 @@ export interface components {
             termination_reason?: string | null;
         };
         /**
+         * ObservabilityStatusResponse
+         * @description Deployment-wide telemetry handling — the response of ``GET /observability/status``.
+         *
+         *     Deliberately a nested object rather than flat fields: trace export is the first of
+         *     several things a client may need to know about how a deployment is instrumented, and a
+         *     nested shape lets the next one be added without re-reading the meaning of the others.
+         */
+        ObservabilityStatusResponse: {
+            trace_export: components["schemas"]["TraceExportStatus"];
+        };
+        /**
          * PromptVersionResponse
          * @description A resolved Prompt_Version (latest or a specific number) (Req 4.3, 4.4).
          */
@@ -1911,6 +1964,22 @@ export interface components {
             step_type: string;
             /** Tool Name */
             tool_name?: string | null;
+        };
+        /**
+         * TraceExportStatus
+         * @description Whether, and where, completed run traces are exported.
+         *
+         *     ``enabled`` is derived from the wired export service, not from configuration alone: a
+         *     credentialed exporter with no trace recorder behind it reports ``False``, because
+         *     nothing would actually leave the process.
+         */
+        TraceExportStatus: {
+            /** Destination */
+            destination?: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Exporter */
+            exporter: string;
         };
         /** TraceResponse */
         TraceResponse: {
@@ -3019,6 +3088,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_observability_status_observability_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservabilityStatusResponse"];
                 };
             };
         };

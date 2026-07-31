@@ -38,6 +38,14 @@ const BASE = "http://localhost:8000";
 // empty-corpus handler keeps these error-path tests green (the specific
 // DocumentListView test overrides it as needed).
 const server = setupServer(
+  // TraceView renders the deployment-wide trace-export notice, so every trace test
+  // answers `GET /observability/status`. Registered as a default handler (restored by
+  // `resetHandlers`) rather than per test, since it is incidental to what they assert.
+  http.get(`${BASE}/observability/status`, () =>
+    HttpResponse.json({
+      trace_export: { enabled: false, exporter: "noop", destination: null },
+    }),
+  ),
   http.get(`${BASE}/documents`, () => HttpResponse.json([])),
 );
 

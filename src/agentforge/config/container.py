@@ -124,6 +124,7 @@ from agentforge.observability.prompt_registry.store import (
     InMemory_Prompt_Store,
     Pg_Prompt_Store,
 )
+from agentforge.observability.trace_export import Trace_Export_Service
 from agentforge.observability.tracing_exporter import (
     Tracing_Exporter,
     build_tracing_exporter,
@@ -1140,6 +1141,7 @@ class ObservabilityContext:
 
     settings: Settings
     tracing_exporter: Tracing_Exporter
+    trace_export_service: Trace_Export_Service
     usage_store: Usage_Store
     cost_model: Cost_Model
     usage_recorder: Usage_Recorder
@@ -1157,6 +1159,7 @@ def build_observability_context(
     settings: Settings,
     *,
     app: AppContext | None = None,
+    trace_recorder: Trace_Recorder | None = None,
     **overrides,
 ) -> ObservabilityContext:
     """Compose the Phase 6 observability object graph from settings.
@@ -1173,7 +1176,13 @@ def build_observability_context(
     model, registry, pipeline, and framework, so a new implementation is a builder edit
     here — never a router or core-flow change (Req 7.3, 9.7).
 
-    Supported ``overrides`` keys (all optional): ``tracing_exporter``, ``usage_store``,
+    ``trace_recorder`` is the recorder the export service reads completed traces back
+    from; the composition root passes the agentic context's instance so both read one
+    store. Omitting it leaves trace export unavailable (reported as such rather than
+    silently exporting nothing), which is only correct for the keyless NoOp exporter.
+
+    Supported ``overrides`` keys (all optional): ``tracing_exporter``,
+    ``trace_export_service``, ``usage_store``,
     ``cost_model``, ``usage_recorder``, ``usage_sink``, ``analytics_service``,
     ``prompt_store``, ``prompt_registry``, ``guardrail_pipeline``, ``evaluation_store``,
     ``evaluators``, ``pipeline_runner``, and ``evaluation_framework``.
@@ -1181,6 +1190,13 @@ def build_observability_context(
     tracing_exporter: Tracing_Exporter = (
         overrides.get("tracing_exporter") or build_tracing_exporter(settings)
     )
+    # The export service bridges the exporter to the Trace_Recorder that OWNS the traces.
+    # The recorder is passed in rather than built here because the agentic context already
+    # holds the one instance (and, on the Postgres path, its engine) — building a second
+    # would open a second connection pool to read the same rows.
+    trace_export_service: Trace_Export_Service = overrides.get(
+        "trace_export_service"
+    ) or Trace_Export_Service(tracing_exporter, trace_recorder)
 
     # Reuse the app's usage store/sink when available so the provider and analytics share
     # one store; otherwise build the profile-selected defaults.
@@ -1229,6 +1245,7 @@ def build_observability_context(
     return ObservabilityContext(
         settings=settings,
         tracing_exporter=tracing_exporter,
+        trace_export_service=trace_export_service,
         usage_store=usage_store,
         cost_model=cost_model,
         usage_recorder=usage_recorder,

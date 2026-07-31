@@ -23,12 +23,15 @@ Endpoints:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from agentforge.api.deps import (
     get_multi_agent_context,
+    get_trace_export_service,
     get_optional_guardrail_pipeline,
     require_permission,
 )
@@ -53,6 +56,7 @@ from agentforge.observability.guardrails.base import (
     apply_input_guardrail,
 )
 from agentforge.multiagent.approval import RunNotAwaitingApprovalError
+from agentforge.observability.trace_export import Trace_Export_Service
 from agentforge.multiagent.models import (
     Approval_Decision,
     ApprovalDecisionType,
@@ -60,10 +64,27 @@ from agentforge.multiagent.models import (
     Termination_Reason,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["multi-agent"])
 
 
 # --- helpers ----------------------------------------------------------------------
+
+
+def _export_trace_quietly(
+    trace_export: Trace_Export_Service, run_id: str, *, org_id, user_id
+) -> None:
+    """Export a finished run's trace, absorbing every failure (Req 10.2).
+
+    Used where the export cannot be a background task because the response is already
+    streaming: an exception raised here would surface mid-response, so an observability
+    side channel must not be able to.
+    """
+    try:
+        trace_export.export_run(run_id, org_id=org_id, user_id=user_id)
+    except Exception:  # noqa: BLE001 - the service already swallows; belt and braces
+        logger.warning("Trace export failed for multi-agent run %s.", run_id, exc_info=True)
 
 
 def _run_status_name(run: Multi_Agent_Run) -> str:
@@ -113,8 +134,10 @@ def _termination_reason_name(run: Multi_Agent_Run) -> str | None:
 )
 async def start_multi_agent_run(
     payload: StartMultiAgentRunRequest,
+    background: BackgroundTasks,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
+    trace_export: Trace_Export_Service = Depends(get_trace_export_service),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> StartMultiAgentRunResponse:
     """Start a Multi_Agent_Run, persist it, and run it synchronously to completion.
@@ -129,6 +152,9 @@ async def start_multi_agent_run(
     is invoked: a blocking guardrail raises ``AppError("guardrail_blocked", 400)`` and the
     downstream multi-agent orchestrator is never reached (Req 5.4). The output pipeline
     runs on the terminal output and its flags are attached to the response (Req 5.5, 5.6).
+
+    The completed run's trace is exported as a **background task** — after the response is
+    sent, so it adds no latency and cannot fail the run (Req 10.2).
     """
 
     org_id = principal.org_id
@@ -185,7 +211,14 @@ async def start_multi_agent_run(
             flags=flags,
         )
 
-    return await run_in_threadpool(_start)
+    response = await run_in_threadpool(_start)
+    background.add_task(
+        trace_export.export_run,
+        response.run_id,
+        org_id=org_id,
+        user_id=principal.user_id,
+    )
+    return response
 
 
 # --- POST /multi-agent/runs/{id}/stream -------------------------------------------
@@ -195,6 +228,7 @@ async def start_multi_agent_run(
 async def stream_multi_agent_run(
     run_id: str,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
+    trace_export: Trace_Export_Service = Depends(get_trace_export_service),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> StreamingResponse:
     """Stream a fresh multi-agent run for ``run_id`` over Server-Sent Events (Req 9.2).
@@ -215,6 +249,11 @@ async def stream_multi_agent_run(
             run_id=run.id,
             org_id=org_id,
         )
+        # The service's generator is exhausted, so the client already holds the single
+        # terminal event; exporting here can no longer affect the stream.
+        _export_trace_quietly(
+            trace_export, run.id, org_id=org_id, user_id=principal.user_id
+        )
 
     return StreamingResponse(_iter(), media_type="text/event-stream")
 
@@ -229,7 +268,9 @@ async def stream_multi_agent_run(
 async def submit_approval(
     run_id: str,
     payload: ApprovalDecisionRequest,
+    background: BackgroundTasks,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
+    trace_export: Trace_Export_Service = Depends(get_trace_export_service),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> ApprovalDecisionResponse:
     """Forward an ``Approval_Decision`` to the ``Human_Approval_Gate`` (Req 9.3).
@@ -238,6 +279,10 @@ async def submit_approval(
     * A decision to a run that is not currently awaiting approval is rejected with a
       ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt
       has already been recorded in the trace by the gate (Req 5.5).
+
+    When the resumed run reaches a terminal state, its trace is exported as a background
+    task — the approval gate's own steps are part of that trace, so exporting on the
+    decision that ends the run is what captures them (Req 10.2).
     """
     org_id = principal.org_id
     run = await run_in_threadpool(_lookup_run, ctx, org_id, run_id)
@@ -289,7 +334,15 @@ async def submit_approval(
             termination_reason=_termination_reason_name(current),
         )
 
-    return await run_in_threadpool(_submit)
+    response = await run_in_threadpool(_submit)
+    if response.status == "terminated":
+        background.add_task(
+            trace_export.export_run,
+            run_id,
+            org_id=org_id,
+            user_id=principal.user_id,
+        )
+    return response
 
 
 # --- GET /multi-agent/runs/{id} ---------------------------------------------------
