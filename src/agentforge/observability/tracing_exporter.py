@@ -49,6 +49,23 @@ class Tracing_Exporter(ABC):
         """
         raise NotImplementedError
 
+    def available(self) -> bool:
+        """Whether this exporter can actually deliver a span right now.
+
+        Concrete, not abstract, and ``True`` by default: an implementation whose
+        prerequisites are satisfied by its own construction has nothing to report. It exists
+        because an exporter can be *configured* and still be unable to deliver — an optional
+        client library that was never installed being the case that matters — and a status
+        surface that reported such a deployment as "exporting" would recreate exactly the
+        defect this seam's first real caller was written to fix.
+
+        Must not raise, and must not perform network I/O: it answers "could I", not "is the
+        destination healthy". Deliverability of a *configured, importable* destination
+        (a wrong URL, a revoked key) is not knowable without sending something, and is
+        documented as outside this signal.
+        """
+        return True
+
 
 class NoOp_Tracing_Exporter(Tracing_Exporter):
     """Keyless default: makes no external call and produces no external side effect."""

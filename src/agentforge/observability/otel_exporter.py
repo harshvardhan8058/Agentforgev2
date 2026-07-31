@@ -23,12 +23,15 @@ Dependencies. The OpenTelemetry SDK is imported **lazily**, inside the export pa
 like the LangSmith client: the keyless stack must boot and run without it, and nothing here
 may be constructed at import time. Install it with the ``otel`` extra
 (``pip install -e ".[otel]"``). A missing dependency degrades to "no export", never to a
-failed run — the same contract every exporter carries (Req 1.5, 1.7).
+failed run — the same contract every exporter carries (Req 1.5, 1.7) — is reported by
+:meth:`OTLP_Tracing_Exporter.available` so no status surface can claim otherwise, and is
+logged once rather than once per run.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 from uuid import UUID
 
@@ -38,6 +41,18 @@ from agentforge.tracing.base import Trace
 logger = logging.getLogger(__name__)
 
 OTLP_EXPORTER_NAME = "otlp"
+
+# Upper bound on the per-run flush. The BatchSpanProcessor's default export timeout is 30
+# seconds, and this flush runs inside the SSE response body iterator on a streamed run — an
+# unreachable collector would hold the client's connection (and the console's "streaming"
+# state) open for that whole time, long after the terminal event was delivered. Two seconds
+# is enough for a healthy collector; anything slower is left to the processor's own
+# scheduled delivery rather than made the caller's problem.
+FLUSH_TIMEOUT_MS = 2_000
+
+# Sentinel distinguishing "not built yet" from "cannot be built". Without it a missing
+# optional dependency re-attempts the import and re-logs the warning on every completed run.
+_UNAVAILABLE = object()
 
 # Span names. Prefixed so they are recognisable in a backend shared with other services.
 RUN_SPAN_NAME = "agent.run"
@@ -69,11 +84,28 @@ class OTLP_Tracing_Exporter(Tracing_Exporter):
         self._service_name = service_name
         self._headers = headers
         self._span_exporter = span_exporter
-        self._provider: Any | None = None
+        # `None` = not built yet; `_UNAVAILABLE` = build failed permanently (missing
+        # dependency). Guarded by a lock because export runs concurrently (several
+        # background tasks in the threadpool plus SSE worker threads), and two threads each
+        # building a provider would orphan a BatchSpanProcessor thread whose spans are never
+        # flushed.
+        self._provider: Any = None
+        self._build_lock = threading.Lock()
 
     @property
     def name(self) -> str:
         return OTLP_EXPORTER_NAME
+
+    def available(self) -> bool:
+        """True when this exporter can actually deliver spans.
+
+        Overrides the seam's default because an OTLP endpoint can be configured without the
+        OpenTelemetry SDK installed, and reporting that deployment as "exporting" would
+        recreate the defect this whole feature fixed: a surface claiming a feature works
+        while nothing leaves the process. Resolving it means attempting the (cached) SDK
+        import, so the answer is exact rather than a guess about configuration.
+        """
+        return self._get_provider() is not None
 
     def export(self, trace: Trace, *, org_id: UUID, user_id: UUID | None) -> None:
         """Emit the trace as a span tree. Never propagates a failure (Req 1.5, 1.7)."""
@@ -115,21 +147,39 @@ class OTLP_Tracing_Exporter(Tracing_Exporter):
         # synchronous flush is what actually delivers the batch before this returns.
         provider = self._provider
         if provider is not None and hasattr(provider, "force_flush"):
-            provider.force_flush()
+            provider.force_flush(timeout_millis=FLUSH_TIMEOUT_MS)
 
     # --- lazy SDK construction ----------------------------------------------------
     def _get_tracer(self) -> Any | None:
-        """Return a tracer bound to a private provider, or None if unavailable.
+        """Return a tracer bound to a private provider, or None if unavailable."""
+        provider = self._get_provider()
+        if provider is None:
+            return None
+        return provider.get_tracer("agentforge.trace_export")
+
+    def _get_provider(self) -> Any | None:
+        """Build (once) and return the private TracerProvider, or None if unavailable.
 
         A **private** ``TracerProvider`` is used rather than the global one so that
         installing AgentForge into a host application that already configures
         OpenTelemetry cannot be disturbed by this exporter, and vice versa.
+
+        Built under a lock and memoised in both directions: a successful build is reused,
+        and a failed one is remembered so a missing optional dependency logs once instead of
+        once per completed run.
         """
-        if self._provider is None:
-            self._provider = self._build_provider()
-        if self._provider is None:
+        if self._provider is _UNAVAILABLE:
             return None
-        return self._provider.get_tracer("agentforge.trace_export")
+        if self._provider is not None:
+            return self._provider
+        with self._build_lock:
+            # Re-check inside the lock: another thread may have built it while we waited.
+            if self._provider is _UNAVAILABLE:
+                return None
+            if self._provider is None:
+                built = self._build_provider()
+                self._provider = built if built is not None else _UNAVAILABLE
+            return self._provider if self._provider is not _UNAVAILABLE else None
 
     def _build_provider(self) -> Any | None:
         """Build the private TracerProvider, or None when the SDK/exporter is absent."""

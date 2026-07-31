@@ -284,3 +284,30 @@ def test_multi_agent_stream_exports_after_the_stream_completes(wired):
     assert body, "the stream must have produced frames"
     assert len(exporter.calls) == exported_by_start + 1
     assert exporter.calls[-1][0].run_id == run_id
+
+
+def test_an_approval_attempt_on_a_finished_run_exports_nothing_extra(wired):
+    """The approval attachment point is the only conditional one, so guard the condition.
+
+    ``submit_approval`` exports **only** when the decision leaves the run ``terminated``. The
+    positive side of that branch is not reachable from this lane: under the keyless stack the
+    orchestrator auto-approves and the run has already terminated when ``POST /multi-agent/runs``
+    returns, so no checkpoint exists to decide on (``tests/unit/test_multiagent_approval.py``
+    covers pause/resume at the domain level). What is reachable — and what an inverted or
+    drifting condition would break — is the negative side: a decision that does not terminate
+    a run must not export anything.
+    """
+    client, exporter, _org = wired
+    run_id = client.post("/multi-agent/runs", json={"task": "plan a launch"}).json()[
+        "run_id"
+    ]
+    exported_by_start = len(exporter.calls)
+
+    conflict = client.post(
+        f"/multi-agent/runs/{run_id}/approval",
+        json={"type": "reject", "feedback": "not now"},
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "run-not-awaiting-approval"
+    assert len(exporter.calls) == exported_by_start

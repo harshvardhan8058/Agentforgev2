@@ -13,7 +13,7 @@
 - `main` is v1.0: Phases 1–9 plus the production-hardening pass, all merged.
 - **PR #2 is open** with three v1.1 roadmap items complete (head `43093b2`, four commits).
   It requires **no migration**. All local gates are green:
-  backend **786**, frontend **445**, Playwright **20**, `check_openapi.py`, `scan_secrets.py`.
+  backend **793**, frontend **445**, Playwright **20**, `check_openapi.py`, `scan_secrets.py`.
 - The **live-PostgreSQL lane was not run locally** (see §4). PR #2's CI run is its first
   execution, and two of its suites are brand new.
 
@@ -92,7 +92,7 @@ even the removal of an unrelated member.
 python -m venv .venv && . .venv/bin/activate       # Python 3.11
 pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.5.1"
 pip install -e ".[dev]" -c constraints.txt
-pytest -m "not integration" -q                      # expect 786 passed, ~2.5 min
+pytest -m "not integration" -q                      # expect 793 passed, ~2.5 min
 
 cd frontend && npm ci
 npm run ci                                          # expect 445 passed
@@ -148,7 +148,7 @@ embedding model once, so its first run downloads ~90 MB.
 
 1. **Land PR #2.** Watch the `integration` lane specifically (§4.1). If a store method fails
    there, it will be a SQL/type detail, not a design problem — the in-memory equivalents are
-   covered by 786 passing tests.
+   covered by 793 passing tests.
 2. **Export durability** (new, and the natural follow-up to the trace-export work). Export is
    fire-and-forget: a collector that is down during a run loses that run's export, and only
    one destination can be active. A bounded retry, a "re-export this run" endpoint, or a

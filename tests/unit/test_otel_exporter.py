@@ -278,3 +278,119 @@ def test_an_empty_trace_still_produces_a_run_span():
 )
 def test_header_parsing(raw, expected):
     assert OTLP_Tracing_Exporter._parse_headers(raw) == expected
+
+
+# --- availability, memoisation, and the bounded flush -----------------------------
+#
+# All three come from the same review finding: a configured OTLP endpoint with the optional
+# extra missing reported itself as "exporting", re-attempted the import on every completed
+# run, and (on a streamed run) could hold the client's connection open for the SDK's 30s
+# default flush timeout after the terminal event had already been delivered.
+
+
+def _fail_otel_imports(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _fail(name, *args, **kwargs):
+        if name.startswith("opentelemetry"):
+            raise ImportError(f"no module named {name}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _fail)
+
+
+def test_available_is_false_without_the_optional_extra(monkeypatch):
+    """A status surface must not report an unimportable exporter as exporting."""
+    _fail_otel_imports(monkeypatch)
+    exporter = OTLP_Tracing_Exporter("http://collector:4318/v1/traces")
+
+    assert exporter.available() is False
+
+
+def test_available_is_true_with_a_usable_span_exporter():
+    sink = _in_memory_exporter()
+    exporter = OTLP_Tracing_Exporter("http://collector:4318", span_exporter=sink)
+
+    assert exporter.available() is True
+
+
+def test_the_trace_export_service_reports_an_unavailable_exporter_as_disabled(monkeypatch):
+    from agentforge.observability.trace_export import Trace_Export_Service
+    from agentforge.tracing.recorder import InMemory_Trace_Recorder
+
+    _fail_otel_imports(monkeypatch)
+    service = Trace_Export_Service(
+        OTLP_Tracing_Exporter("http://collector:4318/v1/traces"),
+        InMemory_Trace_Recorder(),
+    )
+
+    # Configured, wired, and still honestly reported as off.
+    assert service.exporter_name == "otlp"
+    assert service.enabled is False
+
+
+def test_a_missing_dependency_is_resolved_once_not_once_per_run(monkeypatch, caplog):
+    """The failure is memoised, so a busy deployment does not log a warning per run."""
+    import logging
+
+    _fail_otel_imports(monkeypatch)
+    exporter = OTLP_Tracing_Exporter("http://collector:4318/v1/traces")
+
+    with caplog.at_level(logging.WARNING, logger="agentforge.observability.otel_exporter"):
+        for _ in range(3):
+            exporter.export(_trace(), org_id=ORG, user_id=USER)
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1, f"expected one warning, got {len(warnings)}"
+
+
+def test_the_per_run_flush_is_bounded():
+    """An unreachable collector must not hold a streamed response open (SDK default: 30s)."""
+    from agentforge.observability.otel_exporter import FLUSH_TIMEOUT_MS
+
+    flushes: list[int | None] = []
+
+    class _RecordingProvider:
+        def get_tracer(self, _name):
+            sink = _in_memory_exporter()
+            provider = _real_provider(sink)
+            return provider.get_tracer("test")
+
+        def force_flush(self, timeout_millis=None):
+            flushes.append(timeout_millis)
+            return True
+
+    exporter = OTLP_Tracing_Exporter("http://collector:4318")
+    exporter._provider = _RecordingProvider()
+
+    exporter.export(_trace(), org_id=ORG, user_id=USER)
+
+    assert flushes == [FLUSH_TIMEOUT_MS]
+    assert FLUSH_TIMEOUT_MS <= 5_000, "a per-run flush must stay well under a request budget"
+
+
+def _real_provider(sink):
+    """A real TracerProvider writing into ``sink`` (used to produce genuine spans)."""
+    sdk_trace = pytest.importorskip("opentelemetry.sdk.trace")
+    sdk_export = pytest.importorskip("opentelemetry.sdk.trace.export")
+    provider = sdk_trace.TracerProvider()
+    provider.add_span_processor(sdk_export.SimpleSpanProcessor(sink))
+    return provider
+
+
+def test_spec_named_env_vars_are_accepted(monkeypatch):
+    """A pod with OTEL_EXPORTER_OTLP_* injected must not silently export nothing."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@localhost:5432/a")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318/v1/traces")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "x-api-key=abc")
+
+    from agentforge.config.settings import load_settings
+
+    settings = load_settings()
+
+    assert settings.otel_exporter_endpoint == "http://collector:4318/v1/traces"
+    assert settings.otel_headers is not None
+    assert settings.active_tracing_exporter() == "otlp"

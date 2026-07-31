@@ -171,7 +171,7 @@
 - **Conversation context** (`POST /conversations`, `GET /conversations/{id}`) threading `conversation_id` into agent + multi-agent runs.
 - **Premium frontend platform:** dark/light theming (design tokens, no-FOWT), command palette (⌘K, RBAC-gated), keyboard shortcuts, responsive app shell, skeleton/empty/error states, markdown+citations, Monaco, charts — all lazy-loaded.
 - **Observability everywhere:** trace recorder + pluggable exporter (NoOp keyless / LangSmith / OTLP), invoked on **every** completed run — single-agent sync and streamed, multi-agent sync and streamed, and the approval decision that terminates a run. Export runs after the response (background task) or after the stream's single terminal event (completion hook), swallows every failure, and short-circuits before touching the trace store when it is off, so it never changes run outcomes or adds latency. `GET /observability/status` reports the active destination.
-- **Testing posture:** backend keyless lane (**786** tests) + Hypothesis properties; frontend `npm run ci` (**445**); Playwright e2e (**20**, real production build with the API mocked at the network layer); all deterministic and keyless. A live-PostgreSQL integration lane (`pytest -m integration`) runs in CI against an ephemeral `pgvector` service container.
+- **Testing posture:** backend keyless lane (**793** tests) + Hypothesis properties; frontend `npm run ci` (**445**); Playwright e2e (**20**, real production build with the API mocked at the network layer); all deterministic and keyless. A live-PostgreSQL integration lane (`pytest -m integration`) runs in CI against an ephemeral `pgvector` service container.
 
 ## Known v1.0 limitations / open items
 

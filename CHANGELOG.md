@@ -156,6 +156,26 @@ existing tables.
   submitting strings turned an untouched `notify: true` into `"true"`; untouched values now
   round-trip with the type they arrived with.
 
+### Known bounds of the new trace-export surface
+
+Documented rather than fixed, and recorded in `docs/KNOWN_LIMITATIONS.md`: "enabled" means
+configured **and importable**, not reachable (no health probe); a streamed run the client
+aborts is not exported; re-streaming a multi-agent run exports again under the same run id;
+and every tenant's spans go to one deployment-wide destination tagged with `org_id`, with no
+per-org destination or opt-out.
+
+A self-review of the export work also fixed, before merge: an untimed `force_flush` that
+could hold a streamed response open for the SDK's 30-second default after the terminal event
+had already been delivered; a status surface that reported `enabled: true` for an OTLP
+endpoint configured without the `otel` extra (the exact "configured but does nothing" defect
+class this feature set out to remove) — the seam gained an `available()` probe that `enabled`
+now consults; a missing-dependency warning logged once per run instead of once, because the
+failed provider build was not memoised; an unsynchronised lazy build that could orphan a
+`BatchSpanProcessor` thread; the OpenTelemetry spec's own `OTEL_EXPORTER_OTLP_ENDPOINT` /
+`OTEL_EXPORTER_OTLP_HEADERS` variable names not being accepted, so a pod with a collector
+sidecar's standard variables injected would have exported nothing and warned about nothing;
+and a notice with no `aria-live` region, which a screen reader would never announce.
+
 ### Known bounds of the new integration-config surface
 
 Documented rather than fixed, and recorded in `docs/KNOWN_LIMITATIONS.md`: the credential
@@ -168,7 +188,7 @@ with `role=admin` gain the capability on deploy**.
 
 ### Verification
 
-Every gate below was run on the branch: backend `pytest -m 'not integration' -q` → **786
+Every gate below was run on the branch: backend `pytest -m 'not integration' -q` → **793
 passed**; `cd frontend && npm run ci` → **445 passed**; `cd frontend && npm run e2e` →
 **20 passed**; `python scripts/check_openapi.py` and `python scripts/scan_secrets.py` clean.
 

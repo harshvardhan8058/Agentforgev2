@@ -62,11 +62,15 @@ export function TraceExportNotice(): JSX.Element | null {
   const { enabled, exporter, destination } = status.data.trace_export;
   const label = EXPORTER_LABELS[exporter] ?? exporter;
 
+  // `aria-live`: the notice arrives after an async fetch, i.e. after a screen reader has
+  // already read the timeline it annotates, so a polite live region announces it when it
+  // lands instead of leaving it silently appended.
   return (
     <p
       className="mt-3 flex items-center gap-1.5 text-xs text-text-subtle"
       data-testid="trace-export-notice"
       data-export-enabled={enabled}
+      aria-live="polite"
     >
       {enabled ? (
         <>

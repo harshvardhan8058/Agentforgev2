@@ -75,10 +75,26 @@ class Trace_Export_Service:
     def enabled(self) -> bool:
         """True when a completed run would actually be exported somewhere.
 
-        False for the NoOp exporter and false when no recorder is wired, so a client
-        surface built on this cannot claim export is on while nothing leaves the process.
+        Three conditions, each of which has produced a "configured but does nothing"
+        deployment: the exporter is not the NoOp, a recorder is wired to read traces from,
+        and the exporter reports itself able to deliver (its optional client library is
+        installed). A client surface built on this cannot claim export is on while nothing
+        can leave the process.
+
+        It does **not** mean the destination is reachable — a wrong URL or a revoked key
+        still reads as enabled, since that is only discoverable by sending something.
         """
-        return self._exporter.name != NOOP_EXPORTER_NAME and self._recorder is not None
+        if self._exporter.name == NOOP_EXPORTER_NAME or self._recorder is None:
+            return False
+        try:
+            return self._exporter.available()
+        except Exception:  # noqa: BLE001 - a status probe must never raise either
+            logger.warning(
+                "Tracing exporter %r failed its availability check.",
+                self._exporter.name,
+                exc_info=True,
+            )
+            return False
 
     def export_run(
         self, run_id: str, *, org_id: UUID, user_id: UUID | None = None

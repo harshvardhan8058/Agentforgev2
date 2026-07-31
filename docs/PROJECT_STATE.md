@@ -50,7 +50,7 @@ v1_1_roadmap_status:
 test_status:
   backend:
     command: "pytest -m 'not integration' -q"
-    tests_passing: 786
+    tests_passing: 793
     result: pass
     note: "Deterministic + credential-free. ~2 min. Loads the real embedding model once (test_embedding_dimension), so the first run downloads ~90 MB."
   frontend:
@@ -117,7 +117,7 @@ not_yet_verified_on_a_real_docker_host:
   - "Production overlay boot with real secrets."
 
 resume_checkpoint:
-  state: "v1.0 on main; v1.1 work complete and pushed on feat/v1.1-admin-crud-and-cost-defaults (PR #2). All local gates green: backend 786, frontend 445, e2e 20, contract + secret scans clean. No migration needed."
+  state: "v1.0 on main; v1.1 work complete and pushed on feat/v1.1-admin-crud-and-cost-defaults (PR #2). All local gates green: backend 793, frontend 445, e2e 20, contract + secret scans clean. No migration needed."
   next: "1) Land PR #2 (watch the integration lane in CI — it is the first execution of the two new Pg suites). 2) Then pick from v1_1_roadmap_status.not_started; trace-export polish is the cheapest real feature, DEPLOYMENT rollback runbooks the cheapest docs win. 3) The Docker-host validation checklist in docs/SESSION_HANDOFF.md is still the gate on calling the stack runtime-verified."
   see_also: docs/SESSION_HANDOFF.md
 ---
@@ -153,7 +153,7 @@ required by that work.
 
 | Lane | Command | Result |
 |---|---|---|
-| Backend (keyless) | `pytest -m 'not integration' -q` | **786 passed** |
+| Backend (keyless) | `pytest -m 'not integration' -q` | **793 passed** |
 | Frontend | `cd frontend && npm run ci` | **445 passed** |
 | Browser | `cd frontend && npm run e2e` | **20 passed** |
 | Contract | `python scripts/check_openapi.py` | pass |

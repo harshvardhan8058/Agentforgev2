@@ -14,7 +14,13 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -148,9 +154,21 @@ class Settings(BaseSettings):
     # ...). Selected only when an endpoint is configured, so the keyless path is unchanged.
     # ``otel_headers`` follows the OTLP convention ("k=v,k2=v2") and may carry an ingest
     # key, so it is a SecretStr and never appears in logs or model_dump.
-    otel_exporter_endpoint: str | None = None
+    # The OpenTelemetry spec's own variable names are accepted as aliases, because a pod
+    # with a collector sidecar typically has OTEL_EXPORTER_OTLP_ENDPOINT injected already.
+    # Without the alias that deployment would configure nothing, get no export, and get no
+    # warning either — a silent no-op is the worst possible outcome for a telemetry setting.
+    otel_exporter_endpoint: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "otel_exporter_endpoint", "otel_exporter_otlp_endpoint"
+        ),
+    )
     otel_service_name: str = "agentforge"
-    otel_headers: SecretStr | None = None
+    otel_headers: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("otel_headers", "otel_exporter_otlp_headers"),
+    )
 
     # Cost model (the default rate is applied when a (provider, model) pair is unlisted).
     # Decimal-as-string so no float drift; the keyless default is free (Req 2.5).
