@@ -16,6 +16,7 @@ import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 
 import { SessionContext } from "../../auth/useSession";
+import { ToastProvider } from "../../providers/ToastProvider";
 import { makeSession } from "../../test/renderWithSession";
 import type { Role } from "../../auth/token";
 
@@ -54,6 +55,20 @@ function ratesFixture(overrides: Record<string, unknown> = {}): Record<string, u
 beforeEach(() =>
   server.use(
     http.get(`${BASE}/analytics/cost-rates`, () => HttpResponse.json(ratesFixture())),
+    // The dashboard also carries the spend-budget card.
+    http.get(`${BASE}/budget`, () =>
+      HttpResponse.json({
+        period_start: "2026-08-01T00:00:00Z",
+        period_end: "2026-09-01T00:00:00Z",
+        spent: "0",
+        limit_amount: null,
+        remaining: null,
+        percent_used: null,
+        action: null,
+        exceeded: false,
+        blocked: false,
+      }),
+    ),
   ),
 );
 
@@ -63,9 +78,11 @@ function renderView(role: Role = "member"): void {
   });
   render(
     <QueryClientProvider client={queryClient}>
-      <SessionContext.Provider value={makeSession(role)}>
-        <UsageDashboardView />
-      </SessionContext.Provider>
+      <ToastProvider>
+        <SessionContext.Provider value={makeSession(role)}>
+          <UsageDashboardView />
+        </SessionContext.Provider>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }

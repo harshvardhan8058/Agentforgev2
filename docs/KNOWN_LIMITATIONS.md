@@ -25,6 +25,24 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
 - **Multi-Agent:** the human-approval gate is opt-in (`approval_policy=human`); keyless runs auto-approve. Generated content is deterministic without an LLM key.
 - **Documents:** upload size is bounded by `max_document_bytes`; error envelopes (413/415/400/422/500) are surfaced but very large corpora are not performance-tuned.
 - **Prompt Registry:** prompt-version creation is gated behind the `ingest_documents` permission; versions are immutable by design (no edit/delete).
+- **Spend budgets:** an owner can cap monthly spend and have new runs refused, but:
+  - **One ceiling per organization.** No per-user, per-team, per-project or per-model budgets,
+    and no separate limits for different providers.
+  - **Calendar months in UTC only.** No rolling windows and no per-tenant billing anchor;
+    both need a billing model the platform does not have.
+  - **Bounded overshoot.** Enforcement reads a month-to-date total cached for
+    `BUDGET_CACHE_SECONDS` (default 30), so a burst inside that window can exceed the ceiling
+    slightly. The alternative — an exact ledger with a lock per run — costs more than it buys.
+  - **Metering fails open.** If spend cannot be computed, work proceeds (logged at WARNING),
+    because an analytics outage must not become a total outage.
+  - **No notifications.** Crossing a threshold is visible on the dashboard and in the API, but
+    nothing emails, webhooks, or alerts. Combining this with the audit trail's SIEM export is
+    the natural follow-up.
+  - **A budget only bites where cost is priced.** With no `COST_RATE_PRESET`/rate table every
+    run costs `0`, so a ceiling can never be reached — the Cost rates panel says as much.
+  - **Approval decisions are deliberately not gated**, so a paused multi-agent run can always
+    be finished even when the org is over budget.
+
 - **Audit trail:** every administrative mutation is recorded and readable at
   `GET /audit-events`, but the bounds are worth knowing before an audit:
   - **Append-only is an application property, not a database grant.** No `UPDATE`/`DELETE`

@@ -85,6 +85,9 @@ class Audit_Action(str, Enum):
     API_KEY_CREATED = "api_key.created"
     API_KEY_REVOKED = "api_key.revoked"
 
+    BUDGET_SET = "budget.set"
+    BUDGET_REMOVED = "budget.removed"
+
     INTEGRATION_CONNECTION_CREATED = "integration_connection.created"
     INTEGRATION_CONNECTION_UPDATED = "integration_connection.updated"
     INTEGRATION_CONNECTION_DELETED = "integration_connection.deleted"

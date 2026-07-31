@@ -13,6 +13,7 @@ const permissionArb = fc.constantFrom<Permission>(
   "run_agents",
   "ingest_documents",
   "manage_api_keys",
+  "manage_budget",
   "manage_integrations",
   "read_audit_log",
   "manage_members",

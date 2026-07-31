@@ -96,6 +96,33 @@
 - **Optional credentials:** None.
 - **Limitations:** Preset rates are the vendor's public list prices at the date in the preset name — indicative, not authoritative — so negotiated/batch/cached-input pricing needs per-pair overrides; meaningful volume requires runs.
 
+## 7b. Cost governance (v1.1)
+
+**Spend budgets with enforcement**
+- **Purpose:** turn cost *observability* into cost *control*. The platform could measure spend
+  and do nothing about it; an owner can now set a monthly ceiling that warns or blocks.
+- **Backend modules:** `observability/budget.py` (`Spend_Budget`, `Budget_Store` with
+  in-memory + Postgres implementations, `Budget_Guard`, `current_period`),
+  `api/routers/budget.py`, the `enforce_budget` dependency in `api/deps.py`, migration `0014`.
+- **Frontend:** `features/analytics/BudgetCard` on the Analytics page — spent/limit/remaining
+  rendered verbatim, a native `<progress>`, an explicit `role="alert"` notice while blocking,
+  and an owner-only set/remove form.
+- **Endpoints:** `GET /budget` (`read`), `PUT /budget` and `DELETE /budget` (`manage_budget`,
+  owner-only). Both mutations are audited (`budget.set`, `budget.removed`).
+- **Enforcement:** `402 budget_exceeded` on the spending entry points only (`/query`,
+  `/agent/run`, `/agent/stream`, `/multi-agent/runs`, `/multi-agent/runs/{id}/stream`). Reads
+  and approval decisions are never blocked.
+- **Period:** calendar month in UTC, computed per request — no stored period, no rollover job.
+- **Guarantees:** money is `Decimal` end to end and crosses the API as exact strings; the
+  enforced total is the same one `/analytics/usage` shows; `warn` never refuses; a metering
+  failure fails open; raising a ceiling takes effect immediately.
+- **Status:** Fully working.
+- **Keyless:** Yes (in-memory store; Postgres when the domain stores persist).
+- **Optional credentials:** None. Costs are only non-zero once pricing is configured (§7).
+- **Limitations:** see `docs/KNOWN_LIMITATIONS.md` — one budget per org (no per-user, per-team
+  or per-project ceilings), calendar months only, bounded overshoot within
+  `BUDGET_CACHE_SECONDS`, and no notification when a threshold is crossed.
+
 ## 8. Guardrails
 
 **Guardrail Config + Evaluate**
@@ -200,6 +227,7 @@
 ## Cross-cutting capabilities
 
 - **Uniform error envelope** `AppError { error: {code, message, details} }` across all APIs; frontend normalizes via `mapError`/`ErrorBanner`.
+- **Cost governance** (see §7b): a monthly spend ceiling per org that warns or blocks, enforced in front of every spending endpoint.
 - **Audit trail** over every administrative mutation (see §11b): append-only, org-scoped, credential-free, with a configurable fail-open/fail-closed posture.
 - **SSE streaming** with exactly-one-terminal invariant (single & multi-agent).
 - **Conversation context** (`POST /conversations`, `GET /conversations/{id}`) threading `conversation_id` into agent + multi-agent runs.

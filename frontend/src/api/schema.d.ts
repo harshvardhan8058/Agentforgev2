@@ -253,6 +253,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Budget
+         * @description Return this organization's spend standing for the current calendar month (UTC).
+         *
+         *     ``limit_amount`` is ``null`` when no budget is set, which is the unlimited default —
+         *     distinguishable from a budget of ``"0"``, which means "spend nothing" and is reported as
+         *     fully used.
+         */
+        get: operations["get_budget_budget_get"];
+        /**
+         * Set Budget
+         * @description Set (or replace) the monthly ceiling and its action. Idempotent — hence ``PUT``.
+         */
+        put: operations["set_budget_budget_put"];
+        post?: never;
+        /**
+         * Delete Budget
+         * @description Remove the ceiling, returning the organization to unlimited spend.
+         *
+         *     Idempotent: removing an absent budget is a 204, not a 404. The desired end state — no
+         *     ceiling — is what the caller asked for, and it holds either way.
+         */
+        delete: operations["delete_budget_budget_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations": {
         parameters: {
             query?: never;
@@ -690,6 +725,11 @@ export interface paths {
          *     * A decision to a run that is not currently awaiting approval is rejected with a
          *       ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt
          *       has already been recorded in the trace by the gate (Req 5.5).
+         *
+         *     Deliberately **not** gated on the spend budget, unlike starting a run: a paused run has
+         *     already spent most of what it will spend, and refusing the decision that finishes it would
+         *     strand it at a checkpoint forever while wasting everything already paid for. A budget stops
+         *     *new* work.
          *
          *     When the resumed run reaches a terminal state, its trace is exported as a background
          *     task — the approval gate's own steps are part of that trace, so exporting on the
@@ -1301,7 +1341,7 @@ export interface components {
          *     still being a single authoritative list on the server.
          * @enum {string}
          */
-        Audit_Action: "org.created" | "member.added" | "member.role_changed" | "member.removed" | "team.created" | "team.deleted" | "team_member.added" | "team_member.removed" | "api_key.created" | "api_key.revoked" | "integration_connection.created" | "integration_connection.updated" | "integration_connection.deleted";
+        Audit_Action: "org.created" | "member.added" | "member.role_changed" | "member.removed" | "team.created" | "team.deleted" | "team_member.added" | "team_member.removed" | "api_key.created" | "api_key.revoked" | "budget.set" | "budget.removed" | "integration_connection.created" | "integration_connection.updated" | "integration_connection.deleted";
         /** Body_ingest_document_documents_post */
         Body_ingest_document_documents_post: {
             /**
@@ -1311,6 +1351,47 @@ export interface components {
             file: string;
             /** Filename */
             filename?: string | null;
+        };
+        /**
+         * BudgetStatusResponse
+         * @description Where an organization stands against its spend budget this period.
+         *
+         *     Every monetary field is an exact decimal **string**, rendered verbatim by the client for
+         *     the same reason `total_cost` is: a cost of ``0.00013`` is not representable as a float
+         *     without drift. ``limit_amount``/``remaining``/``percent_used``/``action`` are ``null``
+         *     when no budget is set — the unlimited default.
+         */
+        BudgetStatusResponse: {
+            /** Action */
+            action?: ("warn" | "block") | null;
+            /**
+             * Blocked
+             * @default false
+             */
+            blocked: boolean;
+            /**
+             * Exceeded
+             * @default false
+             */
+            exceeded: boolean;
+            /** Limit Amount */
+            limit_amount?: string | null;
+            /** Percent Used */
+            percent_used?: string | null;
+            /**
+             * Period End
+             * Format: date-time
+             */
+            period_end: string;
+            /**
+             * Period Start
+             * Format: date-time
+             */
+            period_start: string;
+            /** Remaining */
+            remaining?: string | null;
+            /** Spent */
+            spent: string;
         };
         /** CitationModel */
         CitationModel: {
@@ -1948,6 +2029,24 @@ export interface components {
          */
         Role: "owner" | "admin" | "member" | "viewer";
         /**
+         * SetBudgetRequest
+         * @description Body for ``PUT /budget`` — the monthly ceiling and what happens at it.
+         *
+         *     ``limit_amount`` is a ``Decimal`` parsed from a JSON number *or* string, so a client can
+         *     send an exact value without a float round trip; ``0`` is a valid ceiling meaning "spend
+         *     nothing" and is distinct from having no budget at all.
+         */
+        SetBudgetRequest: {
+            /**
+             * Action
+             * @default warn
+             * @enum {string}
+             */
+            action: "warn" | "block";
+            /** Limit Amount */
+            limit_amount: number | string;
+        };
+        /**
          * StartMultiAgentRunRequest
          * @description Request body for starting a Multi_Agent_Run (Req 9.1).
          */
@@ -2459,6 +2558,77 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    get_budget_budget_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetStatusResponse"];
+                };
+            };
+        };
+    };
+    set_budget_budget_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetBudgetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_budget_budget_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

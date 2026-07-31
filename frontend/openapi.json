@@ -449,6 +449,8 @@
           "team_member.removed",
           "api_key.created",
           "api_key.revoked",
+          "budget.set",
+          "budget.removed",
           "integration_connection.created",
           "integration_connection.updated",
           "integration_connection.deleted"
@@ -479,6 +481,90 @@
           "file"
         ],
         "title": "Body_ingest_document_documents_post",
+        "type": "object"
+      },
+      "BudgetStatusResponse": {
+        "description": "Where an organization stands against its spend budget this period.\n\nEvery monetary field is an exact decimal **string**, rendered verbatim by the client for\nthe same reason `total_cost` is: a cost of ``0.00013`` is not representable as a float\nwithout drift. ``limit_amount``/``remaining``/``percent_used``/``action`` are ``null``\nwhen no budget is set \u2014 the unlimited default.",
+        "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "enum": [
+                  "warn",
+                  "block"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "blocked": {
+            "default": false,
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "exceeded": {
+            "default": false,
+            "title": "Exceeded",
+            "type": "boolean"
+          },
+          "limit_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Amount"
+          },
+          "percent_used": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent Used"
+          },
+          "period_end": {
+            "format": "date-time",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date-time",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "remaining": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining"
+          },
+          "spent": {
+            "title": "Spent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period_start",
+          "period_end",
+          "spent"
+        ],
+        "title": "BudgetStatusResponse",
         "type": "object"
       },
       "CitationModel": {
@@ -1731,6 +1817,37 @@
         "title": "Role",
         "type": "string"
       },
+      "SetBudgetRequest": {
+        "description": "Body for ``PUT /budget`` \u2014 the monthly ceiling and what happens at it.\n\n``limit_amount`` is a ``Decimal`` parsed from a JSON number *or* string, so a client can\nsend an exact value without a float round trip; ``0`` is a valid ceiling meaning \"spend\nnothing\" and is distinct from having no budget at all.",
+        "properties": {
+          "action": {
+            "default": "warn",
+            "enum": [
+              "warn",
+              "block"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "limit_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Limit Amount"
+          }
+        },
+        "required": [
+          "limit_amount"
+        ],
+        "title": "SetBudgetRequest",
+        "type": "object"
+      },
       "StartMultiAgentRunRequest": {
         "description": "Request body for starting a Multi_Agent_Run (Req 9.1).",
         "properties": {
@@ -2683,6 +2800,81 @@
         ]
       }
     },
+    "/budget": {
+      "delete": {
+        "description": "Remove the ceiling, returning the organization to unlimited spend.\n\nIdempotent: removing an absent budget is a 204, not a 404. The desired end state \u2014 no\nceiling \u2014 is what the caller asked for, and it holds either way.",
+        "operationId": "delete_budget_budget_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Delete Budget",
+        "tags": [
+          "budget"
+        ]
+      },
+      "get": {
+        "description": "Return this organization's spend standing for the current calendar month (UTC).\n\n``limit_amount`` is ``null`` when no budget is set, which is the unlimited default \u2014\ndistinguishable from a budget of ``\"0\"``, which means \"spend nothing\" and is reported as\nfully used.",
+        "operationId": "get_budget_budget_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Budget",
+        "tags": [
+          "budget"
+        ]
+      },
+      "put": {
+        "description": "Set (or replace) the monthly ceiling and its action. Idempotent \u2014 hence ``PUT``.",
+        "operationId": "set_budget_budget_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBudgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Budget",
+        "tags": [
+          "budget"
+        ]
+      }
+    },
     "/conversations": {
       "get": {
         "description": "Return the caller org's conversations, most recent first (Req 8.1, 4.2).\n\nCreation returned an id once and there was no way to enumerate threads afterwards, so\na conversation became unreachable as soon as its id was lost. Scoped to\n``principal.org_id`` at the data-access layer, so no other tenant's thread can appear.",
@@ -3575,7 +3767,7 @@
     },
     "/multi-agent/runs/{run_id}/approval": {
       "post": {
-        "description": "Forward an ``Approval_Decision`` to the ``Human_Approval_Gate`` (Req 9.3).\n\n* Unknown ``run_id`` -> ``404 not_found`` via the envelope (Req 9.6).\n* A decision to a run that is not currently awaiting approval is rejected with a\n  ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt\n  has already been recorded in the trace by the gate (Req 5.5).\n\nWhen the resumed run reaches a terminal state, its trace is exported as a background\ntask \u2014 the approval gate's own steps are part of that trace, so exporting on the\ndecision that ends the run is what captures them (Req 10.2).",
+        "description": "Forward an ``Approval_Decision`` to the ``Human_Approval_Gate`` (Req 9.3).\n\n* Unknown ``run_id`` -> ``404 not_found`` via the envelope (Req 9.6).\n* A decision to a run that is not currently awaiting approval is rejected with a\n  ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt\n  has already been recorded in the trace by the gate (Req 5.5).\n\nDeliberately **not** gated on the spend budget, unlike starting a run: a paused run has\nalready spent most of what it will spend, and refusing the decision that finishes it would\nstrand it at a checkpoint forever while wasting everything already paid for. A budget stops\n*new* work.\n\nWhen the resumed run reaches a terminal state, its trace is exported as a background\ntask \u2014 the approval gate's own steps are part of that trace, so exporting on the\ndecision that ends the run is what captures them (Req 10.2).",
         "operationId": "submit_approval_multi_agent_runs__run_id__approval_post",
         "parameters": [
           {

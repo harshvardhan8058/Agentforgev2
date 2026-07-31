@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, status
 from fastapi.concurrency import run_in_threadpool
 
 from agentforge.api.deps import (
+    enforce_budget,
     get_optional_guardrail_pipeline,
     get_rag_service,
     require_permission,
@@ -39,6 +40,7 @@ async def query(
     service: RAG_Service = Depends(get_rag_service),
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
+    _budget: Principal = Depends(enforce_budget),
 ) -> QueryResponse:
     """Answer a query with grounding and citations, scoped to the caller's org.
 

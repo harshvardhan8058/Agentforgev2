@@ -35,6 +35,7 @@ class Permission(str, Enum):
     MANAGE_API_KEYS = "manage_api_keys"
     MANAGE_INTEGRATIONS = "manage_integrations"
     READ_AUDIT_LOG = "read_audit_log"
+    MANAGE_BUDGET = "manage_budget"
     INGEST_DOCUMENTS = "ingest_documents"
     RUN_AGENTS = "run_agents"
     READ = "read"
@@ -55,11 +56,16 @@ _ADMIN: frozenset[Permission] = _MEMBER | {
     Permission.MANAGE_API_KEYS,
     Permission.MANAGE_INTEGRATIONS,
 }
+# Setting a spend ceiling is OWNER-only for the same reason as the audit trail: it is a
+# financial control, and the role that owns the organization is the one that owns its budget.
+# READING the budget needs only `read` — a member who is about to be blocked should be able to
+# see why, and the numbers are the same ones /analytics/usage already shows them.
+#
 # Reading the audit trail is OWNER-only, deliberately matching the roster it exposes: the
 # trail's member events carry emails and role assignments, and `GET /orgs/{id}/members` is
 # gated on `manage_members`, which only an owner holds. Granting trail access to admins would
 # have handed them, through a side door, exactly the roster the direct endpoint withholds.
-_OWNER: frozenset[Permission] = _ADMIN | {Permission.MANAGE_MEMBERS, Permission.READ_AUDIT_LOG}
+_OWNER: frozenset[Permission] = _ADMIN | {Permission.MANAGE_MEMBERS, Permission.READ_AUDIT_LOG, Permission.MANAGE_BUDGET}
 
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.VIEWER: _VIEWER,

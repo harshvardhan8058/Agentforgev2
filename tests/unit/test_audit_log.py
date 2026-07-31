@@ -381,6 +381,8 @@ def test_the_recorded_action_vocabulary_is_stable():
         "team_member.removed",
         "api_key.created",
         "api_key.revoked",
+        "budget.set",
+        "budget.removed",
         "integration_connection.created",
         "integration_connection.updated",
         "integration_connection.deleted",

@@ -35,6 +35,17 @@ machine-readable form.
   `scripts/check_openapi.py` (server side) and `frontend/scripts/check-codegen.mjs` (client
   side) fail CI on drift.
 
+**Added in this cycle, beyond the original v1.1 list** (the audit found gaps that outranked
+the leftovers):
+
+- ~~**Enterprise audit trail:**~~ append-only, org-scoped, credential-free record of every
+  administrative action, with an owner-only console page and a configurable fail-open /
+  fail-closed posture. This was the top-ranked *missing enterprise capability*: every product
+  AgentForge is measured against has one, and nothing here answered "who changed this".
+- ~~**Spend budgets:**~~ a monthly ceiling per organization that warns or blocks, enforced in
+  front of every spending endpoint. Cost was measurable and unlimitable, which is the
+  difference between an observability feature and a governance one.
+
 **Remaining:**
 
 - **CPU-slim backend image:** the shipped image is already CPU-only (no CUDA/NVIDIA packages,
@@ -42,6 +53,13 @@ machine-readable form.
   image — a design change rather than a packaging tweak.
 - **Docs & DX:** expand `DEPLOYMENT.md` rollback runbooks, add a quickstart, and document the
   integration-lane test suite (credential-free, but needs a `pgvector` database).
+- **Budget notifications (new, from the budget work):** crossing a threshold is visible on the
+  dashboard and in the API, but nothing emails, webhooks, or alerts — and an owner who has to
+  look is an owner who finds out late. A webhook/notification seam would serve budget
+  thresholds, guardrail blocks, and run completion at once, and is the natural next capability.
+- **Audit export + retention (new, from the audit work):** a SIEM/CSV export and a retention
+  policy are what an auditor asks for after "do you have a trail". Both are small next to the
+  trail itself, and the keyset cursor they need already exists.
 - **Export durability (new, from the trace-export work):** export is fire-and-forget with no
   retry or queue, so a collector that is down during a run loses that run's export (the
   recorded trace is unaffected). A bounded retry, or a "re-export a run" endpoint, is the

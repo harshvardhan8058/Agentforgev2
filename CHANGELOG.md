@@ -16,6 +16,30 @@ existing tables.
 
 ### Added
 
+- **Enterprise audit trail.** The platform could say what a run cost and what an agent did, and
+  nothing about **who changed the organization** — the first question of every compliance
+  review and access-related ticket. New `Audit_Log` seam (in-memory + Postgres, migration
+  `0013`), an `Audit_Service` that records for the acting principal, and `GET /audit-events`
+  behind a new owner-only `read_audit_log`. Fifteen actions are recorded across members, teams,
+  API keys, integration connections and budgets. Append-only by construction (the seam has no
+  update or delete); nothing recorded can be a credential (credential-named metadata keys are
+  refused, an API-key event carries the key *prefix*); only successful actions are recorded;
+  keyset-paginated on `(created_at, id)`; and the failure posture is the operator's choice —
+  fail-open with an ERROR log by default, or `AUDIT_LOG_REQUIRED=true` to report an applied but
+  unrecorded change as `503 audit_unavailable`.
+- **Audit Log console page** (`read_audit_log`-gated) with action and page-size filters, whose
+  option list is generated from the server's own vocabulary through OpenAPI — adding a server
+  action fails the frontend type check rather than silently missing a filter.
+- **Spend budgets with enforcement.** Cost *observability* became cost *control*: an owner sets
+  a monthly ceiling (`PUT /budget`, owner-only `manage_budget`) that either warns or refuses new
+  work with `402 budget_exceeded`. The period is a calendar month computed per request (no
+  stored period, no rollover job); the enforced total is exactly what `/analytics/usage` shows;
+  reads and approval decisions are never blocked; money stays `Decimal` end to end. Enforcement
+  is cached for `BUDGET_CACHE_SECONDS` to keep a `SUM` off the request path, with the resulting
+  bounded overshoot documented rather than discovered. Migration `0014`.
+- **Budget card on the Analytics page** — spent/limit/remaining verbatim, a native `<progress>`,
+  a `role="alert"` notice while blocking, owner-only controls, axe-clean.
+
 - **Trace export actually happens.** The `Tracing_Exporter` seam shipped in Phase 6 with a
   NoOp implementation, a LangSmith implementation, a settings-driven factory, a DI accessor
   and its own tests — and **no caller anywhere in `src/`**. Setting `LANGSMITH_API_KEY`
@@ -156,6 +180,28 @@ existing tables.
   submitting strings turned an untouched `notify: true` into `"true"`; untouched values now
   round-trip with the type they arrived with.
 
+### Known bounds of the audit trail and spend budgets
+
+Documented in `docs/KNOWN_LIMITATIONS.md` rather than implied. Audit: append-only is an
+application property (a deployment that must *prove* immutability should revoke
+`UPDATE`/`DELETE` on the table); authentication events and IP addresses are not recorded (the
+latter deliberately — behind the bundled proxy `X-Forwarded-For` is client-controllable, and
+recording a spoofable value an auditor would read as authoritative is worse than recording
+none); no retention policy or SIEM export; an actor's identity does not survive a user
+deletion. Budgets: one ceiling per org, calendar months only, bounded overshoot within the
+cache window, metering fails open, no notifications, and a ceiling can only bite where pricing
+is configured.
+
+A self-review of both features fixed, before merge: metadata admission raising *outside* the
+failure-posture guard (which turned three ordinary inputs into a 500 on an already-applied
+mutation with nothing in the trail); `audit_log_required` claiming to fail closed while keeping
+the side effect; `read_audit_log` at admin level exposing the owner-only member roster through
+a side door; organization creation leaving no evidence in the acting tenant's trail; a
+documented-but-absent keyset cursor; an `actor_id` filter that silently returned nothing for
+key actors; an unbounded audit-store connection on the critical path of an applied mutation;
+and a frontend "destructive action" list that would have badged the next `*.deleted` action as
+benign.
+
 ### Known bounds of the new trace-export surface
 
 Documented rather than fixed, and recorded in `docs/KNOWN_LIMITATIONS.md`: "enabled" means
@@ -188,9 +234,9 @@ with `role=admin` gain the capability on deploy**.
 
 ### Verification
 
-Every gate below was run on the branch: backend `pytest -m 'not integration' -q` → **793
-passed**; `cd frontend && npm run ci` → **445 passed**; `cd frontend && npm run e2e` →
-**20 passed**; `python scripts/check_openapi.py` and `python scripts/scan_secrets.py` clean.
+Every gate below was run on the branch: backend `pytest -m 'not integration' -q` → **891
+passed**; `cd frontend && npm run ci` → **467 passed**; `cd frontend && npm run e2e` →
+**21 passed**; `python scripts/check_openapi.py` and `python scripts/scan_secrets.py` clean.
 
 The live-PostgreSQL lane (`pytest -m integration`) was **not** run: no database could be
 started in the authoring environment. New Postgres store behaviour is covered by

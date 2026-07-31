@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 
 from agentforge.agent.orchestrator import Agent_Orchestrator, extract_citations
 from agentforge.api.deps import (
+    enforce_budget,
     get_conversation_store,
     get_optional_guardrail_pipeline,
     get_orchestrator,
@@ -69,6 +70,7 @@ async def run_agent(
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
+    _budget: Principal = Depends(enforce_budget),
 ) -> AgentRunResponse:
     """Run the bounded agent loop and return its grounded result (Req 1.7, 8.5).
 
@@ -145,6 +147,7 @@ async def stream_agent(
     store: Conversation_Store = Depends(get_conversation_store),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
+    _budget: Principal = Depends(enforce_budget),
 ) -> StreamingResponse:
     """Stream the agent run over Server-Sent Events, scoped to the caller's org (Req 9.1-9.9).
 

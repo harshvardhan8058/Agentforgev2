@@ -15,6 +15,7 @@ export type Permission =
   | "ingest_documents"
   | "manage_api_keys"
   | "manage_integrations"
+  | "manage_budget"
   | "read_audit_log"
   | "manage_members";
 
@@ -38,6 +39,7 @@ const ADMIN: ReadonlySet<Permission> = new Set<Permission>([
 const OWNER: ReadonlySet<Permission> = new Set<Permission>([
   ...ADMIN,
   "read_audit_log",
+  "manage_budget",
   "manage_members",
 ]);
 

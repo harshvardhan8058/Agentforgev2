@@ -195,7 +195,7 @@ stateDiagram-v2
 
 ## 7. Data model & migrations
 
-Thirteen additive SQL migrations, one per phase area, applied in order on startup (halting and naming the failing id on error):
+Fourteen additive SQL migrations, one per phase area, applied in order on startup (halting and naming the failing id on error):
 
 ```mermaid
 flowchart LR
@@ -205,6 +205,7 @@ flowchart LR
     m7 --> m8[0008 usage records] --> m9[0009 prompt registry]
     m9 --> m10[0010 evaluations] --> m11[0011 integration connections]
     m11 --> m12[0012 document content hash] --> m13[0013 audit events]
+    m13 --> m14[0014 spend budgets]
 ```
 
 All resources are `org_id`-scoped; cross-tenant access resolves to 404, never 403. Two tables
@@ -232,4 +233,8 @@ flowchart LR
 4. **Secrets** — typed `SecretStr`, never logged.
 5. **Uniform errors** — `AppError { error: {code, message, details} }`.
 6. **Additive migrations** — never rewrite existing ones.
+7. **Governance side channels never fail the work they govern** — trace export runs after the
+   response, an audit write is fail-open by default (fail-closed reports `503
+   audit_unavailable` on an *applied* change rather than pretending to roll it back), and a
+   spend check that cannot compute spend allows the run.
 7. **Streaming invariant** — exactly one terminal SSE event per run.

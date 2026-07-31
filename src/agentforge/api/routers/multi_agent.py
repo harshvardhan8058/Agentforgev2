@@ -30,6 +30,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from agentforge.api.deps import (
+    enforce_budget,
     get_multi_agent_context,
     get_trace_export_service,
     get_optional_guardrail_pipeline,
@@ -139,6 +140,7 @@ async def start_multi_agent_run(
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
+    _budget: Principal = Depends(enforce_budget),
 ) -> StartMultiAgentRunResponse:
     """Start a Multi_Agent_Run, persist it, and run it synchronously to completion.
 
@@ -230,6 +232,7 @@ async def stream_multi_agent_run(
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
+    _budget: Principal = Depends(enforce_budget),
 ) -> StreamingResponse:
     """Stream a fresh multi-agent run for ``run_id`` over Server-Sent Events (Req 9.2).
 
@@ -279,6 +282,11 @@ async def submit_approval(
     * A decision to a run that is not currently awaiting approval is rejected with a
       ``409 run-not-awaiting-approval`` error via the envelope, and the rejected attempt
       has already been recorded in the trace by the gate (Req 5.5).
+
+    Deliberately **not** gated on the spend budget, unlike starting a run: a paused run has
+    already spent most of what it will spend, and refusing the decision that finishes it would
+    strand it at a checkpoint forever while wasting everything already paid for. A budget stops
+    *new* work.
 
     When the resumed run reaches a terminal state, its trace is exported as a background
     task — the approval gate's own steps are part of that trace, so exporting on the

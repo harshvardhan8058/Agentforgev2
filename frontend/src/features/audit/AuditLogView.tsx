@@ -78,6 +78,8 @@ const ACTION_META: Record<AuditAction, { label: string; destructive: boolean }> 
   "team_member.added": { label: "Added to team", destructive: false },
   "team_member.removed": { label: "Removed from team", destructive: true },
   "api_key.created": { label: "API key created", destructive: false },
+  "budget.set": { label: "Spend budget set", destructive: false },
+  "budget.removed": { label: "Spend budget removed", destructive: true },
   "api_key.revoked": { label: "API key revoked", destructive: true },
   "integration_connection.created": {
     label: "Connector settings created",

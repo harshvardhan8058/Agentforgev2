@@ -8,6 +8,7 @@ routers that use them are wired in later tasks.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
@@ -663,6 +664,43 @@ class IntegrationConnectionResponse(BaseModel):
     # field that never occurs.
     config: dict[str, IntegrationConfigValue]
     created_at: datetime
+
+
+class SetBudgetRequest(BaseModel):
+    """Body for ``PUT /budget`` — the monthly ceiling and what happens at it.
+
+    ``limit_amount`` is a ``Decimal`` parsed from a JSON number *or* string, so a client can
+    send an exact value without a float round trip; ``0`` is a valid ceiling meaning "spend
+    nothing" and is distinct from having no budget at all.
+    """
+
+    limit_amount: Decimal = Field(..., ge=0)
+    # "warn" reports the overage and lets runs continue; "block" refuses new runs for the
+    # rest of the period. Defaulting to "warn" is deliberate: setting a budget should not
+    # silently start refusing a customer's traffic.
+    action: Literal["warn", "block"] = "warn"
+
+
+class BudgetStatusResponse(BaseModel):
+    """Where an organization stands against its spend budget this period.
+
+    Every monetary field is an exact decimal **string**, rendered verbatim by the client for
+    the same reason `total_cost` is: a cost of ``0.00013`` is not representable as a float
+    without drift. ``limit_amount``/``remaining``/``percent_used``/``action`` are ``null``
+    when no budget is set — the unlimited default.
+    """
+
+    period_start: datetime
+    period_end: datetime
+    spent: str
+    limit_amount: str | None = None
+    remaining: str | None = None
+    percent_used: str | None = None
+    action: Literal["warn", "block"] | None = None
+    # `exceeded` is "at or over the ceiling"; `blocked` is that AND an action of "block", so a
+    # client can tell "you are over budget" from "we are refusing new runs".
+    exceeded: bool = False
+    blocked: bool = False
 
 
 class AuditEventResponse(BaseModel):

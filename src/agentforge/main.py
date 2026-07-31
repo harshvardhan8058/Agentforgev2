@@ -21,6 +21,7 @@ from agentforge.api.routers import agent as agent_router
 from agentforge.api.routers import analytics as analytics_router
 from agentforge.api.routers import audit as audit_router
 from agentforge.api.routers import auth as auth_router
+from agentforge.api.routers import budget as budget_router
 from agentforge.api.routers import conversations as conversations_router
 from agentforge.api.routers import documents as documents_router
 from agentforge.api.routers import evaluations as evaluations_router
@@ -196,6 +197,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(audit_router.router)
     # Phase 6 observability routers (analytics + prompts + guardrails + evaluations).
     app.include_router(analytics_router.router)
+    # Spend budget: read the org's standing, set or clear its monthly ceiling.
+    app.include_router(budget_router.router)
     # Reports how the deployment handles run telemetry (is trace export on, and where to).
     app.include_router(observability_router.router)
     app.include_router(prompts_router.router)

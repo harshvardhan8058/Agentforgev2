@@ -134,6 +134,12 @@ class Settings(BaseSettings):
     argon2_memory_cost: int = 64 * 1024  # KiB; [8 * 1024, 1_048_576]
     argon2_parallelism: int = 2  # [1, 8]
 
+    # --- cost governance: spend budgets ---
+    # How long a computed month-to-date spend is reused before recomputing. The budget check
+    # runs before every agent/RAG request, so this keeps a SUM over the tenant's month off the
+    # request path; the cost is a bounded overshoot within the window (docs/CONFIGURATION.md).
+    budget_cache_seconds: float = 30.0
+
     # --- enterprise: audit trail ---
     # Failure posture for an audit write. False (default) = fail OPEN: a failed write is
     # logged at ERROR and the audited request still succeeds, because an audit store outage

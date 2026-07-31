@@ -119,6 +119,39 @@ Notes and guarantees:
   fact as `cost_rates_configured`, which is how the console distinguishes "nothing spent"
   from "nothing priced". Both are shown on the Analytics page.
 
+## Spend budgets (`BUDGET_CACHE_SECONDS`)
+
+The ceiling itself is **not** configuration — an owner sets it per organization through
+`PUT /budget` (`manage_budget`), and it is stored in `spend_budgets`. Only the enforcement
+cache is an environment setting.
+
+How it works:
+
+- The period is the **calendar month in UTC**, computed from the request's own timestamp. There
+  is no stored period and no rollover job, which is the most common source of bugs in this kind
+  of feature. Rolling windows and per-tenant billing anchors need a billing model the platform
+  does not have.
+- `action: "warn"` reports the overage and lets traffic continue; `action: "block"` refuses
+  **new** work with `402 budget_exceeded` (the request is well-formed and authorized — a
+  spending limit is exactly what 402 describes). Setting a budget defaults to `warn`, so
+  enabling one cannot silently start refusing a customer's traffic.
+- Only the endpoints that *spend* are gated: RAG query, agent run/stream, multi-agent
+  run/stream. Reads are never blocked — hiding the data that explains an overage would be
+  perverse — and neither is an **approval decision**, because a paused run has already spent
+  most of what it will spend and stranding it at a checkpoint wastes that.
+- The enforced number is the same month-to-date total `GET /analytics/usage` reports, so a
+  refusal is always explicable from the dashboard. `GET /budget` (only `read`) shows spent,
+  limit, remaining, percent used, and whether the org is `exceeded` / `blocked`.
+- **`BUDGET_CACHE_SECONDS` (default 30)** bounds the cost of enforcement: without it every run
+  would put a `SUM` over the tenant's month in front of itself. The trade is a bounded
+  overshoot — a burst inside the window can exceed the ceiling slightly. Raising a ceiling
+  invalidates the cache immediately, so an owner unblocking their own org never waits.
+- **Metering fails open.** If spend cannot be computed the guard reports zero and work
+  continues (logged at WARNING): an analytics outage must not become a total outage for every
+  budgeted tenant.
+- Setting and removing a budget are recorded in the audit trail (`budget.set`,
+  `budget.removed`), so "who raised the ceiling" is answerable.
+
 ## Audit trail (`AUDIT_LOG_REQUIRED`)
 
 Optional in both profiles, and **not** a credential. Every administrative mutation

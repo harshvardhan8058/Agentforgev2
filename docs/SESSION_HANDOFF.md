@@ -2,13 +2,41 @@
 
 **Repo:** `harshvardhan8058/Agentforgev2` · **Branch of record:** `main` ·
 **Work in flight:** `feat/v1.1-admin-crud-and-cost-defaults` ([PR #2](https://github.com/harshvardhan8058/Agentforgev2/pull/2)) ·
-**Last updated:** 2026-08-01 (session 2)
+**Last updated:** 2026-08-01 (session 3)
 
 > Self-contained: a new session can continue from this file alone. Treat git/PR history as
 > truth over prose. `docs/PROJECT_STATE.md` holds the same state in machine-readable form;
 > `CHANGELOG.md` lists the v1.1 changes individually.
 
-## 0. What the last session added (read this first)
+## 0. What session 3 added (read this first)
+
+Session 3 audited the repository against the products AgentForge is measured by (OpenAI
+Platform, Azure AI Foundry, LangSmith, CrewAI Enterprise, Vertex) and ranked **missing
+enterprise capabilities** above the remaining v1.1 chores. Two shipped, in dependency order:
+
+1. **An append-only audit trail** (`enterprise/audit.py`, migration `0013`,
+   `GET /audit-events`, owner-only `read_audit_log`, console page). Nothing in the platform
+   answered *"who changed this?"* — the first question of every compliance review and every
+   access-related support ticket. Fifteen administrative actions are now recorded; the trail is
+   append-only by construction, cannot hold a credential, records only successful actions, and
+   has a configurable fail-open/fail-closed posture.
+2. **Spend budgets** (`observability/budget.py`, migration `0014`, `GET/PUT/DELETE /budget`,
+   owner-only `manage_budget`, Budget card on Analytics). Cost was measurable and
+   *unlimitable*. An owner can now cap monthly spend and have new runs refused with
+   `402 budget_exceeded`; budget changes are themselves audited, which is why the trail was
+   built first.
+
+Both were reviewed behaviourally after implementation; the audit-trail review found eight real
+defects (including metadata admission escaping its own failure guard, and `read_audit_log`
+exposing the owner-only roster to admins) which are fixed with regression tests in `d5b50c4`.
+
+**The audit technique that keeps paying:** ask *who calls this*. Session 2 found a seam with
+zero callers (`Tracing_Exporter`); session 1 found a store with no HTTP surface
+(`Integration_Connection`). Session 3 found the inverse — capabilities with no seam at all —
+by listing what comparable products have that this one does not. Both lists are worth
+re-running.
+
+## 0b. What session 2 added
 
 Session 2 audited the repo against its own docs and found the same class of defect as
 session 1, one level worse: **a seam with no caller at all.**
@@ -34,7 +62,9 @@ all legitimate (`get_agent_context`, `get_app_context`, `get_observability_conte
 ## 1. Current state
 
 - `main` is v1.0: Phases 1–9 plus the production-hardening pass, all merged.
-- **PR #2 is open** with four v1.1 roadmap items complete (head `60705b0`, seven commits).
+- **PR #2 is open** with four v1.1 roadmap items **plus two enterprise capabilities** (audit
+  trail, spend budgets) — eleven commits. It carries migrations `0013` and `0014`, both
+  additive and idempotent; every earlier commit needed none.
   It requires **no migration**. All local gates are green:
   backend **793**, frontend **445**, Playwright **20**, `check_openapi.py`, `scan_secrets.py`.
 - The **live-PostgreSQL lane was not run locally** (see §4). PR #2's CI run is its first
@@ -174,16 +204,28 @@ embedding model once, so its first run downloads ~90 MB.
    covered by 793 passing tests. The PR is now seven commits and touches four roadmap items;
    splitting it is possible but the commits are independently reviewable and the branch is
    green as a whole.
-2. **Export durability** (new, and the natural follow-up to the trace-export work). Export is
+2. **A notification / webhook seam** — the highest-value next capability, and the one three
+   existing features are all waiting for. A budget threshold crossing, a guardrail block, and a
+   run completion are the same shape (an org-scoped event that someone outside the console
+   needs to hear about), and today all three require somebody to be looking at a page. One
+   seam — an org-scoped, RBAC-managed webhook subscription with signed deliveries, bounded
+   retries, and a delivery log — serves all of them, and the audit trail already gives it a
+   place to record subscription changes. Design note for whoever picks it up: deliveries must
+   be off the request path (the trace-export attachment points are the precedent), signatures
+   must be HMAC over the raw body with a per-subscription secret that is shown once, and the
+   delivery log needs the same keyset pagination the audit trail uses.
+3. **Audit export + retention** — a SIEM/CSV export and a retention policy are what an auditor
+   asks for immediately after "do you have a trail"; the cursor they need already exists.
+4. **Export durability** (from the trace-export work). Export is
    fire-and-forget: a collector that is down during a run loses that run's export, and only
    one destination can be active. A bounded retry, a "re-export this run" endpoint, or a
    fan-out composite exporter are all small, well-bounded additions behind the existing seam.
-3. **Deployment DX** (unstarted): rollback runbooks in `DEPLOYMENT.md`, a quickstart, and
+5. **Deployment DX** (unstarted): rollback runbooks in `DEPLOYMENT.md`, a quickstart, and
    documentation of the integration lane (it is credential-free but needs `pgvector`).
-4. **CPU-slim image** (unstarted): the image is already CPU-only and CI-gated at ≤ 4 GB;
+6. **CPU-slim image** (unstarted): the image is already CPU-only and CI-gated at ≤ 4 GB;
    getting materially smaller means serving embeddings from outside the image, which is a
    design change, not a packaging tweak.
-5. **Runtime validation on a Docker host** — the standing gate on calling the stack verified:
+7. **Runtime validation on a Docker host** — the standing gate on calling the stack verified:
 
 ```bash
 git checkout main && git pull
@@ -197,6 +239,8 @@ curl -fsS http://localhost/health/ready                        # database:up, re
 #  Agent Run (streaming) -> live incremental SSE through nginx
 #  Multi-Agent run -> completes
 #  Members: roster, role change, remove; Teams: create/delete, add/remove members
+#  Audit Log: every action above appears, newest first, with the actor's email
+#  Analytics: set a budget of 0 with action=block -> a new run is refused with 402
 #  Integrations: connection settings save/edit/remove; a token-shaped setting is refused
 #  Analytics: Cost rates panel reports "prices nothing" (or the preset, if set)
 pytest -m integration        # needs the pgvector database
