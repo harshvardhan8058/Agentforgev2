@@ -140,13 +140,14 @@
 **Orgs, Teams, Members, API Keys, RBAC, Tenancy, Rate Limiting**
 - **Purpose:** Multi-tenant org management, role-based access, org-scoped API keys, per-principal rate limiting.
 - **Backend modules:** `enterprise/{principal,rbac,tenancy,models}`, auth service, Redis rate limiter, `api/routers/orgs.py`, migrations.
-- **Frontend:** `features/orgs/MembersView` (add member, create team, add team member), `ApiKeysView` (list/create/revoke, one-time secret + copy); `Can` RBAC gate; `OrgContextBadge`, `OrgSwitcher`.
-- **Endpoints:** `POST /orgs`, `POST /orgs/{org_id}/members`, `POST /orgs/{org_id}/teams`, `POST /orgs/{org_id}/teams/{team_id}/members`, `GET/POST /orgs/{org_id}/api-keys`, `DELETE /orgs/{org_id}/api-keys/{key_id}`.
+- **Frontend:** `features/orgs/MembersView` (roster with role reassignment + member removal, team list/create/delete, team-member add/remove — all confirmed for destructive actions), `ApiKeysView` (list/create/revoke, one-time secret + copy); `Can` RBAC gate; `OrgContextBadge`, `OrgSwitcher`.
+- **Endpoints:** `POST /orgs`; members — `GET/POST /orgs/{org_id}/members`, `PATCH/DELETE /orgs/{org_id}/members/{user_id}`; teams — `GET/POST /orgs/{org_id}/teams`, `DELETE /orgs/{org_id}/teams/{team_id}`, `GET/POST /orgs/{org_id}/teams/{team_id}/members`, `DELETE /orgs/{org_id}/teams/{team_id}/members/{user_id}`; API keys — `GET/POST /orgs/{org_id}/api-keys`, `DELETE /orgs/{org_id}/api-keys/{key_id}`.
 - **RBAC:** roles owner ⊇ admin ⊇ member ⊇ viewer over `read`, `run_agents`, `ingest_documents`, `manage_api_keys`, `manage_members`. Cross-tenant access → 404 (never 403).
 - **Status:** Fully working.
 - **Keyless:** Yes (rate limiting NoOp without Redis-enabled; Redis present in compose).
 - **Optional credentials:** None.
-- **Limitations:** Backend ships create/add only for members/teams — no list/update/remove member or list/delete team endpoints, so the UI intentionally omits those; API-key secret shown once, never persisted client-side.
+- **Invariants:** an organization always retains at least one `owner` — a demotion or removal that would remove the last one is refused with `last_owner` (400), checked inside the writing transaction; removing a member also drops their team memberships in that org only; every team read/write is scoped by `org_id`, so another tenant's team is 404.
+- **Limitations:** roles are the fixed set `owner|admin|member|viewer` (no custom roles); there is no invite flow — a user must already exist before being added by email; `manage_members` is granted to `owner` only; API-key secret shown once, never persisted client-side.
 
 ## 12. Deployment (Phase 9)
 
@@ -174,7 +175,6 @@
 
 - LLM output deterministic without `GROQ_API_KEY`; tracing export NoOp without `LANGSMITH_API_KEY`; web search & all integrations disabled without their keys.
 - No frontend UI for integrations management yet (status API only).
-- Member/team management is create/add-only (no list/edit/remove) per shipped backend contracts.
 - `frontend/openapi.json` predates Phase 8's `/integrations/status` (contract-freshness gap; the SPA doesn't call that endpoint) — optional regen.
 - Manual final checkpoints (frontend Task 30, deployment Task 13) left unchecked for human sign-off; deployment Properties 2 & 3 run only in the integration lane / real Docker host.
 - Backend container image size (CUDA torch) — CPU-slim optimization deferred.

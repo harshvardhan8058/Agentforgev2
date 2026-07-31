@@ -1025,6 +1025,42 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "MemberSummary": {
+        "description": "One row of ``GET /orgs/{id}/members`` \u2014 a Membership with its User's email.\n\n``email`` is ``None`` only when no User row backs the Membership. Postgres makes that\nreferentially impossible (``memberships.user_id`` is a foreign key), so it can occur\nonly for a synthetic in-memory membership; the row is still reported rather than\nsilently dropped, because omitting a member from an administrative roster is worse\nthan reporting one whose display name could not be resolved.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "role",
+          "created_at"
+        ],
+        "title": "MemberSummary",
+        "type": "object"
+      },
       "MessageModel": {
         "properties": {
           "content": {
@@ -1438,6 +1474,64 @@
         "title": "StartMultiAgentRunResponse",
         "type": "object"
       },
+      "TeamMemberSummary": {
+        "description": "One row of ``GET /orgs/{id}/teams/{tid}/members`` (Req 2.4).\n\n``email`` follows the same contract as :attr:`MemberSummary.email`.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "created_at"
+        ],
+        "title": "TeamMemberSummary",
+        "type": "object"
+      },
+      "TeamSummary": {
+        "description": "One row of ``GET /orgs/{id}/teams`` \u2014 an org-scoped Team (Req 2.3).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "team_id": {
+            "format": "uuid",
+            "title": "Team Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "name",
+          "created_at"
+        ],
+        "title": "TeamSummary",
+        "type": "object"
+      },
       "TokenResponse": {
         "description": "A freshly-issued bearer Access_Token (Req 1.2).",
         "properties": {
@@ -1527,6 +1621,19 @@
           "run_id"
         ],
         "title": "TraceResponse",
+        "type": "object"
+      },
+      "UpdateMemberRoleRequest": {
+        "description": "Body for ``PATCH /orgs/{id}/members/{user_id}`` \u2014 reassign a member's Role.",
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "UpdateMemberRoleRequest",
         "type": "object"
       },
       "UsageBreakdownEntry": {
@@ -2983,6 +3090,52 @@
       }
     },
     "/orgs/{org_id}/members": {
+      "get": {
+        "description": "Return every Membership in ``org_id`` with its User's email (Req 2.6, 4.4).\n\nThe store filters by ``org_id``, so another tenant's roster is structurally\nunreachable; emails are resolved in one batched call rather than per row.",
+        "operationId": "list_members_orgs__org_id__members_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberSummary"
+                  },
+                  "title": "Response List Members Orgs  Org Id  Members Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Members",
+        "tags": [
+          "orgs"
+        ]
+      },
       "post": {
         "description": "Add an existing user (by email) to ``org_id`` under a Role (Req 2.2).",
         "operationId": "add_member_orgs__org_id__members_post",
@@ -3036,7 +3189,162 @@
         ]
       }
     },
+    "/orgs/{org_id}/members/{user_id}": {
+      "delete": {
+        "description": "Remove a member from ``org_id``, together with their Team_Memberships (Req 2.5).\n\nAn unknown or cross-tenant member is a uniform 404; removing the last owner raises\n``AppError(\"last_owner\", 400)``.",
+        "operationId": "remove_member_orgs__org_id__members__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Member",
+        "tags": [
+          "orgs"
+        ]
+      },
+      "patch": {
+        "description": "Reassign a member's Role within ``org_id`` (Req 2.2, 3.4).\n\nAn unknown member \u2014 or one belonging to another tenant \u2014 is a uniform 404. Demoting\nthe organization's last owner raises ``AppError(\"last_owner\", 400)``.",
+        "operationId": "update_member_role_orgs__org_id__members__user_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemberRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Member Role",
+        "tags": [
+          "orgs"
+        ]
+      }
+    },
     "/orgs/{org_id}/teams": {
+      "get": {
+        "description": "Return every Team in ``org_id``, oldest first (Req 2.3, 4.4).",
+        "operationId": "list_teams_orgs__org_id__teams_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TeamSummary"
+                  },
+                  "title": "Response List Teams Orgs  Org Id  Teams Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Teams",
+        "tags": [
+          "orgs"
+        ]
+      },
       "post": {
         "description": "Create an org-scoped Team within ``org_id`` (Req 2.3).",
         "operationId": "create_team_orgs__org_id__teams_post",
@@ -3090,9 +3398,112 @@
         ]
       }
     },
+    "/orgs/{org_id}/teams/{team_id}": {
+      "delete": {
+        "description": "Delete a Team from ``org_id`` with its Team_Memberships; unknown/cross-org is 404.",
+        "operationId": "delete_team_orgs__org_id__teams__team_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Team",
+        "tags": [
+          "orgs"
+        ]
+      }
+    },
     "/orgs/{org_id}/teams/{team_id}/members": {
+      "get": {
+        "description": "Return a Team's members with their emails; unknown/cross-org Team is 404.",
+        "operationId": "list_team_members_orgs__org_id__teams__team_id__members_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TeamMemberSummary"
+                  },
+                  "title": "Response List Team Members Orgs  Org Id  Teams  Team Id  Members Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Team Members",
+        "tags": [
+          "orgs"
+        ]
+      },
       "post": {
-        "description": "Add a user (by email) to a Team (Req 2.4, 2.5).\n\nA user holding no Membership in the team's Organization propagates\n``AppError(\"org_mismatch\", 400)`` from the Identity_Store.",
+        "description": "Add a user (by email) to a Team (Req 2.4, 2.5).\n\nThe Team is resolved **within the caller's org first**: a Team belonging to another\ntenant is a uniform 404, never an attempt that the store might accept. (Without that\nlookup, a user who happens to hold memberships in both organizations would satisfy the\nstore's cross-org guard and be added to a foreign tenant's Team \u2014 Req 4.3, 5.7.)\n\nA user holding no Membership in the team's Organization propagates\n``AppError(\"org_mismatch\", 400)`` from the Identity_Store.",
         "operationId": "add_team_member_orgs__org_id__teams__team_id__members_post",
         "parameters": [
           {
@@ -3149,6 +3560,63 @@
           }
         },
         "summary": "Add Team Member",
+        "tags": [
+          "orgs"
+        ]
+      }
+    },
+    "/orgs/{org_id}/teams/{team_id}/members/{user_id}": {
+      "delete": {
+        "description": "Remove a User from a Team within ``org_id``; unknown/cross-org target is 404.\n\nThe member keeps their Organization Membership \u2014 only the Team association is removed.",
+        "operationId": "remove_team_member_orgs__org_id__teams__team_id__members__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Team Member",
         "tags": [
           "orgs"
         ]

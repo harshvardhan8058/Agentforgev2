@@ -284,6 +284,47 @@ class AddTeamMemberResponse(BaseModel):
     user_id: UUID
 
 
+class MemberSummary(BaseModel):
+    """One row of ``GET /orgs/{id}/members`` — a Membership with its User's email.
+
+    ``email`` is ``None`` only when no User row backs the Membership. Postgres makes that
+    referentially impossible (``memberships.user_id`` is a foreign key), so it can occur
+    only for a synthetic in-memory membership; the row is still reported rather than
+    silently dropped, because omitting a member from an administrative roster is worse
+    than reporting one whose display name could not be resolved.
+    """
+
+    user_id: UUID
+    email: str | None = None
+    role: RbacRole
+    created_at: datetime
+
+
+class UpdateMemberRoleRequest(BaseModel):
+    """Body for ``PATCH /orgs/{id}/members/{user_id}`` — reassign a member's Role."""
+
+    role: RbacRole
+
+
+class TeamSummary(BaseModel):
+    """One row of ``GET /orgs/{id}/teams`` — an org-scoped Team (Req 2.3)."""
+
+    team_id: UUID
+    name: str
+    created_at: datetime
+
+
+class TeamMemberSummary(BaseModel):
+    """One row of ``GET /orgs/{id}/teams/{tid}/members`` (Req 2.4).
+
+    ``email`` follows the same contract as :attr:`MemberSummary.email`.
+    """
+
+    user_id: UUID
+    email: str | None = None
+    created_at: datetime
+
+
 # --- enterprise: API keys (Phase 5) -----------------------------------------------
 
 

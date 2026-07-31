@@ -29,7 +29,7 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
 - **Guardrails:** the default pipeline is deterministic and simple (max-input-length + optional static blocklist) — not ML/classifier-based moderation.
 - **Evaluations:** evaluators are deterministic; dataset/run creation is gated behind `run_agents`.
 - **Integrations:** no frontend management UI in v1 (status API only); connectors are deterministic stand-ins for real HTTP in this build; bounded timeout + result cap; single-write actions gated by `run_agents`; OAuth flows and webhooks are out of scope; org connection config stores non-secret fields only.
-- **Admin:** member/team management is **create/add-only** — there are no list/update/remove-member or list/delete-team endpoints, so the UI intentionally omits those actions. API-key secrets are shown exactly once and never persisted client-side.
+- **Admin:** member and team management is complete (list/add/reassign-role/remove members; list/create/delete teams; list/add/remove team members), but roles are the fixed set `owner|admin|member|viewer` — custom roles and per-resource ACLs are out of scope — and there is **no invite flow**: a user must already exist (self-registered) before being added to an org by email. `manage_members` is granted to `owner` only, so admins cannot administer the roster. An organization always keeps at least one owner (`last_owner`, 400). API-key secrets are shown exactly once and never persisted client-side.
 
 ## 3. Deployment & infrastructure limitations
 

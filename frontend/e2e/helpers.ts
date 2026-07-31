@@ -119,6 +119,14 @@ export async function mockCommon(page: Page): Promise<void> {
   await page.route(`${API}/auth/refresh`, (route) =>
     respond(route, { access_token: makeJwt(), token_type: "bearer" }),
   );
+
+  // Collection endpoints fetched on mount answer with an ARRAY. The catch-all's
+  // `{}` is fine for a view that reads object fields, but a list renderer would
+  // be handed a non-iterable — a mock artefact, not a product defect. Declaring
+  // the real shape here keeps the sweep honest for every view that lists.
+  await page.route(`${API}/orgs/*/members`, (route) => respond(route, []));
+  await page.route(`${API}/orgs/*/teams`, (route) => respond(route, []));
+  await page.route(`${API}/orgs/*/api-keys`, (route) => respond(route, []));
 }
 
 /** Register a JSON responder for a specific API path (any method). */

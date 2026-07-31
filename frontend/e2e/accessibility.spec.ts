@@ -52,6 +52,46 @@ test.describe("accessibility (axe, WCAG 2.1 AA)", () => {
     expect(results.violations).toEqual([]);
   });
 
+  test("members administration view has no serious violations", async ({ page }) => {
+    await mockCommon(page);
+    await seedAuth(page, { role: "owner" });
+    const orgId = "11111111-1111-4111-8111-111111111111";
+    await mockJson(page, `/orgs/${orgId}/members`, [
+      {
+        user_id: "22222222-2222-4222-8222-222222222222",
+        email: "owner@example.com",
+        role: "owner",
+        created_at: "2026-07-01T00:00:00Z",
+      },
+      {
+        user_id: "33333333-3333-4333-8333-333333333333",
+        email: "member@example.com",
+        role: "member",
+        created_at: "2026-07-02T00:00:00Z",
+      },
+    ]);
+    await mockJson(page, `/orgs/${orgId}/teams`, [
+      { team_id: "44444444-4444-4444-8444-444444444444", name: "Platform", created_at: "2026-07-01T00:00:00Z" },
+    ]);
+    await mockJson(
+      page,
+      `/orgs/${orgId}/teams/44444444-4444-4444-8444-444444444444/members`,
+      [
+        {
+          user_id: "33333333-3333-4333-8333-333333333333",
+          email: "member@example.com",
+          created_at: "2026-07-02T00:00:00Z",
+        },
+      ],
+    );
+
+    await page.goto("/members");
+    await expect(page.getByTestId("members-list")).toBeVisible();
+    await expect(page.getByTestId("team-members-list")).toBeVisible();
+    const results = await scan(page);
+    expect(results.violations).toEqual([]);
+  });
+
   test("query view has no serious violations", async ({ page }) => {
     await mockCommon(page);
     await seedAuth(page, { role: "member" });

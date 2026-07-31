@@ -9,8 +9,18 @@ consistent with the design's "cross-tenant is 404, never 403" rule.
 Endpoint → permission map (design § "Applying auth + tenancy to existing endpoints"):
 
 * ``POST /orgs`` — any authenticated principal (creates a NEW org they own).
-* ``POST /orgs/{id}/members`` / ``teams`` / ``teams/{tid}/members`` — ``manage_members``.
+* ``GET|POST /orgs/{id}/members`` and ``PATCH|DELETE /orgs/{id}/members/{user_id}`` —
+  ``manage_members``.
+* ``GET|POST /orgs/{id}/teams``, ``DELETE /orgs/{id}/teams/{tid}``,
+  ``GET|POST /orgs/{id}/teams/{tid}/members`` and
+  ``DELETE /orgs/{id}/teams/{tid}/members/{user_id}`` — ``manage_members``.
 * ``POST|GET|DELETE /orgs/{id}/api-keys`` — ``manage_api_keys``.
+
+The membership mutations preserve one domain invariant beyond RBAC: an Organization must
+always retain at least one ``OWNER``, so a demotion or removal that would remove the last
+one is refused with ``AppError("last_owner", 400)``. The check lives in the Identity_Store
+(next to the write, inside the same transaction for the Postgres implementation) rather
+than here, so it cannot be bypassed by a future call site.
 
 The Identity_Store / API_Key_Service are synchronous, so their calls run in a worker
 thread to avoid blocking the event loop.
@@ -42,6 +52,10 @@ from agentforge.api.schemas import (
     CreateOrgResponse,
     CreateTeamRequest,
     CreateTeamResponse,
+    MemberSummary,
+    TeamMemberSummary,
+    TeamSummary,
+    UpdateMemberRoleRequest,
 )
 from agentforge.enterprise.api_keys import API_Key_Service
 from agentforge.enterprise.base import Identity_Store
@@ -70,6 +84,36 @@ def _not_found_user(email: str) -> AppError:
         status.HTTP_404_NOT_FOUND,
         {"email": email},
     )
+
+
+def _not_found_member(user_id: UUID) -> AppError:
+    """Build the uniform 404 for a member absent from the caller's organization."""
+    return AppError(
+        "not_found",
+        "Member not found.",
+        status.HTTP_404_NOT_FOUND,
+        {"user_id": str(user_id)},
+    )
+
+
+def _not_found_team(team_id: UUID) -> AppError:
+    """Build the uniform 404 for a team absent from the caller's organization."""
+    return AppError(
+        "not_found",
+        "Team not found.",
+        status.HTTP_404_NOT_FOUND,
+        {"team_id": str(team_id)},
+    )
+
+
+async def _emails_for(
+    identity: Identity_Store, user_ids: list[UUID]
+) -> dict[UUID, str]:
+    """Return a ``user_id -> email`` map resolved in a single store call."""
+    if not user_ids:
+        return {}
+    users = await run_in_threadpool(identity.list_users_by_ids, user_ids)
+    return {u.id: u.email for u in users}
 
 
 @router.post(
@@ -119,6 +163,81 @@ async def add_member(
     )
 
 
+@router.get("/orgs/{org_id}/members", response_model=list[MemberSummary])
+async def list_members(
+    org_id: UUID,
+    identity: Identity_Store = Depends(get_identity_store),
+    principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
+) -> list[MemberSummary]:
+    """Return every Membership in ``org_id`` with its User's email (Req 2.6, 4.4).
+
+    The store filters by ``org_id``, so another tenant's roster is structurally
+    unreachable; emails are resolved in one batched call rather than per row.
+    """
+    _ensure_same_org(principal, org_id)
+    memberships = await run_in_threadpool(identity.list_org_members, org_id)
+    emails = await _emails_for(identity, [m.user_id for m in memberships])
+    return [
+        MemberSummary(
+            user_id=m.user_id,
+            email=emails.get(m.user_id),
+            role=m.role,
+            created_at=m.created_at,
+        )
+        for m in memberships
+    ]
+
+
+@router.patch("/orgs/{org_id}/members/{user_id}", response_model=MemberSummary)
+async def update_member_role(
+    org_id: UUID,
+    user_id: UUID,
+    payload: UpdateMemberRoleRequest,
+    identity: Identity_Store = Depends(get_identity_store),
+    principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
+) -> MemberSummary:
+    """Reassign a member's Role within ``org_id`` (Req 2.2, 3.4).
+
+    An unknown member — or one belonging to another tenant — is a uniform 404. Demoting
+    the organization's last owner raises ``AppError("last_owner", 400)``.
+    """
+    _ensure_same_org(principal, org_id)
+    membership = await run_in_threadpool(
+        identity.update_membership_role, user_id, org_id, payload.role
+    )
+    if membership is None:
+        raise _not_found_member(user_id)
+    user = await run_in_threadpool(identity.get_user, user_id)
+    return MemberSummary(
+        user_id=membership.user_id,
+        email=user.email if user is not None else None,
+        role=membership.role,
+        created_at=membership.created_at,
+    )
+
+
+@router.delete(
+    "/orgs/{org_id}/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_member(
+    org_id: UUID,
+    user_id: UUID,
+    identity: Identity_Store = Depends(get_identity_store),
+    principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
+) -> Response:
+    """Remove a member from ``org_id``, together with their Team_Memberships (Req 2.5).
+
+    An unknown or cross-tenant member is a uniform 404; removing the last owner raises
+    ``AppError("last_owner", 400)``.
+    """
+    _ensure_same_org(principal, org_id)
+    removed = await run_in_threadpool(identity.remove_membership, user_id, org_id)
+    if not removed:
+        raise _not_found_member(user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post(
     "/orgs/{org_id}/teams",
     response_model=CreateTeamResponse,
@@ -136,6 +255,38 @@ async def create_team(
     return CreateTeamResponse(team_id=team.id, name=team.name)
 
 
+@router.get("/orgs/{org_id}/teams", response_model=list[TeamSummary])
+async def list_teams(
+    org_id: UUID,
+    identity: Identity_Store = Depends(get_identity_store),
+    principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
+) -> list[TeamSummary]:
+    """Return every Team in ``org_id``, oldest first (Req 2.3, 4.4)."""
+    _ensure_same_org(principal, org_id)
+    teams = await run_in_threadpool(identity.list_teams, org_id)
+    return [
+        TeamSummary(team_id=t.id, name=t.name, created_at=t.created_at) for t in teams
+    ]
+
+
+@router.delete(
+    "/orgs/{org_id}/teams/{team_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_team(
+    org_id: UUID,
+    team_id: UUID,
+    identity: Identity_Store = Depends(get_identity_store),
+    principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
+) -> Response:
+    """Delete a Team from ``org_id`` with its Team_Memberships; unknown/cross-org is 404."""
+    _ensure_same_org(principal, org_id)
+    deleted = await run_in_threadpool(identity.delete_team, org_id, team_id)
+    if not deleted:
+        raise _not_found_team(team_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post(
     "/orgs/{org_id}/teams/{team_id}/members",
     response_model=AddTeamMemberResponse,
@@ -150,10 +301,17 @@ async def add_team_member(
 ) -> AddTeamMemberResponse:
     """Add a user (by email) to a Team (Req 2.4, 2.5).
 
+    The Team is resolved **within the caller's org first**: a Team belonging to another
+    tenant is a uniform 404, never an attempt that the store might accept. (Without that
+    lookup, a user who happens to hold memberships in both organizations would satisfy the
+    store's cross-org guard and be added to a foreign tenant's Team — Req 4.3, 5.7.)
+
     A user holding no Membership in the team's Organization propagates
     ``AppError("org_mismatch", 400)`` from the Identity_Store.
     """
     _ensure_same_org(principal, org_id)
+    if await run_in_threadpool(identity.get_team, org_id, team_id) is None:
+        raise _not_found_team(team_id)
     user = await run_in_threadpool(identity.get_user_by_email, payload.email)
     if user is None:
         raise _not_found_user(payload.email)
@@ -161,6 +319,61 @@ async def add_team_member(
     return AddTeamMemberResponse(
         team_id=membership.team_id, user_id=membership.user_id
     )
+
+
+@router.get(
+    "/orgs/{org_id}/teams/{team_id}/members",
+    response_model=list[TeamMemberSummary],
+)
+async def list_team_members(
+    org_id: UUID,
+    team_id: UUID,
+    identity: Identity_Store = Depends(get_identity_store),
+    principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
+) -> list[TeamMemberSummary]:
+    """Return a Team's members with their emails; unknown/cross-org Team is 404."""
+    _ensure_same_org(principal, org_id)
+    if await run_in_threadpool(identity.get_team, org_id, team_id) is None:
+        raise _not_found_team(team_id)
+    members = await run_in_threadpool(identity.list_team_members, org_id, team_id)
+    emails = await _emails_for(identity, [m.user_id for m in members])
+    return [
+        TeamMemberSummary(
+            user_id=m.user_id,
+            email=emails.get(m.user_id),
+            created_at=m.created_at,
+        )
+        for m in members
+    ]
+
+
+@router.delete(
+    "/orgs/{org_id}/teams/{team_id}/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_team_member(
+    org_id: UUID,
+    team_id: UUID,
+    user_id: UUID,
+    identity: Identity_Store = Depends(get_identity_store),
+    principal: Principal = Depends(require_permission(Permission.MANAGE_MEMBERS)),
+) -> Response:
+    """Remove a User from a Team within ``org_id``; unknown/cross-org target is 404.
+
+    The member keeps their Organization Membership — only the Team association is removed.
+    """
+    _ensure_same_org(principal, org_id)
+    removed = await run_in_threadpool(
+        identity.remove_team_member, org_id, team_id, user_id
+    )
+    if not removed:
+        # Distinguish the two "nothing was removed" causes for the operator, without
+        # leaking anything across tenants: both are 404, only the details differ.
+        team = await run_in_threadpool(identity.get_team, org_id, team_id)
+        if team is None:
+            raise _not_found_team(team_id)
+        raise _not_found_member(user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
