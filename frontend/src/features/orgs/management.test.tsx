@@ -240,6 +240,63 @@ describe("org management gating (MSW)", () => {
     );
   });
 
+  it("binds the team detail card to the team just created, not to the first one", async () => {
+    // The regression this guards: the selection used to fall back to `teamList[0]`
+    // whenever the picked id was absent from the cached list — exactly the state a
+    // fresh create produces — so the detail card, its member list, and the
+    // "Add to team" write all targeted a different, pre-existing team. The refetch
+    // after the create is made to FAIL here, because queries do not retry: that is
+    // the case where the wrong selection used to persist indefinitely behind a
+    // "Team created" toast.
+    const addedTo: string[] = [];
+    let teamListRequests = 0;
+    server.use(
+      http.get(`${BASE}/orgs/org-1/members`, () => HttpResponse.json([])),
+      http.get(`${BASE}/orgs/org-1/teams`, () => {
+        teamListRequests += 1;
+        if (teamListRequests > 1) {
+          return HttpResponse.json(
+            { error: { code: "internal_error", message: "boom", details: {} } },
+            { status: 500 },
+          );
+        }
+        return HttpResponse.json([
+          { team_id: "t1", name: "Existing", created_at: "2026-07-01T00:00:00Z" },
+        ]);
+      }),
+      http.get(`${BASE}/orgs/org-1/teams/:teamId/members`, () => HttpResponse.json([])),
+      http.post(`${BASE}/orgs/org-1/teams`, () =>
+        HttpResponse.json(
+          { team_id: "t2", name: "Fresh", created_at: "2026-07-31T00:00:00Z" },
+          { status: 201 },
+        ),
+      ),
+      http.post(`${BASE}/orgs/org-1/teams/:teamId/members`, ({ params }) => {
+        addedTo.push(String(params.teamId));
+        return HttpResponse.json({ team_id: params.teamId, user_id: "u9" }, { status: 201 });
+      }),
+    );
+
+    renderView(<MembersView />, "owner");
+    await waitFor(() => expect(screen.getByTestId("teams-list")).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Team name"), "Fresh");
+    await user.click(screen.getByTestId("create-team-submit"));
+
+    // The created team is selected and shown, even though the list refetch that
+    // followed failed outright.
+    await waitFor(() =>
+      expect(screen.getByTestId("team-detail-card")).toHaveTextContent("Fresh"),
+    );
+
+    await user.type(screen.getByLabelText("Add a member to this team"), "u@example.com");
+    await user.click(screen.getByTestId("add-team-member-submit"));
+
+    // The write went to the team the operator created, not to "Existing".
+    await waitFor(() => expect(addedTo).toEqual(["t2"]));
+  });
+
   it("deletes a team after confirmation", async () => {
     let deleted = 0;
     server.use(

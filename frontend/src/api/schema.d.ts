@@ -1195,10 +1195,12 @@ export interface components {
         };
         /**
          * CostRatesResponse
-         * @description The pricing configuration behind every cost figure this deployment reports.
+         * @description The pricing this deployment charges **new** usage at.
          *
          *     Deployment-wide (identical for every org) and credential-free: rates are numbers and
-         *     ``preset`` is a public name.
+         *     ``preset`` is a public name. It describes current configuration only — a stored
+         *     ``Usage_Record.cost`` was computed by the rates in force when that record was written,
+         *     so changing pricing does not restate history and this response cannot explain it.
          */
         CostRatesResponse: {
             /** Available Presets */
@@ -1309,9 +1311,18 @@ export interface components {
         };
         /**
          * CreateTeamResponse
-         * @description Response carrying the newly-created Team id (Req 2.3).
+         * @description Response carrying the newly-created Team (Req 2.3).
+         *
+         *     Carries the same fields as a :class:`TeamSummary` row (``created_at`` included) so a
+         *     client can place the created team into its list immediately instead of guessing a
+         *     timestamp or blocking on a re-read.
          */
         CreateTeamResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /** Name */
             name: string;
             /**

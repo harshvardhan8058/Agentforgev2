@@ -70,17 +70,25 @@ def orphans_owner(
     user_id: UUID,
     new_role: Role | None,
 ) -> bool:
-    """Return True iff changing ``user_id``'s Role to ``new_role`` leaves no owner.
+    """Return True iff changing ``user_id``'s Role to ``new_role`` removes the last owner.
 
     ``new_role is None`` models removal of the Membership. Extracted as a **pure**
     function of the organization's current ``(user_id, role)`` pairs so both
     :class:`InMemory_Identity_Store` and :class:`Pg_Identity_Store` enforce one identical
     rule — the only difference between them is how the pairs are read (a dict scan versus
     a row-locking ``SELECT`` inside the mutating transaction).
+
+    The rule is deliberately about the *transition*, not the post-state: an organization
+    that already holds **no** owner cannot lose one, so every change to it is allowed.
+    Refusing there would freeze such an organization completely — including removing an
+    unrelated member — under an error that misstates the cause, and no API path could
+    recover it. (The HTTP surface never creates that state; direct writes, a cascaded
+    ``users`` delete, or a seed/import can.)
     """
-    others_own = any(
-        uid != user_id and role == Role.OWNER for uid, role in current_roles
-    )
+    roles = list(current_roles)
+    if not any(role == Role.OWNER for _uid, role in roles):
+        return False
+    others_own = any(uid != user_id and role == Role.OWNER for uid, role in roles)
     if others_own:
         return False
     return new_role != Role.OWNER
@@ -494,9 +502,13 @@ class Pg_Identity_Store(Identity_Store):
         commit, because the second blocks until the first has finished and then re-reads
         the committed roster.
         """
+        # ORDER BY is not cosmetic here: without it the rows are locked in scan order,
+        # which two concurrent mutations in the same organization need not agree on, and
+        # they can deadlock. A fixed order makes one of them simply wait.
         rows = conn.execute(
             text(
-                "SELECT user_id, role FROM memberships WHERE org_id = :org_id FOR UPDATE"
+                "SELECT user_id, role FROM memberships WHERE org_id = :org_id "
+                "ORDER BY user_id FOR UPDATE"
             ),
             {"org_id": str(org_id)},
         ).fetchall()
@@ -595,10 +607,16 @@ class Pg_Identity_Store(Identity_Store):
                     {"team_id": str(team_id)},
                 )
             org_id = str(org_row[0])
+            # FOR SHARE, because this is a check-then-act against a row another
+            # transaction may be deleting: `remove_membership` deletes the membership
+            # and its team memberships together, precisely to uphold Req 2.5, and there
+            # is no foreign key from team_memberships to memberships to serialise the
+            # two. Sharing the lock makes a concurrent removal wait, after which this
+            # transaction's guard is re-evaluated against committed state and fails.
             member_row = conn.execute(
                 text(
                     "SELECT 1 FROM memberships "
-                    "WHERE user_id = :user_id AND org_id = :org_id"
+                    "WHERE user_id = :user_id AND org_id = :org_id FOR SHARE"
                 ),
                 {"user_id": str(user_id), "org_id": org_id},
             ).first()

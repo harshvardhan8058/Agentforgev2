@@ -95,11 +95,11 @@ interface AddMemberResponse {
   role: Role;
 }
 
-/** `POST /orgs/{org_id}/teams` response (the list is refetched for the rest). */
-interface CreateTeamResponse {
-  team_id: string;
-  name: string;
-}
+/**
+ * `POST /orgs/{org_id}/teams` response — the same fields as a `TeamSummary` row,
+ * so the created team can be placed into the cached list immediately.
+ */
+type CreateTeamResponse = TeamSummary;
 
 /** `POST /orgs/{org_id}/teams/{team_id}/members` response. */
 interface AddTeamMemberResponse {
@@ -161,8 +161,17 @@ export function MembersView(): JSX.Element {
   // Derive the selection instead of syncing it in an effect: a team deleted
   // elsewhere simply falls out of the list and the first remaining team takes
   // over, with no stale id left pointing at a resource that no longer exists.
+  //
+  // The `teamList[0]` fallback only applies when nothing is picked. Falling back
+  // whenever the picked id is merely ABSENT would silently retarget the detail
+  // card — and the "Add to team" write inside it — at a different team for as
+  // long as the list lagged the selection, which is exactly the state a fresh
+  // create produces. `createTeam` therefore seeds the cache rather than relying
+  // on the refetch landing first.
   const selectedTeam =
-    teamList.find((t) => t.team_id === pickedTeamId) ?? teamList[0] ?? null;
+    (pickedTeamId === null
+      ? teamList[0]
+      : teamList.find((t) => t.team_id === pickedTeamId)) ?? null;
   const selectedTeamId = selectedTeam?.team_id ?? null;
   const teamMembersKey = orgScopedKey(orgId, "team-members", selectedTeamId);
 
@@ -185,6 +194,17 @@ export function MembersView(): JSX.Element {
   }
   function refreshTeamMembers(): void {
     void queryClient.invalidateQueries({ queryKey: teamMembersKey });
+  }
+  /**
+   * Invalidate EVERY team roster in this org (prefix match), for changes whose
+   * server-side effect is not confined to the selected team — removing a member
+   * drops them from all of the org's teams, so invalidating only the visible one
+   * would leave the others showing a member who is gone.
+   */
+  function refreshAllTeamMembers(): void {
+    void queryClient.invalidateQueries({
+      queryKey: orgScopedKey(orgId, "team-members"),
+    });
   }
 
   const addMember = useMutation<AddMemberResponse, ClientError, void>({
@@ -238,8 +258,9 @@ export function MembersView(): JSX.Element {
         tone: "success",
       });
       refreshMembers();
-      // Removing a member also drops their team memberships server-side.
-      refreshTeamMembers();
+      // Removing a member also drops their team memberships server-side — in every
+      // team of this org, not just the one on screen.
+      refreshAllTeamMembers();
     },
   });
 
@@ -253,6 +274,18 @@ export function MembersView(): JSX.Element {
       ),
     onSuccess: (created) => {
       toast({ title: "Team created", description: created.name, tone: "success" });
+      // Place the created team into the cached list before selecting it. Without
+      // this the selection would name a team the list does not yet contain, and a
+      // failed refetch (queries do not retry) would leave the detail card bound to
+      // nothing after a success toast. The server's own values are used — nothing
+      // about the row is invented client-side.
+      queryClient.setQueryData<TeamSummary[]>(teamsKey, (current) =>
+        current === undefined
+          ? [created]
+          : current.some((t) => t.team_id === created.team_id)
+            ? current
+            : [...current, created],
+      );
       setPickedTeamId(created.team_id);
       setTeamName("");
       refreshTeams();
@@ -268,8 +301,16 @@ export function MembersView(): JSX.Element {
       ),
     onSuccess: (_data, team) => {
       toast({ title: "Team deleted", description: team.name, tone: "success" });
-      if (pickedTeamId === team.team_id) setPickedTeamId(null);
+      // Drop the selection so it falls back to the first remaining team rather
+      // than naming a team that no longer exists.
+      if (pickedTeamId === null || pickedTeamId === team.team_id) {
+        setPickedTeamId(null);
+      }
+      queryClient.setQueryData<TeamSummary[]>(teamsKey, (current) =>
+        current?.filter((t) => t.team_id !== team.team_id),
+      );
       refreshTeams();
+      refreshAllTeamMembers();
     },
   });
 

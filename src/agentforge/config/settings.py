@@ -14,7 +14,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, ValidationError
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -177,6 +177,12 @@ class Settings(BaseSettings):
     # seconds, so a short bounded wait turns a dead run into a slightly slower one.
     llm_rate_limit_max_wait_seconds: float = 8.0
 
+    # Model the Groq provider requests. Exposed because the cost presets price models
+    # individually: without it, only the provider's built-in default was ever reachable,
+    # so a priced row for any other model was documentation rather than configuration.
+    # Blank/unset keeps the provider's own default.
+    groq_model: str | None = None
+
     # --- credentials (ALL optional) ---
     groq_api_key: SecretStr | None = None
     hosted_embedding_api_key: SecretStr | None = None
@@ -252,6 +258,22 @@ class Settings(BaseSettings):
         toggle = getattr(self, f"{name}_enabled")
         return credential is not None and toggle is not False
 
+    @field_validator("cost_rate_preset", "cost_rate_table_json", "groq_model", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        """Treat an empty/whitespace-only string as "unset" for optional string settings.
+
+        Environment-driven configuration cannot distinguish "absent" from "present but
+        empty": a blank line in an `.env` template, Compose `${VAR}` interpolation with
+        the variable unset, `--env-file`, and CI all deliver ``""``. Without this,
+        ``COST_RATE_PRESET=`` would be validated as a *misspelled preset name* and abort
+        startup, so shipping the setting in a template with no value would ship an
+        unbootable deployment.
+        """
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
+
     def active_tracing_exporter(self) -> str:
         """Return the active Tracing_Exporter name based on credential presence.
 
@@ -305,7 +327,12 @@ def load_settings() -> Settings:
     # unpriced: reported costs are only trustworthy if the rates behind them were the
     # ones the operator asked for. Validated here — the single configuration gate — so
     # the failure names the setting instead of surfacing later from the cost model.
-    if settings.cost_rate_preset is not None:
+    #
+    # Truthiness, not ``is not None``: an EMPTY value means "unset", and empty values are
+    # everywhere in this deployment model — a blank line in an `.env` template, Compose
+    # `${VAR}` interpolation with the variable unset, `--env-file`, CI. Treating `""` as
+    # a misspelled preset name would make a blank optional setting an unbootable API.
+    if settings.cost_rate_preset:
         # Local import: the preset catalogue imports nothing from this module at import
         # time, but keeping it lazy holds settings free of observability dependencies.
         from agentforge.observability.cost_presets import RATE_PRESETS, preset_names

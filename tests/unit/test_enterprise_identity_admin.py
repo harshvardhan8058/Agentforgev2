@@ -318,3 +318,47 @@ def test_add_team_member_is_idempotent_and_preserves_created_at():
 
     assert again.created_at == first.created_at
     assert len(store.list_team_members(org.id, team.id)) == 1
+
+
+
+# --- the last-owner rule is about the transition, not the post-state ---------------
+#
+# A first cut refused any change that left no owner behind, which also refused changes
+# to an organization that *already* held none — freezing it completely (including
+# removing an unrelated member) under an error that misstated the cause, with no API
+# path able to recover it. The HTTP surface never creates that state, but a direct
+# write, a cascaded ``users`` delete, or a seed/import can.
+
+
+def _ownerless_org(store: InMemory_Identity_Store):
+    """Return ``(org, admin, member)`` for an organization holding no OWNER."""
+    org = store.create_organization("Ownerless")
+    admin = store.create_user("admin@example.com", "hash")
+    member = store.create_user("member@example.com", "hash")
+    store.add_membership(admin.id, org.id, Role.ADMIN)
+    store.add_membership(member.id, org.id, Role.MEMBER)
+    return org, admin, member
+
+
+def test_orphans_owner_is_false_when_the_org_already_has_no_owner():
+    admin, member = uuid.uuid4(), uuid.uuid4()
+    roles = [(admin, Role.ADMIN), (member, Role.MEMBER)]
+
+    assert orphans_owner(roles, member, None) is False
+    assert orphans_owner(roles, member, Role.VIEWER) is False
+    assert orphans_owner(roles, admin, None) is False
+
+
+def test_an_ownerless_org_can_still_be_administered():
+    store = _store()
+    org, admin, member = _ownerless_org(store)
+
+    assert store.remove_membership(member.id, org.id) is True
+    assert store.update_membership_role(admin.id, org.id, Role.VIEWER).role is Role.VIEWER
+    # And it can be repaired by promoting somebody to owner.
+    assert store.update_membership_role(admin.id, org.id, Role.OWNER).role is Role.OWNER
+
+
+def test_orphans_owner_on_an_empty_roster_is_false():
+    """A membership that is not in the roster cannot remove an owner."""
+    assert orphans_owner([], uuid.uuid4(), None) is False

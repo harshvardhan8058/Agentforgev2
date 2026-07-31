@@ -94,10 +94,19 @@ what the usage/cost analytics report, and they resolve lowest precedence first:
    here **override the preset** for the same pair, so a preset can be adopted wholesale and
    corrected model by model.
 
+A rate is matched against the `(provider, model)` a usage record was written with, and the
+recorded model is the one the provider reports having **served** the request (which may be a
+concrete version an alias resolved to), not necessarily the one requested. `GROQ_MODEL`
+(also optional; blank keeps the provider's default `llama-3.1-8b-instant`) selects the
+model, so any model you price should be the one you actually run.
+
 Notes and guarantees:
 
 - **Keyless stays free and deterministic.** With none of the three set, every call costs
   exactly `Decimal("0")` — correct, because the keyless Fallback provider runs locally.
+- **Blank means unset.** An empty or whitespace-only value for `COST_RATE_PRESET`,
+  `COST_RATE_TABLE_JSON` or `GROQ_MODEL` is normalized to "not configured", so a blank line
+  in an `.env` template or an unset Compose `${VAR}` is not mistaken for a misspelling.
 - **Rates are indicative.** Preset values are the vendor's public list prices as of the date
   in the preset name; a deployment with negotiated, batch, or cached-input pricing should
   override the affected pairs. All arithmetic is `Decimal`, and rates cross the API as exact

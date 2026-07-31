@@ -64,9 +64,9 @@ def test_org_always_retains_an_owner(member_count: int, operations: list) -> Non
 
     for operation in operations:
         target = users[operation[1] % len(users)]
-        before = {
-            (m.user_id, m.role) for m in store.list_org_members(org.id)
-        }
+        before = {(m.user_id, m.role) for m in store.list_org_members(org.id)}
+        owners_before = _owner_count(store, org.id)
+        target_was_owner = (target.id, Role.OWNER) in before
         try:
             if operation[0] == "set_role":
                 store.update_membership_role(target.id, org.id, operation[2])
@@ -79,6 +79,15 @@ def test_org_always_retains_an_owner(member_count: int, operations: list) -> Non
             assert {
                 (m.user_id, m.role) for m in store.list_org_members(org.id)
             } == before
+            # The refusal must have been NECESSARY. Asserting only "an owner still
+            # exists" would be satisfied by a store that refused everything, which is
+            # its own defect: it would freeze an organization no API path could then
+            # repair. A refusal is legitimate only when the target held the sole
+            # ownership and the change would have surrendered it.
+            assert owners_before == 1 and target_was_owner, (
+                f"refused {operation[0]} with {owners_before} owner(s), "
+                f"target_was_owner={target_was_owner}"
+            )
 
         assert _owner_count(store, org.id) >= 1
 

@@ -252,7 +252,9 @@ async def create_team(
     """Create an org-scoped Team within ``org_id`` (Req 2.3)."""
     _ensure_same_org(principal, org_id)
     team = await run_in_threadpool(identity.create_team, org_id, payload.name)
-    return CreateTeamResponse(team_id=team.id, name=team.name)
+    return CreateTeamResponse(
+        team_id=team.id, name=team.name, created_at=team.created_at
+    )
 
 
 @router.get("/orgs/{org_id}/teams", response_model=list[TeamSummary])

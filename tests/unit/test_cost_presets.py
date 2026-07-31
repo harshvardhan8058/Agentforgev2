@@ -142,3 +142,59 @@ def test_known_preset_loads_from_the_environment(monkeypatch):
     monkeypatch.setenv("COST_RATE_PRESET", PRESET)
 
     assert load_settings().cost_rate_preset == PRESET
+
+
+
+# --- empty values mean "unset", not "misspelled" ----------------------------------
+#
+# Environment configuration cannot distinguish absent from present-but-empty: a blank
+# line in an `.env` template, Compose `${VAR}` interpolation with the variable unset,
+# `--env-file` and CI all deliver `""`. Validating that as an unknown preset name made
+# shipping the setting in a template with no value ship an unbootable deployment.
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_preset_is_treated_as_unset(monkeypatch, blank: str):
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@localhost:5432/a")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("COST_RATE_PRESET", blank)
+    monkeypatch.setenv("COST_RATE_TABLE_JSON", blank)
+
+    settings = load_settings()
+
+    assert settings.cost_rate_preset is None
+    assert settings.cost_rate_table_json is None
+    # And the model that is built from it prices everything at zero, as when unset.
+    model = build_default_cost_model(settings)
+    assert model.cost_for("groq", "llama-3.1-8b-instant", _ONE_MILLION) == Decimal(0)
+
+
+def test_blank_groq_model_is_treated_as_unset(monkeypatch):
+    """The same rule applies to the model name, which is passed through to the provider."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@localhost:5432/a")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("GROQ_MODEL", "  ")
+
+    assert load_settings().groq_model is None
+
+
+def test_configured_groq_model_reaches_the_provider():
+    """Every preset-priced model must be selectable, or its rate is documentation."""
+    from agentforge.config.container import _build_groq
+
+    priced_models = [model for (provider, model) in RATE_PRESETS[PRESET] if provider == "groq"]
+    assert len(priced_models) > 1  # otherwise this test proves nothing
+
+    for model_name in priced_models:
+        provider = _build_groq(
+            _settings(groq_api_key="test-key-not-a-real-credential", groq_model=model_name)
+        )
+        assert provider._model == model_name
+
+
+def test_unset_groq_model_keeps_the_providers_own_default():
+    from agentforge.config.container import _build_groq
+    from agentforge.llm.groq_provider import _DEFAULT_MODEL
+
+    provider = _build_groq(_settings(groq_api_key="test-key-not-a-real-credential"))
+    assert provider._model == _DEFAULT_MODEL

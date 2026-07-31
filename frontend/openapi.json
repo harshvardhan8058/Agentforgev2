@@ -476,7 +476,7 @@
         "type": "object"
       },
       "CostRatesResponse": {
-        "description": "The pricing configuration behind every cost figure this deployment reports.\n\nDeployment-wide (identical for every org) and credential-free: rates are numbers and\n``preset`` is a public name.",
+        "description": "The pricing this deployment charges **new** usage at.\n\nDeployment-wide (identical for every org) and credential-free: rates are numbers and\n``preset`` is a public name. It describes current configuration only \u2014 a stored\n``Usage_Record.cost`` was computed by the rates in force when that record was written,\nso changing pricing does not restate history and this response cannot explain it.",
         "properties": {
           "available_presets": {
             "items": {
@@ -695,8 +695,13 @@
         "type": "object"
       },
       "CreateTeamResponse": {
-        "description": "Response carrying the newly-created Team id (Req 2.3).",
+        "description": "Response carrying the newly-created Team (Req 2.3).\n\nCarries the same fields as a :class:`TeamSummary` row (``created_at`` included) so a\nclient can place the created team into its list immediately instead of guessing a\ntimestamp or blocking on a re-read.",
         "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -709,7 +714,8 @@
         },
         "required": [
           "team_id",
-          "name"
+          "name",
+          "created_at"
         ],
         "title": "CreateTeamResponse",
         "type": "object"
