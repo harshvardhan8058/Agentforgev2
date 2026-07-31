@@ -234,6 +234,13 @@ consumer from costing this platform anything unbounded:
 | `WEBHOOK_TIMEOUT_SECONDS` | `4.0` | One attempt, so a hanging endpoint cannot hold a worker thread |
 | `WEBHOOK_BACKOFF_SECONDS` | `0.5` | The first retry gap; it doubles per attempt (`0.5s`, `1.0s` at the defaults) |
 
+All three ranges are **enforced**, not merely documented (`1-10`, `0-30s`, `0-10s`): these
+settings are the mechanism that keeps a pathological consumer cheap, so
+`WEBHOOK_MAX_ATTEMPTS=1000` with `WEBHOOK_TIMEOUT_SECONDS=600` — which would let a single event
+occupy a worker thread for days — is refused at startup. Alongside them, an organization may
+register at most **20** subscriptions (`409 webhook_limit_reached` past it), because an event fans
+out to every active one.
+
 Guarantees that do not depend on configuration:
 
 - **Delivery can never affect the work that triggered it.** Emission happens after the response

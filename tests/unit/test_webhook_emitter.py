@@ -402,3 +402,94 @@ def test_the_stores_and_transport_are_the_declared_abstractions():
     assert issubclass(InMemory_Webhook_Delivery_Store, Webhook_Delivery_Store)
     assert Transport_Result(status=204).ok is True
     assert Transport_Result(status=None).ok is False
+
+
+
+# --- what the recorded delivery reports -------------------------------------------
+
+
+def test_duration_measures_the_endpoint_not_this_platform_s_backoff(wired):
+    """A fast endpoint that 500s three times must not be reported as having taken 13 seconds."""
+    emitter, subs, _deliveries, transport, org_id = wired
+    _subscribe(subs, org_id, Webhook_Event.RUN_COMPLETED)
+    transport.status = 500
+    # The injected sleep records rather than waits, so any backoff folded into the measurement
+    # would be zero here — instead assert on the real thing: 1.5s of *scheduled* backoff, and a
+    # duration that stays in the millisecond range of three no-op transport calls.
+    (delivery,) = emitter.emit(org_id, Webhook_Event.RUN_COMPLETED, {"run_id": "r1"})
+
+    assert emitter.slept == [0.5, 1.0]
+    assert delivery.attempts == 3
+    assert delivery.duration_ms is not None and delivery.duration_ms < 500
+
+
+def test_a_slow_endpoint_is_reflected_in_the_duration(wired, monkeypatch):
+    """The field is what an operator reads to judge how slow a consumer is."""
+    emitter, subs, _deliveries, transport, org_id = wired
+    _subscribe(subs, org_id, Webhook_Event.RUN_COMPLETED)
+    clock = iter([0.0, 0.25, 0.25])  # start, after attempt, final read
+
+    monkeypatch.setattr("agentforge.webhooks.emitter.time.monotonic", lambda: next(clock))
+
+    (delivery,) = emitter.emit(org_id, Webhook_Event.RUN_COMPLETED, {"run_id": "r1"})
+
+    assert delivery.duration_ms == 250
+
+
+# --- the in-memory pair mirrors the SQL cascade ------------------------------------
+
+
+def test_deleting_a_subscription_sweeps_its_deliveries_in_memory_too():
+    """Migration 0015 cascades; a fake that keeps the rows would let a test pass wrongly."""
+    deliveries = InMemory_Webhook_Delivery_Store()
+    subs = InMemory_Webhook_Subscription_Store(deliveries)
+    org_id = uuid.uuid4()
+    subscription = subs.create(
+        org_id, url="https://a.example.com/h", events=("run.completed",), secret=SECRET
+    )
+    emitter = Webhook_Emitter(subs, deliveries, Recording_Webhook_Transport())
+    emitter.emit(org_id, Webhook_Event.RUN_COMPLETED, {"run_id": "r1"})
+    assert len(deliveries.list_for_subscription(org_id, subscription.id)) == 1
+
+    subs.delete(org_id, subscription.id)
+
+    assert deliveries.list_for_subscription(org_id, subscription.id) == []
+
+
+def test_deleting_one_subscription_leaves_another_s_log_alone():
+    deliveries = InMemory_Webhook_Delivery_Store()
+    subs = InMemory_Webhook_Subscription_Store(deliveries)
+    org_id = uuid.uuid4()
+    first = subs.create(
+        org_id, url="https://a.example.com/h", events=("run.completed",), secret=SECRET
+    )
+    second = subs.create(
+        org_id, url="https://b.example.com/h", events=("run.completed",), secret=SECRET
+    )
+    emitter = Webhook_Emitter(subs, deliveries, Recording_Webhook_Transport())
+    emitter.emit(org_id, Webhook_Event.RUN_COMPLETED, {"run_id": "r1"})
+
+    subs.delete(org_id, first.id)
+
+    assert deliveries.list_for_subscription(org_id, first.id) == []
+    assert len(deliveries.list_for_subscription(org_id, second.id)) == 1
+
+
+# --- the transport seam's never-raise contract -------------------------------------
+
+
+def test_the_real_transport_returns_a_result_for_an_undeliverable_url():
+    """A stored URL whose host was re-pointed, or one that is simply malformed.
+
+    The real transport is exercised here rather than the double, because the contract under test
+    ("MUST NOT raise") belongs to the real one. No network is touched: admission refuses both of
+    these before any connection is attempted.
+    """
+    from agentforge.webhooks.transport import Httpx_Webhook_Transport
+
+    transport = Httpx_Webhook_Transport()
+    for url in ("https://127.0.0.1/hook", "https://example.com:99999/hook"):
+        result = transport.post(url, body=b"{}", headers={}, timeout_seconds=1.0)
+        assert result.status is None
+        assert result.ok is False
+        assert result.error and len(result.error) <= 200

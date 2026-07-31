@@ -146,3 +146,34 @@ def test_a_request_that_registers_nothing_gets_a_plain_error_response():
         "message": "nope",
         "details": {},
     }
+
+
+
+def test_deferred_work_registered_from_a_worker_thread_still_runs():
+    """The arrangement production actually uses.
+
+    Every real call site registers from inside `run_in_threadpool` — the guardrail block happens
+    in the worker running the synchronous pipeline — while the exception handler reads the list on
+    the event loop. There is one writer per request and the threadpool future establishes the
+    ordering, but the tests above all register from the event loop, so this is the case that
+    matters and was otherwise unexercised.
+    """
+    from fastapi.concurrency import run_in_threadpool
+
+    ran: list[str] = []
+    app = create_app()
+
+    @app.get("/deferred-from-worker")
+    async def deferred_from_worker(request: Request):  # pragma: no cover - via the request
+        def blocking_work() -> None:
+            # Registered from the worker thread, exactly as `_report_block` does.
+            defer_after_error(request, lambda: ran.append("reported"))
+
+        await run_in_threadpool(blocking_work)
+        raise AppError("guardrail_blocked", "nope", status.HTTP_400_BAD_REQUEST)
+
+    register_exception_handlers(app)
+    resp = _client_without_lifespan(app).get("/deferred-from-worker")
+
+    assert resp.status_code == 400
+    assert ran == ["reported"]

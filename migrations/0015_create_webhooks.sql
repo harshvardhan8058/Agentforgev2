@@ -47,8 +47,8 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- The only read pattern: one subscription's log, newest first, with the (created_at, id)
--- keyset the API paginates on.
+-- keyset the API paginates on. `org_id` is in the WHERE clause of every query for tenancy, but
+-- always alongside `subscription_id`, so it needs no index of its own -- and this is the
+-- fastest-growing table in the schema, where an index nothing reads is pure write amplification.
 CREATE INDEX IF NOT EXISTS webhook_deliveries_sub_time_idx
     ON webhook_deliveries (subscription_id, created_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS webhook_deliveries_org_time_idx
-    ON webhook_deliveries (org_id, created_at DESC, id DESC);

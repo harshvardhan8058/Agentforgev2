@@ -1163,6 +1163,9 @@ export interface paths {
          *
          *     The secret is generated here and appears in this response only; no other endpoint returns
          *     it. Deliveries start immediately — a new subscription is active.
+         *
+         *     Refuses with ``409 webhook_limit_reached`` past ``MAX_WEBHOOKS_PER_ORG``, because every
+         *     emitted event fans out to every active subscription.
          */
         post: operations["create_webhook_webhooks_post"];
         delete?: never;

@@ -65,17 +65,22 @@ def emit_run_outcome(
         if termination_reason in SUCCESSFUL_TERMINATIONS
         else Webhook_Event.RUN_FAILED
     )
-    data: dict[str, object] = {
-        "run_id": run_id,
-        "kind": kind,
-        "termination_reason": termination_reason,
-    }
-    if conversation_id is not None:
-        data["conversation_id"] = conversation_id
-    if citation_count is not None:
-        # How well-grounded the answer was, without shipping the answer or the sources.
-        data["citation_count"] = citation_count
-    emitter.emit(org_id, event, data)
+    # Every key is always present, with an explicit `null` where the emission point does not
+    # know the value. Omitting an absent key would make one event name carry different shapes
+    # depending on which router produced it — the exact divergence this module exists to
+    # prevent — and would force a consumer to distinguish "no citations" from "not reported".
+    emitter.emit(
+        org_id,
+        event,
+        {
+            "run_id": run_id,
+            "kind": kind,
+            "termination_reason": termination_reason,
+            "conversation_id": conversation_id,
+            # How well-grounded the answer was, without shipping the answer or the sources.
+            "citation_count": citation_count,
+        },
+    )
 
 
 def emit_document_ingested(

@@ -72,7 +72,11 @@ the leftovers):
   permanently broken endpoint is not just a growing pile of `failed` rows nobody looks at;
   (2) **manual redelivery** of a recorded delivery, which the delivery log already has the data
   for; (3) **secret rotation with an overlap window** where both the old and new secret verify,
-  which is the only way to rotate without breaking a consumer. A durable delivery queue is a
+  which is the only way to rotate without breaking a consumer. Then **retention on
+  `webhook_deliveries`**, which is the fastest-growing table in the schema and today grows without
+  bound, and **a dedicated bounded executor for outbound delivery** so webhook work cannot consume
+  the worker threads that serve requests (a per-org subscription cap and enforced setting ranges
+  hold that line today, which is a bound rather than an isolation). A durable delivery queue is a
   larger, infrastructure-shaped change and belongs in v2.0 beside real connectors.
 - **Export durability (new, from the trace-export work):** export is fire-and-forget with no
   retry or queue, so a collector that is down during a run loses that run's export (the

@@ -51,8 +51,11 @@ SECRET_PREFIX: Final[str] = "whsec_"
 SECRET_ENTROPY_BYTES: Final[int] = 32
 
 MAX_URL_LENGTH: Final[int] = 2048
-_ALLOWED_SCHEMES: Final[tuple[str, ...]] = ("https", "http")
-_ALLOWED_PORTS: Final[tuple[int, ...]] = (80, 443)
+#: The port each scheme may use, paired with the scheme rather than pooled. Pooling them
+#: admitted ``https://host:80`` while the refusal message claimed to have checked "the default
+#: port for its scheme" — a URL reading as one service and reaching another is the whole class
+#: of confusion this check exists to prevent.
+_ALLOWED_SCHEME_PORTS: Final[dict[str, int]] = {"https": 443, "http": 80}
 
 
 class WebhookUrlRejected(ValueError):
@@ -82,11 +85,15 @@ def _is_forbidden_address(address: str) -> bool:
 
 
 def _is_loopback_host(host: str) -> bool:
-    """True for the literal loopback names/addresses a developer would use locally."""
-    if host in {"localhost", "127.0.0.1", "::1", "[::1]"}:
+    """True for the literal loopback names/addresses a developer would use locally.
+
+    ``host`` is always ``urlsplit().hostname``, which lower-cases and strips the brackets from
+    an IPv6 literal, so ``[::1]`` never arrives here in bracketed form.
+    """
+    if host in {"localhost", "127.0.0.1", "::1"}:
         return True
     try:
-        return ipaddress.ip_address(host.strip("[]")).is_loopback
+        return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
 
@@ -97,14 +104,27 @@ def validate_webhook_url(url: str, *, allow_loopback: bool = False) -> str:
     ``allow_loopback`` is set by the composition root outside the production profile, so a
     developer can target a local listener. It relaxes **only** the scheme and address checks
     for loopback hosts; nothing else is loosened, and production never sets it.
+
+    :class:`WebhookUrlRejected` is the **only** exception this raises. That is load-bearing:
+    the transport layer maps it to a 400 and the delivery transport maps it to a failed
+    attempt, so anything else escaping here becomes a 500 for an input the caller could have
+    fixed. Both of the stdlib calls below leak other types for perfectly reachable inputs —
+    ``urlsplit().port`` raises ``ValueError`` for ``:99999`` or ``:abc``, and
+    ``getaddrinfo`` raises ``UnicodeError`` for a DNS label over 63 characters — so they are
+    wrapped rather than trusted.
     """
     if not url or len(url) > MAX_URL_LENGTH:
         raise WebhookUrlRejected(
             f"a webhook URL must be between 1 and {MAX_URL_LENGTH} characters"
         )
 
-    parts = urlsplit(url)
-    if parts.scheme not in _ALLOWED_SCHEMES:
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError as exc:
+        # A port outside 0-65535, or one that is not a number at all.
+        raise WebhookUrlRejected(f"a webhook URL must be well-formed: {exc}") from exc
+    if parts.scheme not in _ALLOWED_SCHEME_PORTS:
         raise WebhookUrlRejected("a webhook URL must use https")
     host = parts.hostname
     if not host:
@@ -119,7 +139,7 @@ def validate_webhook_url(url: str, *, allow_loopback: bool = False) -> str:
         raise WebhookUrlRejected("a webhook URL must not embed credentials")
     if parts.fragment:
         raise WebhookUrlRejected("a webhook URL must not include a fragment")
-    if parts.port is not None and parts.port not in _ALLOWED_PORTS:
+    if port is not None and port != _ALLOWED_SCHEME_PORTS[parts.scheme]:
         if not (allow_loopback and loopback):
             raise WebhookUrlRejected(
                 "a webhook URL must use the default port for its scheme"
@@ -132,15 +152,23 @@ def validate_webhook_url(url: str, *, allow_loopback: bool = False) -> str:
     # Name-based checks are not enough: resolve, and refuse if ANY answer is an address an
     # outbound request must not reach.
     try:
-        resolved = socket.getaddrinfo(host, parts.port or (443 if parts.scheme == "https" else 80))
-    except socket.gaierror as exc:
+        resolved = socket.getaddrinfo(host, port or _ALLOWED_SCHEME_PORTS[parts.scheme])
+    except (socket.gaierror, UnicodeError, OSError) as exc:
+        # UnicodeError: an over-long or empty DNS label, which the IDNA codec refuses before
+        # any lookup happens. Reported as "did not resolve", which is what it amounts to.
         raise WebhookUrlRejected(f"a webhook URL must resolve: {host} did not") from exc
 
     addresses = {info[4][0] for info in resolved}
     if not addresses:
         raise WebhookUrlRejected(f"a webhook URL must resolve: {host} did not")
     for address in addresses:
-        if _is_forbidden_address(address):
+        try:
+            forbidden = _is_forbidden_address(address)
+        except ValueError as exc:  # pragma: no cover - getaddrinfo returns parseable addresses
+            # An address the resolver returned that `ipaddress` cannot parse. Unreachable in
+            # practice, and refusing is the only safe reading of "we cannot classify this".
+            raise WebhookUrlRejected("a webhook URL must resolve to a classifiable address") from exc
+        if forbidden:
             # The address is deliberately not echoed: it is the platform's internal topology.
             raise WebhookUrlRejected(
                 "a webhook URL must not resolve to a private, loopback, link-local or "

@@ -138,9 +138,15 @@ class Settings(BaseSettings):
     # Bounds on a delivery, all applied per attempt / per event (webhooks/emitter.py). Kept
     # small on purpose: a delivery runs in a background task holding a worker thread, so a
     # pathological consumer must not be able to occupy one for long.
-    webhook_max_attempts: int = 3
-    webhook_timeout_seconds: float = 4.0
-    webhook_backoff_seconds: float = 0.5
+    #
+    # The ranges are enforced rather than documented, because these three settings ARE the
+    # mechanism that keeps a pathological consumer cheap. Left unvalidated,
+    # `WEBHOOK_MAX_ATTEMPTS=1000` with `WEBHOOK_TIMEOUT_SECONDS=600` would be accepted, and a
+    # single event would then be able to occupy a worker thread for days. The upper bounds are
+    # the point; the lower bounds keep the feature meaningful (one attempt, a real timeout).
+    webhook_max_attempts: int = Field(default=3, ge=1, le=10)
+    webhook_timeout_seconds: float = Field(default=4.0, gt=0.0, le=30.0)
+    webhook_backoff_seconds: float = Field(default=0.5, ge=0.0, le=10.0)
 
     # --- cost governance: spend budgets ---
     # How long a computed month-to-date spend is reused before recomputing. The budget check

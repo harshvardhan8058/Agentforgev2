@@ -37,6 +37,10 @@ curl -s "https://agentforge.example.com/webhooks/$WEBHOOK_ID/deliveries?limit=25
   -H "Authorization: Bearer $TOKEN"
 ```
 
+An organization may register at most **20** endpoints; past that, `POST /webhooks` answers
+`409 webhook_limit_reached`. This is not a display bound — every emitted event fans out to every
+active subscription, each with its own retry budget — so it is enforced rather than assumed.
+
 All six endpoints require the **`manage_webhooks`** permission, granted from `admin` upwards.
 Every one is scoped to the caller's organization by construction: the store takes the
 principal's `org_id`, there is no org parameter to tamper with, and another tenant's webhook id
@@ -57,7 +61,14 @@ happened once, at a point in time.
 | `webhook.ping` | Only from `POST /webhooks/{id}/test`. **Not subscribable** — it is addressed at one endpoint on demand | `message`, `webhook_id` |
 
 `kind` is `single_agent` or `multi_agent`, so a consumer routes on one field instead of
-inferring from which optional keys are present.
+inferring from which optional keys are present. **Every key listed for an event is always
+present**, with an explicit `null` where the emitting endpoint does not know the value — one
+event name never carries two shapes, and you never have to distinguish "no citations" from "not
+reported".
+
+`guardrail.blocked` fires from `/query`, `/agent/run` and `POST /multi-agent/runs`. It does not
+fire from the two streaming endpoints, because those run no input guardrail at all — worth
+knowing if you are correlating on `surface`, and recorded in `docs/KNOWN_LIMITATIONS.md`.
 
 **What payloads deliberately do not carry.** No agent answer, no document text, no blocked
 input. A webhook endpoint lives outside this platform's trust boundary and outside your own
@@ -150,6 +161,10 @@ delivery log per **(event, subscription)** — not per HTTP attempt — carrying
 endpoint's `response_status`, a short `error`, and `duration_ms`. `attempts > 1` with
 `delivered` is how you spot a flaky consumer.
 
+`duration_ms` counts only time spent talking to your endpoint, summed across attempts. AgentForge's
+own backoff is excluded, so a fast endpoint that returns `500` three times reports single-digit
+milliseconds rather than the thirteen seconds the whole sequence took.
+
 `response_status` is `null` when no response was obtained at all — DNS failure, TLS failure,
 timeout, refused connection — which is exactly the case `error` explains. `error` is a bounded
 diagnostic and **never** a response body.
@@ -166,7 +181,9 @@ SSRF, so admission is strict and all of the following must hold:
 
 - **https only.** (`http` is permitted for a loopback host outside the production profile, so a
   developer can point a subscription at `http://localhost:9000` while building one.)
-- **No credentials in the URL, no fragment, and the default port for the scheme.**
+- **No credentials in the URL, no fragment, and the default port for that scheme** — `443` for
+  `https`, `80` for `http`, paired with the scheme rather than pooled, so `https://host:80` is
+  refused too.
 - **Every resolved address must be globally routable unicast.** The host is resolved and refused
   if *any* answer is loopback, private, link-local (where cloud metadata services live),
   CGNAT/shared space, reserved, unspecified, or multicast. An allow-list, not a deny-list: a
@@ -175,8 +192,15 @@ SSRF, so admission is strict and all of the following must hold:
 - **Redirects are not followed**, so a `302` cannot walk a validated request to an unvalidated
   address.
 
-A refusal is `400 invalid_webhook_url` with the reason, at both create and update. The resolved
-address is never echoed back — that is the platform's internal topology.
+A refusal is `400 invalid_webhook_url` with the reason, at both create and update — including for
+a malformed URL (a port outside `0-65535`, a DNS label over 63 characters), which is the caller's
+to fix and never a `500`. The resolved address is never echoed back: that is the platform's
+internal topology.
+
+The audit trail records the **scheme, host and path** of a webhook URL, never its query string.
+Webhook URLs are frequently themselves bearer credentials (`?token=…`, a Slack
+`services/T…/B…/…` endpoint), and audit rows are readable by every auditor an organization
+invites.
 
 ## The signing secret
 
@@ -184,6 +208,11 @@ Returned **once**, by `POST /webhooks`, and by no other endpoint: `WebhookSubscr
 has no `secret` field at all, so a listing, a read-back after an update, or a delivery log
 cannot leak it — not because each handler remembers to strip it, but because the shape it would
 have to travel in does not have the field.
+
+If the audit write for a registration fails (a deployment running `AUDIT_LOG_REQUIRED=true`
+during an audit-store outage), the subscription is **deleted again** before the error is returned.
+Otherwise you would be left with a live endpoint signing with a secret this response never
+disclosed and no endpoint can ever show you.
 
 There is **no rotation endpoint**, deliberately. Silently re-keying would break your endpoint
 with no way for you to notice except failing verification; doing it properly needs an overlap

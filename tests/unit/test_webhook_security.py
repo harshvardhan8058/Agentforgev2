@@ -231,3 +231,60 @@ def test_the_timestamp_is_signed_so_a_replay_is_detectable():
 )
 def test_a_malformed_signature_header_never_verifies(header: str):
     assert verify_signature("whsec_test", b"{}", header, now=1700000000) is False
+
+
+
+# --- WebhookUrlRejected is the ONLY exception admission raises -------------------
+#
+# This is load-bearing rather than tidy: the router maps `WebhookUrlRejected` to a 400 and the
+# delivery transport maps it to a failed attempt, so anything else escaping becomes a 500 for an
+# input the caller could have fixed — or a raise from a seam documented as never raising. Both
+# stdlib calls in the policy leak other types for reachable inputs.
+
+
+@pytest.mark.parametrize(
+    ("url", "why"),
+    [
+        ("https://example.com:99999/hook", "urlsplit().port raises ValueError above 65535"),
+        ("https://example.com:abc/hook", "a non-numeric port raises ValueError"),
+        ("https://example.com:-1/hook", "a negative port"),
+    ],
+)
+def test_a_malformed_port_is_rejected_not_raised(url: str, why: str, monkeypatch):
+    """Each of these produced a bare `ValueError`, i.e. a 500, before the fix."""
+    _resolve_to(monkeypatch, "8.8.8.8")
+    with pytest.raises(WebhookUrlRejected):
+        validate_webhook_url(url)
+
+
+@pytest.mark.parametrize(
+    ("url", "why"),
+    [
+        ("https://" + "a" * 250 + ".com/hook", "the IDNA codec refuses a label over 63 chars"),
+        ("https://" + "a" * 64 + ".example.com/hook", "one over-long label among valid ones"),
+        ("https://..example.com/hook", "an empty DNS label"),
+    ],
+)
+def test_an_unencodable_host_is_rejected_not_raised(url: str, why: str):
+    """Each of these produced a bare `UnicodeError`, i.e. a 500, before the fix.
+
+    Deliberately **not** monkeypatching the resolver: the IDNA encoding that refuses these
+    happens inside `getaddrinfo` before any lookup, so a fake resolver would hide exactly the
+    failure under test. No network is touched — the name never gets as far as being looked up.
+    """
+    with pytest.raises(WebhookUrlRejected):
+        validate_webhook_url(url)
+
+
+def test_the_port_check_is_scheme_aware(monkeypatch):
+    """`https://host:80` was admitted while the message claimed to check the scheme's port."""
+    _resolve_to(monkeypatch, "8.8.8.8")
+
+    assert validate_webhook_url("https://hooks.example.com:443/hook")
+    with pytest.raises(WebhookUrlRejected):
+        validate_webhook_url("https://hooks.example.com:80/hook")
+
+
+def test_a_malformed_url_is_rejected_before_the_loopback_allowance_too():
+    with pytest.raises(WebhookUrlRejected):
+        validate_webhook_url("http://localhost:99999/hook", allow_loopback=True)

@@ -95,6 +95,33 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
     attempt (the delivery log still records what was attempted). A durable queue is different
     infrastructure; pretending to have one would be worse than saying so. There is also **no
     manual redelivery endpoint** yet.
+  - **A streamed run holds its connection open until delivery finishes.** The four non-streaming
+    emission points use FastAPI background tasks, which genuinely run after the response. The two
+    streaming ones cannot — the response *is* the stream — so emission happens after the terminal
+    SSE frame but before the response completes, exactly as trace export already did. The client
+    has the full answer at that point; the socket simply stays open. The window is bounded by
+    `WEBHOOK_MAX_ATTEMPTS × WEBHOOK_TIMEOUT_SECONDS` plus backoff, per subscription.
+  - **Delivery shares the application's worker threads.** Emission is synchronous and runs on the
+    same bounded threadpool that serves every other blocking call. Two bounds keep that from
+    becoming a self-inflicted outage — at most **20 subscriptions per organization**
+    (`409 webhook_limit_reached` past it) and enforced ranges on the three delivery settings — but
+    a dedicated executor for outbound delivery would be the proper fix and does not exist yet.
+  - **The per-attempt timeout is not a wall-clock deadline.** `WEBHOOK_TIMEOUT_SECONDS` bounds
+    each individual connect/write/read operation, so an endpoint that drips one byte per interval
+    can stretch a single attempt past the nominal figure. The transport reads only the response
+    head (never the body), which removes the unbounded part; the residual needs a watchdog.
+  - **No retention on the delivery log.** One row per (event, subscription), forever, with no
+    pruning, partitioning, or delete method on the seam — rows leave only with their subscription
+    or their organization. A busy org with several subscriptions writes a row per run per
+    subscription, and a permanently broken endpoint accumulates `failed` rows that nothing bounds
+    and nothing alerts on. Retention and automatic disabling after sustained failure are both on
+    the roadmap.
+  - **Deleting a subscription mid-delivery can lose that delivery's log row.** The row is written
+    after the attempt sequence, and `webhook_deliveries.subscription_id` references a row that can
+    disappear in the meantime; the emitter swallows the resulting constraint violation. The lost
+    row belonged to a subscription whose log was being deleted anyway, so the outcome matches the
+    intent — except that `POST /webhooks/{id}/test` can then return a `delivery_id` the log will
+    not show.
   - **At-least-once, unordered.** A retry after an endpoint accepted-but-timed-out delivers the
     same event twice, which is why every delivery carries a unique `X-AgentForge-Delivery` to
     deduplicate on. Two events emitted close together may arrive in either order.
@@ -106,6 +133,15 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
     event would fire on every request that observed it; a state-based notification needs
     threshold tracking, which is a feature rather than a new enum member. Budget notifications
     therefore remain open (see `FUTURE_ROADMAP.md`).
+  - **`guardrail.blocked` covers three of the five model-invoking surfaces.** `/query`,
+    `/agent/run` and `POST /multi-agent/runs` run the input guardrail pipeline and report a
+    refusal; `/agent/stream` and `/multi-agent/runs/{id}/stream` run **no input guardrail at
+    all** — a pre-existing gap this feature exposes rather than creates — so there is no refusal
+    to report. A security team subscribing to `guardrail.blocked` should know the streaming
+    surfaces are unguarded rather than clean. The `reason` a subscriber receives is the
+    guardrail's own explanation, which for the default blocklist names the matched term, so the
+    org's configured blocklist is disclosed to an endpoint outside the trust boundary (the same
+    string already appears in the 400 body).
   - **A run that raises emits nothing.** `run.failed` covers a run that reached a
     non-successful *terminal state* (an iteration or round limit, a rejected or aborted plan).
     A run whose orchestration threw returns a 5xx to the caller and has no completed run to

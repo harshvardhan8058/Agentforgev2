@@ -4,10 +4,16 @@ Every outbound limit lives here, in one place, so a reviewer can see all of them
 
 * **Redirects disabled.** A 302 would otherwise walk a validated request to an unvalidated
   address, defeating the whole URL admission policy.
-* **A bounded timeout** per attempt, supplied by the emitter.
+* **A bounded timeout** per attempt, supplied by the emitter. Note precisely what httpx's
+  timeout is: a bound on each individual connect/write/read operation, **not** a deadline on
+  the whole attempt. An endpoint that drips one byte per interval can therefore stretch an
+  attempt beyond the nominal figure. Reading only the response head (below) removes the
+  unbounded part of that; the residual is documented in ``docs/KNOWN_LIMITATIONS.md``.
 * **The response body is never read.** Only the status matters for delivery, and a tenant's
-  endpoint may return material this platform has no business storing or logging. Nothing here
-  can leak a body into the delivery log because nothing here ever holds one.
+  endpoint may return material this platform has no business storing or logging. This is
+  enforced with ``client.stream(...)``, exited without touching the body — ``client.post``
+  would buffer the entire response first, so an endpoint returning a multi-gigabyte body would
+  cost this process that memory even though nothing ever looked at it.
 * **Re-validation before connecting.** DNS is mutable, so the stored URL is re-checked on every
   attempt rather than trusted (see ``webhooks/security.py``).
 * **No exception escapes.** A transport failure is a :class:`Transport_Result`, not an error —
@@ -61,11 +67,16 @@ class Httpx_Webhook_Transport(Webhook_Transport):
             with httpx.Client(
                 follow_redirects=False, timeout=timeout_seconds, trust_env=False
             ) as client:
-                response = client.post(url, content=body, headers=headers)
-            return Transport_Result(status=response.status_code)
+                # `stream` rather than `post`: the response head is all this needs, and the body
+                # is closed unread on exit. `post` would buffer the whole thing first.
+                with client.stream("POST", url, content=body, headers=headers) as response:
+                    return Transport_Result(status=response.status_code)
         except Exception as exc:  # noqa: BLE001 - transport failure is a result, not an error
-            # The exception TYPE plus a bounded message: enough for an operator to tell a
-            # timeout from a TLS failure, without storing a tenant's response body.
+            # Deliberately `Exception`, not httpx's own hierarchy: URL re-validation and the
+            # client itself can both raise types outside it (a malformed port is a ValueError),
+            # and this seam's contract is that a failure is a *result*. The exception TYPE plus
+            # a bounded message is enough for an operator to tell a timeout from a TLS failure,
+            # without storing anything the tenant's endpoint sent back.
             return Transport_Result(
                 status=None, error=_short(f"{type(exc).__name__}: {exc}")
             )

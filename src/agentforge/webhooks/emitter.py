@@ -150,7 +150,11 @@ class Webhook_Emitter:
             )
             return None
 
-        started = time.monotonic()
+        # Only time spent talking to the endpoint counts, not the backoff between attempts:
+        # the field is what an operator reads to judge how slow a consumer is, and folding this
+        # platform's own waiting into it would report a fast endpoint that 500s three times as
+        # having taken 13 seconds.
+        spent_ms = 0
         result = None
         attempts = 0
         for attempt in range(1, budget + 1):
@@ -164,6 +168,7 @@ class Webhook_Emitter:
                 SUBSCRIPTION_HEADER: str(subscription.id),
                 SIGNATURE_HEADER: sign_payload(subscription.secret, body, timestamp),
             }
+            attempt_started = time.monotonic()
             try:
                 result = self._transport.post(
                     subscription.url,
@@ -179,6 +184,7 @@ class Webhook_Emitter:
                     exc,
                     exc_info=True,
                 )
+            spent_ms += int((time.monotonic() - attempt_started) * 1000)
             if result is not None and result.ok:
                 break
             if attempt < budget:
@@ -186,7 +192,7 @@ class Webhook_Emitter:
                 # restart on the consumer's side, short enough not to occupy a worker.
                 self._sleep(self._backoff_seconds * (2 ** (attempt - 1)))
 
-        duration_ms = int((time.monotonic() - started) * 1000)
+        duration_ms = spent_ms
         delivered = result is not None and result.ok
         delivery = Webhook_Delivery(
             id=delivery_id,

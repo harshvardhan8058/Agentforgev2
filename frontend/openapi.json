@@ -5216,7 +5216,7 @@
         ]
       },
       "post": {
-        "description": "Register an endpoint and return its signing secret **once**.\n\nThe secret is generated here and appears in this response only; no other endpoint returns\nit. Deliveries start immediately \u2014 a new subscription is active.",
+        "description": "Register an endpoint and return its signing secret **once**.\n\nThe secret is generated here and appears in this response only; no other endpoint returns\nit. Deliveries start immediately \u2014 a new subscription is active.\n\nRefuses with ``409 webhook_limit_reached`` past ``MAX_WEBHOOKS_PER_ORG``, because every\nemitted event fans out to every active subscription.",
         "operationId": "create_webhook_webhooks_post",
         "requestBody": {
           "content": {

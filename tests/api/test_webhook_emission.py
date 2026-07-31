@@ -135,8 +135,11 @@ def wired() -> Wired:
         conversation_store=InMemory_Conversation_Store(),
         trace_recorder=InMemory_Trace_Recorder(),
     )
-    subscriptions = InMemory_Webhook_Subscription_Store()
     deliveries = InMemory_Webhook_Delivery_Store()
+    # Paired, so deleting a subscription sweeps its delivery log exactly as migration 0015's
+    # ON DELETE CASCADE does. An unpaired fake would let a test assert the documented behaviour
+    # and pass while the real store did something else.
+    subscriptions = InMemory_Webhook_Subscription_Store(deliveries)
     transport = Recording_Webhook_Transport()
     app = create_app(settings)
     app.state.settings = settings
@@ -433,3 +436,59 @@ def test_a_delivery_id_is_unique_per_delivery(wired: Wired):
     ids = {d.id for d in wired.delivered(first)} | {d.id for d in wired.delivered(second)}
     assert len(ids) == 2
     assert {uuid.UUID(b["id"]) for b in wired.bodies()} == ids
+
+
+
+# --- one event name, one payload shape --------------------------------------------
+#
+# `webhooks/events.py` exists so routers cannot classify the same outcome differently. That has
+# to cover the payload as well as the event name: a key omitted when its value is unknown would
+# make one event carry different shapes depending on which router produced it, and would force a
+# consumer to distinguish "no citations" from "not reported".
+
+RUN_PAYLOAD_KEYS = {
+    "run_id",
+    "kind",
+    "termination_reason",
+    "conversation_id",
+    "citation_count",
+}
+
+
+def test_the_run_payload_has_the_same_keys_from_every_emission_point(wired: Wired):
+    wired.subscribe("run.completed")
+
+    wired.client.post("/agent/run", json={"message": "hello"}, headers=wired.headers)
+    wired.client.post(
+        "/multi-agent/runs", json={"task": "summarise"}, headers=wired.headers
+    )
+    with wired.client.stream(
+        "POST", "/agent/stream", json={"message": "hello"}, headers=wired.headers
+    ) as response:
+        "".join(response.iter_text())
+
+    bodies = wired.bodies()
+    assert len(bodies) == 3
+    for body in bodies:
+        assert set(body["data"]) == RUN_PAYLOAD_KEYS, body["data"]
+
+
+def test_an_unknown_citation_count_is_an_explicit_null_not_a_missing_key(wired: Wired):
+    from agentforge.webhooks.events import RUN_KIND_MULTI, emit_run_outcome
+
+    subscription = wired.subscribe("run.completed")
+    emitter = wired.client.app.state.observability_context.webhook_emitter
+
+    emit_run_outcome(
+        emitter,
+        wired.org_id,
+        run_id="r1",
+        kind=RUN_KIND_MULTI,
+        termination_reason="completed",
+    )
+
+    assert wired.events_seen(subscription) == ["run.completed"]
+    (body,) = wired.bodies()
+    assert set(body["data"]) == RUN_PAYLOAD_KEYS
+    assert body["data"]["citation_count"] is None
+    assert body["data"]["conversation_id"] is None

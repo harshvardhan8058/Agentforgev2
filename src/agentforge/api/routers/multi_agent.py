@@ -383,7 +383,9 @@ async def submit_approval(
         edited_content=payload.edited_content,
     )
 
-    def _submit() -> ApprovalDecisionResponse:
+    # Returned alongside the response for the same reason as in `_start`: how well-grounded the
+    # terminal output was is a webhook payload field, not a response field.
+    def _submit() -> tuple[ApprovalDecisionResponse, int | None]:
         # Publish the acting tenant so the gate's trace writes are org-scoped (Req 4.6).
         set_current_org(org_id)
         try:
@@ -410,21 +412,29 @@ async def submit_approval(
                 resumed_state.final_output,
                 resumed_state.termination_reason,
             )
-            return ApprovalDecisionResponse(
-                run_id=run_id,
-                status="terminated",
-                termination_reason=resumed_state.termination_reason.value,
+            return (
+                ApprovalDecisionResponse(
+                    run_id=run_id,
+                    status="terminated",
+                    termination_reason=resumed_state.termination_reason.value,
+                ),
+                len(resumed_state.final_output.citations)
+                if resumed_state.final_output
+                else 0,
             )
 
         # Otherwise the run has resumed and is running (or awaiting a next checkpoint).
         current = ctx.run_store.get(org_id, run_id) or run
-        return ApprovalDecisionResponse(
-            run_id=run_id,
-            status=_run_status_name(current),
-            termination_reason=_termination_reason_name(current),
+        return (
+            ApprovalDecisionResponse(
+                run_id=run_id,
+                status=_run_status_name(current),
+                termination_reason=_termination_reason_name(current),
+            ),
+            len(current.final_output.citations) if current.final_output else 0,
         )
 
-    response = await run_in_threadpool(_submit)
+    response, citation_count = await run_in_threadpool(_submit)
     if response.status == "terminated":
         background.add_task(
             trace_export.export_run,
@@ -432,18 +442,22 @@ async def submit_approval(
             org_id=org_id,
             user_id=principal.user_id,
         )
-        # The decision that ended the run is the moment it completed or failed, so this is
-        # where the outcome is reported — a run resumed past its revision bound and rejected
-        # never reaches the start endpoint's emission.
-        background.add_task(
-            emit_run_outcome,
-            emitter,
-            org_id,
-            run_id=run_id,
-            kind=RUN_KIND_MULTI,
-            termination_reason=response.termination_reason or "unknown",
-            conversation_id=run.conversation_id,
-        )
+        if response.termination_reason is not None:
+            # The decision that ended the run is the moment it completed or failed, so this is
+            # where the outcome is reported — a run resumed past its revision bound and
+            # rejected never reaches the start endpoint's emission. A terminated run with no
+            # recorded reason cannot be classified as completed or failed, so it is reported as
+            # neither rather than guessed at.
+            background.add_task(
+                emit_run_outcome,
+                emitter,
+                org_id,
+                run_id=run_id,
+                kind=RUN_KIND_MULTI,
+                termination_reason=response.termination_reason,
+                conversation_id=run.conversation_id,
+                citation_count=citation_count,
+            )
     return response
 
 

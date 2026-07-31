@@ -96,3 +96,75 @@ def test_embedding_dimension_exposed(monkeypatch):
     settings = load_settings()
     assert isinstance(settings.embedding_dimension, int)
     assert settings.embedding_dimension == 384
+
+
+
+# --- outbound webhook delivery bounds ---------------------------------------------
+#
+# These three settings ARE the mechanism that keeps a pathological consumer cheap: a delivery
+# occupies a worker thread for up to attempts x timeout. Left unvalidated,
+# WEBHOOK_MAX_ATTEMPTS=1000 with WEBHOOK_TIMEOUT_SECONDS=600 was accepted, and one event could
+# then occupy that worker for days. The upper bounds are the point.
+
+
+def _webhook_settings(**overrides):
+    from agentforge.config.settings import Settings
+
+    base = {
+        "profile": "local",
+        "database_url": "postgresql+asyncpg://u:p@localhost:5432/agentforge",
+        "redis_url": "redis://localhost:6379/0",
+    }
+    return Settings(**{**base, **overrides})
+
+
+def test_the_webhook_delivery_bounds_have_sane_defaults():
+    settings = _webhook_settings()
+
+    assert settings.webhook_max_attempts == 3
+    assert settings.webhook_timeout_seconds == 4.0
+    assert settings.webhook_backoff_seconds == 0.5
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"webhook_max_attempts": 0},
+        {"webhook_max_attempts": 1000},
+        {"webhook_timeout_seconds": 0.0},
+        {"webhook_timeout_seconds": 600.0},
+        {"webhook_backoff_seconds": -1.0},
+        {"webhook_backoff_seconds": 3600.0},
+    ],
+)
+def test_an_unbounded_webhook_setting_is_refused(overrides):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _webhook_settings(**overrides)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"webhook_max_attempts": 1},
+        {"webhook_max_attempts": 10},
+        {"webhook_timeout_seconds": 30.0},
+        {"webhook_backoff_seconds": 0.0},
+    ],
+)
+def test_the_edges_of_the_allowed_ranges_are_accepted(overrides):
+    """A single attempt and a zero backoff are legitimate operator choices, not mistakes."""
+    settings = _webhook_settings(**overrides)
+
+    for field, value in overrides.items():
+        assert getattr(settings, field) == value
+
+
+def test_loopback_webhook_targets_are_allowed_outside_production_only():
+    """So a subscription can be developed against a local listener, and never in production."""
+    assert _webhook_settings().allow_loopback_webhooks() is True
+    production = _webhook_settings(
+        profile="production", jwt_secret="x" * 40, use_database=True
+    )
+    assert production.allow_loopback_webhooks() is False

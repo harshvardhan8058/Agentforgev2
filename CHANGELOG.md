@@ -180,6 +180,57 @@ the existing tables.
 
 ### Fixed
 
+- **A malformed webhook URL returned 500 instead of 400.** `urlsplit().port` raises a bare
+  `ValueError` for `:99999` or `:abc`, and `getaddrinfo` raises `UnicodeError` for a DNS label
+  over 63 characters — both reachable with a one-line request body, both landing in the
+  unhandled-exception handler because the router catches only `WebhookUrlRejected`. Admission now
+  raises that and nothing else, which also restores the delivery transport's documented
+  "MUST NOT raise" contract.
+- **`https://host:80` was admitted** while the refusal message claimed to check "the default port
+  for its scheme": the allowed ports were pooled rather than paired with a scheme.
+- **The webhook transport buffered the whole untrusted response body** despite documenting that it
+  never reads one — `httpx.Client.post` is the non-streaming API. It now uses `client.stream` and
+  closes without touching the body, so an endpoint returning a multi-gigabyte response cannot
+  cost this process that memory.
+- **Nothing capped webhook subscriptions per organization.** Every emitted event fans out to all
+  of them, serially, each with its own retry budget, so any principal holding `run_agents` could
+  make their own runs pay for an unbounded amount of outbound HTTP. Capped at 20 with
+  `409 webhook_limit_reached`, and the three `WEBHOOK_*` delivery bounds — presented in the
+  documentation as the mechanism that keeps a pathological consumer cheap — now have enforced
+  ranges instead of accepting `WEBHOOK_MAX_ATTEMPTS=1000` with a 600-second timeout.
+- **A failed audit write could orphan a webhook whose secret nobody held.** Under
+  `AUDIT_LOG_REQUIRED=true` the registration raised *after* the subscription existed and was
+  signing, so the caller got a 503 and never saw the secret — which no endpoint returns twice and
+  no endpoint can rotate. The subscription is now deleted again before the error propagates.
+- **The audit trail recorded the full webhook URL**, query string included. `admit_metadata`
+  screens credential-shaped *key names*, and a webhook URL is frequently itself a bearer
+  credential (`?token=…`, a Slack `services/T…/B…/…` endpoint), so the whole value was landing in
+  the table read by every auditor an organization invites. Only scheme, host and path are recorded
+  now — which is what answers "who pointed a webhook where" anyway.
+- **`run.completed` carried a different shape depending on which router emitted it.** The
+  approval path omitted `citation_count` and any unknown value was dropped rather than sent as
+  `null`, in a module whose stated purpose is that routers cannot classify the same outcome
+  differently. Every key is now always present.
+- **`duration_ms` included AgentForge's own retry backoff** and was rendered under a column headed
+  "Took", so a fast endpoint that returned `500` three times reported ~13 seconds. It now sums
+  only the time spent talking to the endpoint.
+- **`PATCH /webhooks/{id}` accepted `{"description": null}` as a no-op**: it cleared the
+  "supply at least one field" guard, changed nothing (both stores read `None` as "leave alone"),
+  returned the old value, and wrote an audit row claiming the field had changed. Refused now, with
+  the empty string offered as the way to clear it. The empty-body refusal also carries a `details`
+  payload, like every other `validation_error` in this API.
+- **The in-memory webhook stores did not mirror migration 0015's cascade**, so deleting a
+  subscription left its delivery log behind in the keyless lane while Postgres removed it — a fake
+  disagreeing with the thing it stands for, and a test could have asserted the documented
+  behaviour and passed for the wrong reason. The composition root now wires the pair together.
+- **An index nothing read** (`webhook_deliveries_org_time_idx`) was created on the
+  fastest-growing table in the schema; every query filters on `org_id` alongside
+  `subscription_id`, which the remaining index already serves.
+- **The delivery log could not be paged or refreshed in the console** — it fetched 25 rows once
+  and pointed the operator at the API's `before`/`before_id` cursor, shipping the server's
+  pagination as a dead end on the one screen that needs it. Now paged with that cursor, with a
+  refresh control, and the one-time secret card can be dismissed rather than lingering until
+  navigation.
 - **Cross-tenant write through team membership (security).**
   `POST /orgs/{id}/teams/{tid}/members` resolved the team only through the store's
   "is the user a member of the team's org?" guard, which a user holding memberships in

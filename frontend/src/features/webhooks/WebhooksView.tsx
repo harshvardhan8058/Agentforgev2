@@ -32,7 +32,13 @@
  */
 import type { JSX } from "react";
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import {
   Check,
   ChevronDown,
@@ -40,9 +46,11 @@ import {
   Pause,
   Play,
   Plus,
+  RefreshCw,
   Send,
   Trash2,
   Webhook,
+  X,
 } from "lucide-react";
 
 import { apiClient } from "../../api/client";
@@ -77,6 +85,12 @@ type WebhookSubscription = components["schemas"]["WebhookSubscriptionResponse"];
 type CreateWebhookResponse = components["schemas"]["CreateWebhookResponse"];
 type WebhookDelivery = components["schemas"]["WebhookDeliveryResponse"];
 
+/** The server's `(created_at, delivery_id)` keyset cursor, sent as `before` / `before_id`. */
+interface DeliveryCursor {
+  before: string;
+  before_id: string;
+}
+
 /**
  * Every subscribable event, with the plain-language description of when it fires.
  *
@@ -93,12 +107,8 @@ const EVENT_DESCRIPTIONS: Record<SubscribableEvent, string> = {
 
 const ALL_EVENTS = Object.keys(EVENT_DESCRIPTIONS) as SubscribableEvent[];
 
-/** How many delivery rows a log panel requests. The server caps `limit` at 200. */
+/** How many delivery rows a log panel requests per page. The server caps `limit` at 200. */
 const DELIVERY_PAGE_SIZE = 25;
-
-function eventLabel(event: string): string {
-  return event;
-}
 
 /** One-shot copy control for the signing secret, mirroring the API-key surface. */
 function CopySecret({ secret }: { secret: string }): JSX.Element {
@@ -135,7 +145,16 @@ function CopySecret({ secret }: { secret: string }): JSX.Element {
   );
 }
 
-/** The delivery log for one endpoint. Mounted only when expanded, so it costs nothing closed. */
+/**
+ * The delivery log for one endpoint. Mounted only when expanded, so it costs nothing closed.
+ *
+ * Paginated with the server's own `(created_at, delivery_id)` keyset cursor via
+ * `useInfiniteQuery`, because the alternative — telling the operator that older history "is
+ * reachable through the API's cursor" — ships the server's pagination as a documented dead end
+ * on the one screen that needs it. Deliveries are append-only and read newest-first, which is
+ * exactly the shape a keyset cursor is correct for: a row inserted mid-read cannot shift a page
+ * boundary the way an offset would.
+ */
 function DeliveryLog({
   orgId,
   webhookId,
@@ -143,23 +162,59 @@ function DeliveryLog({
   orgId: string | null;
   webhookId: string;
 }): JSX.Element {
-  const deliveries = useQuery<WebhookDelivery[], ClientError>({
+  const deliveries = useInfiniteQuery<
+    WebhookDelivery[],
+    ClientError,
+    InfiniteData<WebhookDelivery[]>,
+    readonly unknown[],
+    DeliveryCursor | null
+  >({
     queryKey: orgScopedKey(orgId, "webhook-deliveries", webhookId),
-    queryFn: () =>
+    initialPageParam: null,
+    queryFn: ({ pageParam }) =>
       runRequest<WebhookDelivery[]>(() =>
         apiClient.GET("/webhooks/{webhook_id}/deliveries", {
           params: {
             path: { webhook_id: webhookId },
-            query: { limit: DELIVERY_PAGE_SIZE },
+            query: {
+              limit: DELIVERY_PAGE_SIZE,
+              // Both or neither: the server refuses a half-supplied cursor with a 422, because
+              // a timestamp alone cannot separate deliveries fanned out in one burst.
+              ...(pageParam
+                ? { before: pageParam.before, before_id: pageParam.before_id }
+                : {}),
+            },
           },
         }),
       ),
+    getNextPageParam: (lastPage) => {
+      // A short page is the last page; a full one may or may not be, and asking is cheaper than
+      // guessing. The cursor is the last row of the page just read.
+      if (lastPage.length < DELIVERY_PAGE_SIZE) return null;
+      const last = lastPage[lastPage.length - 1];
+      return { before: last.created_at, before_id: last.delivery_id };
+    },
   });
 
-  const rows = deliveries.data ?? [];
+  const rows = deliveries.data?.pages.flat() ?? [];
 
   return (
     <div className="flex flex-col gap-3" data-testid={`webhook-deliveries-${webhookId}`}>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-text">Recent deliveries</h3>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          data-testid={`refresh-deliveries-${webhookId}`}
+          loading={deliveries.isFetching && !deliveries.isFetchingNextPage}
+          onClick={() => void deliveries.refetch()}
+        >
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          Refresh
+        </Button>
+      </div>
+
       <p className="sr-only" aria-live="polite">
         {deliveries.isFetching
           ? "Loading deliveries"
@@ -261,11 +316,19 @@ function DeliveryLog({
         </div>
       )}
 
-      {rows.length === DELIVERY_PAGE_SIZE && (
-        <p className="text-xs text-text-subtle">
-          Showing the most recent {DELIVERY_PAGE_SIZE} deliveries. Older history is reachable
-          through the API&apos;s <code>before</code> / <code>before_id</code> cursor.
-        </p>
+      {deliveries.hasNextPage && (
+        <div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            data-testid={`load-older-deliveries-${webhookId}`}
+            loading={deliveries.isFetchingNextPage}
+            onClick={() => void deliveries.fetchNextPage()}
+          >
+            Load older deliveries
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -477,7 +540,7 @@ export function WebhooksView(): JSX.Element {
                           htmlFor={`webhook-event-${event}`}
                           className="cursor-pointer font-mono text-xs text-text"
                         >
-                          {eventLabel(event)}
+                          {event}
                         </label>
                         <span
                           id={`webhook-event-${event}-hint`}
@@ -513,8 +576,20 @@ export function WebhooksView(): JSX.Element {
 
           {createdSecret && (
             <Card raised data-testid="created-webhook-secret">
-              <CardHeader>
+              <CardHeader className="flex flex-row items-start justify-between gap-3">
                 <CardTitle>Copy your signing secret</CardTitle>
+                {/* Dismissable: the secret is unrecoverable, so it stays until the operator
+                    says they have it, rather than until they happen to navigate away. */}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  data-testid="dismiss-webhook-secret"
+                  onClick={() => setCreatedSecret(null)}
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                  I have stored it
+                </Button>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
                 <p className="text-sm text-text-muted">

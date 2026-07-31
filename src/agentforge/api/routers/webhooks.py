@@ -28,6 +28,7 @@ question the audit trail was built to answer for members, keys and budgets.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -67,6 +68,14 @@ router = APIRouter(tags=["webhooks"])
 
 # Bounded like every other listing endpoint: a delivery log grows without limit.
 _MAX_DELIVERY_LIMIT = 200
+
+# A hard ceiling on subscriptions per organization, because it is not a display bound — every
+# emitted event fans out to all of them, serially, each with its own retry budget and timeout.
+# Without a cap the *listing* endpoint being unpaginated would be the smaller problem: any
+# principal holding `run_agents` could make each of their own runs pay for an arbitrary amount
+# of outbound HTTP. Twenty is well beyond what a team actually wires up and keeps the worst-case
+# fan-out for one event bounded by a number an operator can reason about.
+MAX_WEBHOOKS_PER_ORG = 20
 
 # A test send is synchronous — the caller is waiting for the outcome — so it gets one attempt.
 # Retrying would only delay the answer and hide the failure they asked to see.
@@ -140,6 +149,21 @@ def _ensure_aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+def _auditable_url(url: str) -> str:
+    """Return the part of ``url`` that is safe to persist on an audit row.
+
+    Scheme, host, port and path only — the query string and any fragment are dropped, because a
+    webhook URL is very often itself a bearer credential (``?token=…``, a Slack
+    ``services/T…/B…/…`` endpoint). The audit trail's metadata policy screens credential-shaped
+    *key names*; nothing screens the value under an innocent key like ``url``, and audit rows are
+    readable by every auditor an organization invites. The host and path are what answer "who
+    pointed a webhook where", which is the reason to record anything at all.
+    """
+    parts = urlsplit(url)
+    host = parts.netloc.rsplit("@", 1)[-1]  # userinfo is already refused at admission
+    return f"{parts.scheme}://{host}{parts.path}"
+
+
 @router.get("/webhooks", response_model=list[WebhookSubscriptionResponse])
 async def list_webhooks(
     store: Webhook_Subscription_Store = Depends(get_webhook_subscription_store),
@@ -170,7 +194,20 @@ async def create_webhook(
 
     The secret is generated here and appears in this response only; no other endpoint returns
     it. Deliveries start immediately — a new subscription is active.
+
+    Refuses with ``409 webhook_limit_reached`` past ``MAX_WEBHOOKS_PER_ORG``, because every
+    emitted event fans out to every active subscription.
     """
+    existing = await run_in_threadpool(store.list_for_org, principal.org_id)
+    if len(existing) >= MAX_WEBHOOKS_PER_ORG:
+        raise AppError(
+            "webhook_limit_reached",
+            f"This organization already has the maximum of {MAX_WEBHOOKS_PER_ORG} webhooks. "
+            "Delete one before registering another.",
+            status.HTTP_409_CONFLICT,
+            {"limit": MAX_WEBHOOKS_PER_ORG},
+        )
+
     url = await _admitted_url(payload.url, settings)
     events = tuple(event.value for event in payload.events)
     subscription = await run_in_threadpool(
@@ -182,16 +219,30 @@ async def create_webhook(
             description=payload.description,
         )
     )
-    await run_in_threadpool(
-        audit.record,
-        principal,
-        Audit_Action.WEBHOOK_CREATED,
-        target_type="webhook",
-        target_id=str(subscription.id),
-        # The URL is recorded because "who pointed a webhook where" is the question. The secret
-        # is not, and could not be: `admit_metadata` refuses credential-named keys outright.
-        metadata={"url": url, "events": ", ".join(events)},
-    )
+    try:
+        await run_in_threadpool(
+            audit.record,
+            principal,
+            Audit_Action.WEBHOOK_CREATED,
+            target_type="webhook",
+            target_id=str(subscription.id),
+            # The URL's host and path are recorded because "who pointed a webhook where" is the
+            # question. The query string is stripped: `admit_metadata` screens credential-shaped
+            # key *names*, and a webhook URL frequently *is* the credential (`?token=…`, a Slack
+            # `services/T…/B…/…` path), so the whole value must not land in the table the audit
+            # module itself describes as the most widely read one. The secret is never recorded.
+            metadata={"url": _auditable_url(url), "events": ", ".join(events)},
+        )
+    except Exception:
+        # The subscription exists and is signing with a secret this response was about to
+        # disclose for the only time. If the audit write fails under `audit_log_required`, the
+        # caller gets an error and would never see that secret again — and there is no rotation
+        # endpoint — so the half-done work is undone before the failure propagates. This is a
+        # genuine compensating action, unlike the audit trail's general posture, because the
+        # thing to undo is a single row this request created moments ago.
+        await run_in_threadpool(store.delete, principal.org_id, subscription.id)
+        raise
+
     base = _to_response(subscription)
     return CreateWebhookResponse(**base.model_dump(), secret=subscription.secret)
 
@@ -212,6 +263,20 @@ async def update_webhook(
             "validation_error",
             "Supply at least one field to change.",
             status.HTTP_422_UNPROCESSABLE_ENTITY,
+            # Every other `validation_error` in this API carries either `field` or `errors`, so a
+            # client parsing the envelope generically has something to point at.
+            {"fields": sorted(UpdateWebhookRequest.model_fields)},
+        )
+    if "description" in changed and changed["description"] is None:
+        # `null` reads as "clear it", and the stores cannot express that: both treat `None` as
+        # "leave alone" (the Postgres path through COALESCE, which could not express clearing
+        # anyway). Accepting it would return the old value, change nothing, and audit a change
+        # that did not happen. Refused with the alternative that does work.
+        raise AppError(
+            "validation_error",
+            "`description` cannot be set to null. Send an empty string to clear it.",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"field": "description"},
         )
     # Existence is checked before the URL is admitted, so a caller cannot use a 400-vs-404
     # difference to learn whether another tenant's webhook id exists.
@@ -248,7 +313,7 @@ async def update_webhook(
         # when both were sent in one request.
         metadata={
             "fields": ", ".join(sorted(changed)),
-            "url": updated.url,
+            "url": _auditable_url(updated.url),
             "active": updated.active,
         },
     )
@@ -277,7 +342,7 @@ async def delete_webhook(
         Audit_Action.WEBHOOK_DELETED,
         target_type="webhook",
         target_id=str(webhook_id),
-        metadata={"url": existing.url},
+        metadata={"url": _auditable_url(existing.url)},
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

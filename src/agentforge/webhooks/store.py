@@ -27,10 +27,17 @@ def _utcnow() -> datetime:
 
 
 class InMemory_Webhook_Subscription_Store(Webhook_Subscription_Store):
-    """Keyless/test subscription store keyed by ``(org_id, subscription_id)``."""
+    """Keyless/test subscription store keyed by ``(org_id, subscription_id)``.
 
-    def __init__(self) -> None:
+    ``deliveries`` may be attached so that deleting a subscription also sweeps its delivery log,
+    mirroring the ``ON DELETE CASCADE`` in migration 0015. Without it the keyless store would
+    keep rows the Postgres store removes, and a test asserting the documented behaviour would
+    pass against the fake and fail against the real thing.
+    """
+
+    def __init__(self, deliveries: "InMemory_Webhook_Delivery_Store | None" = None) -> None:
         self._by_key: dict[tuple[UUID, UUID], Webhook_Subscription] = {}
+        self._deliveries = deliveries
 
     def create(
         self,
@@ -96,7 +103,10 @@ class InMemory_Webhook_Subscription_Store(Webhook_Subscription_Store):
         return updated
 
     def delete(self, org_id: UUID, subscription_id: UUID) -> bool:
-        return self._by_key.pop((org_id, subscription_id), None) is not None
+        removed = self._by_key.pop((org_id, subscription_id), None) is not None
+        if removed and self._deliveries is not None:
+            self._deliveries.forget_subscription(org_id, subscription_id)
+        return removed
 
 
 class InMemory_Webhook_Delivery_Store(Webhook_Delivery_Store):
@@ -129,6 +139,19 @@ class InMemory_Webhook_Delivery_Store(Webhook_Delivery_Store):
         ]
         selected.sort(key=lambda d: (d.created_at, str(d.id)), reverse=True)
         return selected[:limit]
+
+    def forget_subscription(self, org_id: UUID, subscription_id: UUID) -> None:
+        """Drop a deleted subscription's deliveries, standing in for the SQL cascade.
+
+        Not part of :class:`Webhook_Delivery_Store`: the log is append-only through the seam, and
+        the Postgres implementation does not need a method for this because the foreign key does
+        it. This exists only so the in-memory pair behaves the same way.
+        """
+        self._deliveries = [
+            d
+            for d in self._deliveries
+            if not (d.org_id == org_id and d.subscription_id == subscription_id)
+        ]
 
 
 class Pg_Webhook_Subscription_Store(Webhook_Subscription_Store):
@@ -388,9 +411,10 @@ def _build_disabled_emitter():
     from agentforge.webhooks.emitter import Webhook_Emitter
     from agentforge.webhooks.transport import Recording_Webhook_Transport
 
+    deliveries = InMemory_Webhook_Delivery_Store()
     return Webhook_Emitter(
-        InMemory_Webhook_Subscription_Store(),
-        InMemory_Webhook_Delivery_Store(),
+        InMemory_Webhook_Subscription_Store(deliveries),
+        deliveries,
         # Never reached: there are no subscriptions to deliver to. Present so the seam is
         # satisfied without importing the real HTTP transport into this path.
         Recording_Webhook_Transport(),

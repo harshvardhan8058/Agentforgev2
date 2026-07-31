@@ -484,3 +484,115 @@ describe("WebhooksView (MSW)", () => {
     await waitFor(() => expect(toggle).toHaveAttribute("aria-expanded", "true"));
   });
 });
+
+
+/**
+ * The delivery log's pagination and refresh. The server exposes a `(created_at, delivery_id)`
+ * keyset cursor; the first version of this view told the operator to use it through the API,
+ * which ships the server's pagination as a dead end on the screen that needs it.
+ */
+describe("WebhooksView — delivery log pagination", () => {
+  function pageOf(count: number, prefix: string): Record<string, unknown>[] {
+    return Array.from({ length: count }, (_unused, index) =>
+      delivery({
+        delivery_id: `${prefix}-${index}`,
+        created_at: new Date(Date.UTC(2026, 6, 1, 10, count - index)).toISOString(),
+      }),
+    );
+  }
+
+  it("loads an older page with the server's keyset cursor", async () => {
+    const first = pageOf(25, "p1");
+    server.use(
+      http.get(`${BASE}/webhooks/:id/deliveries`, ({ request }) => {
+        const url = new URL(request.url);
+        requests.push({ method: "GET", url });
+        return HttpResponse.json(url.searchParams.get("before") ? pageOf(3, "p2") : first);
+      }),
+    );
+
+    renderView("owner");
+    await waitFor(() => expect(screen.getByTestId("webhooks-list")).toBeInTheDocument());
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId(`toggle-deliveries-${WEBHOOK_ID}`));
+    await waitFor(() =>
+      expect(screen.getByTestId(`webhook-delivery-table-${WEBHOOK_ID}`)).toBeInTheDocument(),
+    );
+
+    // A full page means there may be more, so the control is offered.
+    await user.click(screen.getByTestId(`load-older-deliveries-${WEBHOOK_ID}`));
+
+    await waitFor(() => expect(screen.getByTestId("webhook-delivery-p2-0")).toBeInTheDocument());
+    // Both pages are on screen, oldest appended.
+    expect(screen.getByTestId("webhook-delivery-p1-0")).toBeInTheDocument();
+    const paged = requests.filter((r) => r.url.searchParams.get("before"));
+    expect(paged).toHaveLength(1);
+    // The cursor is the LAST row of the previous page, and both halves are sent together —
+    // the server refuses a half-supplied cursor with a 422.
+    const last = first[first.length - 1] as { created_at: string; delivery_id: string };
+    expect(paged[0].url.searchParams.get("before")).toBe(last.created_at);
+    expect(paged[0].url.searchParams.get("before_id")).toBe(last.delivery_id);
+    // A short page is the end of the log, so the control goes away.
+    expect(screen.queryByTestId(`load-older-deliveries-${WEBHOOK_ID}`)).toBeNull();
+  });
+
+  it("does not offer to load older deliveries when the first page is short", async () => {
+    server.use(
+      http.get(`${BASE}/webhooks/:id/deliveries`, () => HttpResponse.json(pageOf(2, "only"))),
+    );
+
+    renderView("owner");
+    await waitFor(() => expect(screen.getByTestId("webhooks-list")).toBeInTheDocument());
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId(`toggle-deliveries-${WEBHOOK_ID}`));
+
+    await waitFor(() =>
+      expect(screen.getByTestId(`webhook-delivery-table-${WEBHOOK_ID}`)).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId(`load-older-deliveries-${WEBHOOK_ID}`)).toBeNull();
+  });
+
+  it("refetches the log on demand", async () => {
+    let calls = 0;
+    server.use(
+      http.get(`${BASE}/webhooks/:id/deliveries`, () => {
+        calls += 1;
+        return HttpResponse.json([delivery({ delivery_id: `d${calls}` })]);
+      }),
+    );
+
+    renderView("owner");
+    await waitFor(() => expect(screen.getByTestId("webhooks-list")).toBeInTheDocument());
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId(`toggle-deliveries-${WEBHOOK_ID}`));
+    await waitFor(() => expect(screen.getByTestId("webhook-delivery-d1")).toBeInTheDocument());
+
+    await user.click(screen.getByTestId(`refresh-deliveries-${WEBHOOK_ID}`));
+
+    await waitFor(() => expect(screen.getByTestId("webhook-delivery-d2")).toBeInTheDocument());
+  });
+});
+
+/** The one-time secret: unrecoverable, so its disclosure is dismissed deliberately. */
+describe("WebhooksView — the one-time secret", () => {
+  it("stays on screen until the operator says they have stored it", async () => {
+    server.use(
+      http.post(`${BASE}/webhooks`, () =>
+        HttpResponse.json({ ...webhook(), secret: "whsec_keepme" }, { status: 201 }),
+      ),
+    );
+
+    renderView("owner");
+    await waitFor(() => expect(screen.getByTestId("webhooks-list")).toBeInTheDocument());
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("webhook-url-input"), "https://a.example.com/h");
+    await user.click(screen.getByTestId("create-webhook"));
+    await waitFor(() =>
+      expect(screen.getByTestId("created-webhook-secret")).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByTestId("dismiss-webhook-secret"));
+
+    await waitFor(() => expect(screen.queryByTestId("created-webhook-secret")).toBeNull());
+  });
+});

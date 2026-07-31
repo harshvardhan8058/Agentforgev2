@@ -124,3 +124,70 @@ def test_only_container_names_concrete_observability_impls():
         source = inspect.getsource(module)
         for name in concretes:
             assert name not in source, f"{module.__name__} must not name {name}"
+
+
+
+# --- webhook wiring ---------------------------------------------------------------
+
+
+def test_the_keyless_webhook_stores_are_paired_so_a_delete_cascades():
+    """The in-memory pair must behave like migration 0015's ON DELETE CASCADE.
+
+    The composition root is the only place that can wire them together, so this is where the
+    equivalence is asserted — otherwise a test using the keyless graph could assert the
+    documented "deleting a webhook removes its delivery log" and pass for the wrong reason.
+    """
+    import uuid
+
+    from agentforge.webhooks.base import Webhook_Delivery
+
+    obs = build_observability_context(_settings())
+    org_id = uuid.uuid4()
+    subscription = obs.webhook_subscription_store.create(
+        org_id, url="https://hooks.example.com/h", events=("run.completed",), secret="whsec_x"
+    )
+    obs.webhook_delivery_store.record(
+        Webhook_Delivery(
+            id=uuid.uuid4(),
+            org_id=org_id,
+            subscription_id=subscription.id,
+            event_type="run.completed",
+            status="delivered",
+            attempts=1,
+        )
+    )
+    assert obs.webhook_delivery_store.list_for_subscription(org_id, subscription.id)
+
+    obs.webhook_subscription_store.delete(org_id, subscription.id)
+
+    assert obs.webhook_delivery_store.list_for_subscription(org_id, subscription.id) == []
+
+
+def test_the_emitter_is_built_from_the_configured_delivery_bounds():
+    settings = _settings()
+    obs = build_observability_context(settings)
+
+    emitter = obs.webhook_emitter
+
+    assert emitter._max_attempts == settings.webhook_max_attempts
+    assert emitter._timeout_seconds == settings.webhook_timeout_seconds
+    assert emitter._backoff_seconds == settings.webhook_backoff_seconds
+
+
+def test_only_container_names_concrete_webhook_impls():
+    """Same rule as the observability seams: the transport layer names no concrete."""
+    import agentforge.api.deps as deps_mod
+    import agentforge.api.routers.webhooks as webhooks_mod
+
+    concretes = [
+        "InMemory_Webhook_Subscription_Store",
+        "Pg_Webhook_Subscription_Store",
+        "InMemory_Webhook_Delivery_Store",
+        "Pg_Webhook_Delivery_Store",
+        "Httpx_Webhook_Transport",
+        "Recording_Webhook_Transport",
+    ]
+    for module in (deps_mod, webhooks_mod):
+        source = inspect.getsource(module)
+        for name in concretes:
+            assert name not in source, f"{module.__name__} must not name {name}"

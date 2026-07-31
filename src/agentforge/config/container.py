@@ -1047,15 +1047,23 @@ def build_enterprise_context(
     )
 
 
-def build_webhook_subscription_store(settings: Settings) -> Webhook_Subscription_Store:
+def build_webhook_subscription_store(
+    settings: Settings, deliveries: Webhook_Delivery_Store | None = None
+) -> Webhook_Subscription_Store:
     """Postgres when the domain stores persist, in-memory otherwise.
 
     A subscription that vanished on restart would silently stop delivering, which is worse than
     never having existed, so it follows the same persistence predicate as every other store.
+
+    ``deliveries`` is passed through to the in-memory implementation so that deleting a
+    subscription sweeps its delivery log, which is what the Postgres pair does through
+    ``ON DELETE CASCADE``. Ignored on the Postgres path, where the foreign key already does it.
     """
     if settings.persist_domain_stores():
         return Pg_Webhook_Subscription_Store(settings.database_url)
-    return InMemory_Webhook_Subscription_Store()
+    return InMemory_Webhook_Subscription_Store(
+        deliveries if isinstance(deliveries, InMemory_Webhook_Delivery_Store) else None
+    )
 
 
 def build_webhook_delivery_store(settings: Settings) -> Webhook_Delivery_Store:
@@ -1336,12 +1344,14 @@ def build_observability_context(
         budget_store, analytics_service, cache_seconds=settings.budget_cache_seconds
     )
 
-    webhook_subscriptions: Webhook_Subscription_Store = overrides.get(
-        "webhook_subscription_store"
-    ) or build_webhook_subscription_store(settings)
+    # Deliveries first: the in-memory subscription store needs the log so that deleting a
+    # subscription sweeps it, mirroring migration 0015's cascade.
     webhook_deliveries: Webhook_Delivery_Store = overrides.get(
         "webhook_delivery_store"
     ) or build_webhook_delivery_store(settings)
+    webhook_subscriptions: Webhook_Subscription_Store = overrides.get(
+        "webhook_subscription_store"
+    ) or build_webhook_subscription_store(settings, webhook_deliveries)
     webhook_transport: Webhook_Transport = overrides.get(
         "webhook_transport"
     ) or Httpx_Webhook_Transport(allow_loopback=settings.allow_loopback_webhooks())

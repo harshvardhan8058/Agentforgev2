@@ -92,8 +92,11 @@ def wired() -> Wired:
         conversation_store=InMemory_Conversation_Store(),
         trace_recorder=InMemory_Trace_Recorder(),
     )
-    subscriptions = InMemory_Webhook_Subscription_Store()
     deliveries = InMemory_Webhook_Delivery_Store()
+    # Paired, so deleting a subscription sweeps its delivery log exactly as migration 0015's
+    # ON DELETE CASCADE does. An unpaired fake would let a test assert the documented behaviour
+    # and pass while the real store did something else.
+    subscriptions = InMemory_Webhook_Subscription_Store(deliveries)
     transport = Recording_Webhook_Transport()
     app = create_app(settings)
     app.state.settings = settings
@@ -621,3 +624,160 @@ def test_a_refused_write_is_not_audited(wired: Wired):
     wired.create(url="https://10.0.0.5/hook")
 
     assert wired.audit_actions() == []
+
+
+
+# --- resource bounds --------------------------------------------------------------
+
+
+def test_the_number_of_webhooks_per_org_is_capped(wired: Wired):
+    """Not a display bound: every emitted event fans out to all of them, serially."""
+    from agentforge.api.routers.webhooks import MAX_WEBHOOKS_PER_ORG
+
+    for index in range(MAX_WEBHOOKS_PER_ORG):
+        assert wired.create(url=f"http://localhost:9{index:03d}/hook").status_code == 201
+
+    refused = wired.create(url="http://localhost:9999/hook")
+
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "webhook_limit_reached"
+    assert refused.json()["error"]["details"]["limit"] == MAX_WEBHOOKS_PER_ORG
+    assert len(wired.subscriptions.list_for_org(wired.org_id)) == MAX_WEBHOOKS_PER_ORG
+
+
+def test_the_cap_is_per_organization_not_global(wired: Wired):
+    from agentforge.api.routers.webhooks import MAX_WEBHOOKS_PER_ORG
+
+    for index in range(MAX_WEBHOOKS_PER_ORG):
+        wired.create(url=f"http://localhost:9{index:03d}/hook")
+    other_headers, _other_org = issue_principal_headers(
+        wired.ctx, role=Role.OWNER, org_name="Other Org", email="other@ex.com"
+    )
+
+    response = wired.client.post(
+        "/webhooks", json={"url": LOCAL_URL, "events": ["run.completed"]}, headers=other_headers
+    )
+
+    assert response.status_code == 201
+
+
+def test_a_malformed_url_is_a_400_not_a_500(wired: Wired):
+    """A port over 65535 and an over-long DNS label both used to reach the 500 handler."""
+    for url in (
+        "https://example.com:99999/hook",
+        "https://example.com:abc/hook",
+        "https://" + "a" * 250 + ".com/hook",
+    ):
+        response = wired.create(url=url)
+        assert response.status_code == 400, url
+        assert response.json()["error"]["code"] == "invalid_webhook_url"
+
+
+# --- the one-time secret must never be lost ---------------------------------------
+
+
+def test_a_failed_audit_write_does_not_leave_a_webhook_whose_secret_nobody_holds(wired: Wired):
+    """The compensating delete.
+
+    Under `audit_log_required` an audit failure raises *after* the subscription exists and is
+    already signing. The caller then never sees the secret — this response is the only place it
+    ever appears, and there is no rotation endpoint — so the subscription must not survive.
+    """
+    from agentforge.enterprise.audit import AuditUnavailableError
+
+    def explode(*_args, **_kwargs):
+        raise AuditUnavailableError("webhook.created")
+
+    wired.client.app.state.enterprise_context.audit_service.record = explode
+
+    response = wired.create()
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "audit_unavailable"
+    # Nothing left behind: no orphaned subscription signing with an undisclosed secret.
+    assert wired.subscriptions.list_for_org(wired.org_id) == []
+
+
+# --- PATCH semantics --------------------------------------------------------------
+
+
+def test_clearing_a_description_with_null_is_refused_rather_than_silently_ignored(wired: Wired):
+    """It used to pass the "supply a field" guard, change nothing, and audit a phantom change."""
+    created = wired.create(description="Ops").json()
+
+    response = wired.client.patch(
+        f"/webhooks/{created['webhook_id']}",
+        json={"description": None},
+        headers=wired.headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["details"]["field"] == "description"
+    assert wired.audit_actions() == ["webhook.created"]
+
+
+def test_a_description_can_be_cleared_with_an_empty_string(wired: Wired):
+    created = wired.create(description="Ops").json()
+
+    updated = wired.client.patch(
+        f"/webhooks/{created['webhook_id']}",
+        json={"description": ""},
+        headers=wired.headers,
+    ).json()
+
+    assert updated["description"] == ""
+
+
+def test_the_empty_update_refusal_names_the_fields_a_client_may_send(wired: Wired):
+    """Every other `validation_error` carries `field` or `errors`; this one carried nothing."""
+    created = wired.create().json()
+
+    response = wired.client.patch(
+        f"/webhooks/{created['webhook_id']}", json={}, headers=wired.headers
+    )
+
+    assert response.status_code == 422
+    assert set(response.json()["error"]["details"]["fields"]) == {
+        "url",
+        "events",
+        "description",
+        "active",
+    }
+
+
+# --- what the audit trail records about a URL -------------------------------------
+
+
+def test_the_audited_url_drops_the_query_string(wired: Wired):
+    """A webhook URL is frequently itself a bearer credential (`?token=…`).
+
+    `admit_metadata` screens credential-shaped key *names*, not values, so the whole URL under
+    the key `url` would land in the table the audit module describes as the most widely read one.
+    """
+    wired.create(url="http://localhost:9100/hook?token=super-secret-value&x=1")
+
+    event = wired.ctx.audit_log.list_for_org(wired.org_id, limit=1)[0]
+
+    assert event.metadata["url"] == "http://localhost:9100/hook"
+    assert "super-secret-value" not in str(event.metadata)
+
+
+def test_the_audited_url_keeps_the_host_and_path(wired: Wired):
+    """Which is the whole reason to record anything: "who pointed a webhook where"."""
+    wired.create(url="http://127.0.0.1:9101/deep/path")
+
+    event = wired.ctx.audit_log.list_for_org(wired.org_id, limit=1)[0]
+
+    assert event.metadata["url"] == "http://127.0.0.1:9101/deep/path"
+
+
+def test_deleting_a_webhook_also_removes_its_delivery_log(wired: Wired):
+    """Migration 0015 cascades; the keyless store is wired to behave the same way."""
+    created = wired.create().json()
+    webhook_id = uuid.UUID(created["webhook_id"])
+    wired.client.post(f"/webhooks/{webhook_id}/test", headers=wired.headers)
+    assert wired.deliveries.list_for_subscription(wired.org_id, webhook_id)
+
+    wired.client.delete(f"/webhooks/{webhook_id}", headers=wired.headers)
+
+    assert wired.deliveries.list_for_subscription(wired.org_id, webhook_id) == []
