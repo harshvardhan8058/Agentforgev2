@@ -321,6 +321,54 @@ describe("IntegrationsView (MSW)", () => {
     await waitFor(() => expect(patched).toEqual({ default_channel: "#platform" }));
   });
 
+  it("preserves the type of a value the user did not edit", async () => {
+    // Regression: rendering values with String() and submitting strings rewrote an
+    // untouched `notify: true` as "true" - a silent type change to a record another
+    // system is meant to read, and "false" is truthy to every such reader.
+    let patched: Record<string, unknown> | null = null;
+    server.use(
+      http.get(`${BASE}/integrations/connections`, () =>
+        HttpResponse.json([
+          {
+            connection_id: "c1",
+            integration: "slack",
+            config: { default_channel: "#ops", notify: true, max_results: 5 },
+            created_at: "2026-07-01T00:00:00Z",
+          },
+        ]),
+      ),
+      http.patch(`${BASE}/integrations/connections/c1`, async ({ request }) => {
+        const body = (await request.json()) as { config: Record<string, unknown> };
+        patched = body.config;
+        return HttpResponse.json({
+          connection_id: "c1",
+          integration: "slack",
+          config: body.config,
+          created_at: "2026-07-01T00:00:00Z",
+        });
+      }),
+    );
+
+    renderView("admin");
+    await waitFor(() => expect(screen.getByTestId("edit-connection-c1")).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("edit-connection-c1"));
+    // Edit ONLY the first row's value.
+    const channel = screen.getByTestId("edit-c1-value-0");
+    await user.clear(channel);
+    await user.type(channel, "#platform");
+    await user.click(screen.getByTestId("save-connection-c1"));
+
+    await waitFor(() =>
+      expect(patched).toEqual({
+        default_channel: "#platform",
+        notify: true,
+        max_results: 5,
+      }),
+    );
+  });
+
   it("removes a stored configuration after confirmation", async () => {
     let deleted = 0;
     server.use(

@@ -386,3 +386,89 @@ def test_connection_endpoints_require_authentication(wired):
         ).status_code
         == 401
     )
+
+
+
+def test_patch_requires_config_so_it_cannot_silently_erase(wired):
+    """With replace semantics, an omitted `config` must be a 422 — not a full wipe."""
+    _app, client, headers, _org_id = wired
+    connection_id = client.post(
+        "/integrations/connections",
+        json={"integration": "slack", "config": {"default_channel": "#ops"}},
+        headers=headers,
+    ).json()["connection_id"]
+
+    omitted = client.patch(
+        f"/integrations/connections/{connection_id}", json={}, headers=headers
+    )
+
+    assert omitted.status_code == 422
+    assert client.get(
+        f"/integrations/connections/{connection_id}", headers=headers
+    ).json()["config"] == {"default_channel": "#ops"}
+
+    # Clearing it is still possible, but only by saying so.
+    cleared = client.patch(
+        f"/integrations/connections/{connection_id}",
+        json={"config": {}},
+        headers=headers,
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["config"] == {}
+
+
+def test_a_validation_failure_never_echoes_the_submitted_value(wired):
+    """A 422 must not reflect the caller's input back — it may be the credential.
+
+    The scalar `config` contract means a nested value is rejected by the transport layer
+    rather than by the admission policy, and pydantic's error entries carry the offending
+    input verbatim. Anything that reaches the client here is disclosed in the response body
+    (and in whatever logs it), so the handler strips it.
+    """
+    _app, client, headers, _org_id = wired
+    secret = "xoxb-1111-2222-LEAKED"
+
+    resp = client.post(
+        "/integrations/connections",
+        json={"integration": "slack", "config": {"auth": {"token": secret}}},
+        headers=headers,
+    )
+
+    assert resp.status_code == 422
+    assert secret not in resp.text
+    # The client still learns WHERE the problem is, which is all it needs.
+    errors = resp.json()["error"]["details"]["errors"]
+    assert errors
+    assert all(set(entry) <= {"type", "loc", "msg"} for entry in errors)
+    assert any("config" in entry.get("loc", []) for entry in errors)
+
+
+def test_the_store_refuses_config_the_api_could_not_render(wired):
+    """A non-scalar value written past the router would 500 the whole org's list.
+
+    Nothing in the product writes one today, but the JSONB column would hold it and the
+    response model cannot represent it, so one bad row would take out every row. The store
+    refuses it instead.
+    """
+    from agentforge.api.deps import get_integration_connection_store
+
+    _app, client, headers, org_id = wired
+    # Reach the same store instance the endpoints use.
+    store = get_integration_connection_store(_dummy_request(_app))
+
+    with pytest.raises(ValueError):
+        store.create(org_id, "slack", {"filters": ["a", "b"]})
+    with pytest.raises(ValueError):
+        store.create(org_id, "slack", {"nested": {"k": "v"}})
+
+    assert client.get("/integrations/connections", headers=headers).json() == []
+
+
+def _dummy_request(app):
+    """Minimal object exposing the `.app` attribute the store dependency reads."""
+
+    class _Request:
+        def __init__(self, application) -> None:
+            self.app = application
+
+    return _Request(app)

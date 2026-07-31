@@ -65,6 +65,35 @@ async def _http_exception_handler(
     return JSONResponse(status_code=exc.status_code, content=error_body(code, message))
 
 
+# Keys of a pydantic error entry that are safe to return. `input` is deliberately absent:
+# it is the caller's own submitted value, and echoing it turns any validation failure into a
+# reflection of whatever was sent — including a credential pasted into a field that then
+# failed type validation. `loc` + `msg` + `type` are what a client needs to point at the
+# offending field, and `loc` never contains a value (only field names and indices).
+_SAFE_VALIDATION_ERROR_KEYS = ("type", "loc", "msg")
+
+
+def _safe_validation_errors(errors: list) -> list[dict]:
+    """Strip the echoed input from pydantic's error entries (Req 2.5).
+
+    ``ctx`` is dropped as well: for several pydantic error types it embeds the input (or a
+    derived fragment of it), so allow-listing keys is the only form of this that stays safe
+    as pydantic's error vocabulary grows.
+    """
+    safe: list[dict] = []
+    for entry in errors:
+        if not isinstance(entry, dict):  # pragma: no cover - defensive
+            continue
+        safe.append(
+            {
+                key: entry[key]
+                for key in _SAFE_VALIDATION_ERROR_KEYS
+                if key in entry
+            }
+        )
+    return safe
+
+
 async def _validation_exception_handler(
     _: Request, exc: RequestValidationError
 ) -> JSONResponse:
@@ -73,7 +102,7 @@ async def _validation_exception_handler(
         content=error_body(
             "validation_error",
             "Request validation failed.",
-            {"errors": exc.errors()},
+            {"errors": _safe_validation_errors(exc.errors())},
         ),
     )
 

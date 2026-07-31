@@ -159,3 +159,71 @@ def test_oversized_key_and_value_are_refused():
     assert validate_connection_config(
         {"k" * MAX_KEY_LENGTH: "v" * MAX_VALUE_LENGTH}
     ) == {"k" * MAX_KEY_LENGTH: "v" * MAX_VALUE_LENGTH}
+
+
+
+# --- the credential shapes an operator actually pastes ----------------------------
+#
+# A first cut recognised credentials only by key-name substrings and a case-sensitive list
+# of vendor prefixes. That caught `bot_token` and `xoxb-…` while accepting exactly the
+# things people put in connector settings: a Slack incoming-webhook URL (possession of
+# which IS authority to post), a DSN with the password inside it, a bare JWT, a lowercase
+# `bearer …` header value, and any vendor token pasted in upper case. Because listing
+# connections needs only `read`, anything admitted is readable by every member of the org.
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        # A webhook URL is a bearer capability, under any key name.
+        {"webhook_url": "https://hooks.slack.com/services/T00000/B00000/XXXXXXXX"},
+        {"notify_endpoint": "https://hooks.slack.com/services/T00000/B00000/XXXXXXXX"},
+        {"target": "https://discord.com/api/webhooks/123/abcdef"},
+        {"target": "https://chat.googleapis.com/v1/spaces/AAA/messages?key=x"},
+        # A DSN carries its password in the authority section.
+        {"store": "postgresql://user:sup3rpw@db.internal:5432/app"},
+        {"broker": "amqps://svc:pw@rabbit.internal:5671/vhost"},
+        # A JWT is a bearer token wherever it sits.
+        {"identifier": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.signature"},
+        {"header_value": "bearer eyJhbGciOiJIUzI1NiJ9.abc.def"},
+        # Case-folded vendor prefixes.
+        {"default_channel": "XOXB-1111-2222-secret"},
+        {"account": "AKIAIOSFODNN7EXAMPLE"},
+        {"account": "AIzaSyExampleValue"},
+        # PEM blocks.
+        {"material": "-----BEGIN OPENSSH PRIVATE KEY-----"},
+    ],
+)
+def test_credential_shapes_are_refused_regardless_of_key_name(config):
+    with pytest.raises(ValueError):
+        validate_connection_config(config)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["ssh_key", "signingKey", "deploy-key", "keys", "pat", "cookie", "dsn", "auth"],
+)
+def test_capability_bearing_key_names_are_refused(key: str):
+    """Names that grant something without ever saying "secret"."""
+    with pytest.raises(ValueError):
+        validate_connection_config({key: "placeholder"})
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        # Segment matching, not substring matching: "pat" is inside `folder_path` and
+        # "key" inside `keyboard_shortcut`, and refusing those would make the policy
+        # useless for ordinary settings.
+        {"folder_path": "/Shared/Reports"},
+        {"keyboard_shortcut": "ctrl+k"},
+        {"patch_level": 3},
+        {"monkey": "business"},
+        # A plain URL with no userinfo and no webhook host is ordinary configuration.
+        {"base_url": "https://api.example.com/v2"},
+        {"default_channel": "#ops", "repo": "acme/platform", "max_results": 25},
+        {"notify": True, "label": None},
+    ],
+)
+def test_ordinary_settings_are_still_accepted(config):
+    assert validate_connection_config(config) == config

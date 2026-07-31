@@ -1591,7 +1591,7 @@ export interface components {
          */
         IntegrationConnectionResponse: {
             /** Config */
-            config?: {
+            config: {
                 [key: string]: string | number | boolean | null;
             };
             /**
@@ -1925,10 +1925,15 @@ export interface components {
          *
          *     The config is **replaced**, not merged: merging would make removing a setting
          *     impossible, and the record is small enough that a client always holds all of it.
+         *
+         *     ``config`` is therefore **required**. With replace semantics an omitted field cannot mean
+         *     "leave it alone", so defaulting it would make ``PATCH {}`` a silent erase of every setting
+         *     reported as success — reachable by a client that serialises only dirty fields, or by a
+         *     typo. Sending ``{"config": {}}`` explicitly still clears it.
          */
         UpdateIntegrationConnectionRequest: {
             /** Config */
-            config?: {
+            config: {
                 [key: string]: string | number | boolean | null;
             };
         };

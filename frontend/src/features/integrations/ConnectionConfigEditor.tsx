@@ -20,11 +20,23 @@ import { Plus, X } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 
-/** One editable config entry. `id` is a stable React key across re-orders. */
+/** A config value as the contract declares it. */
+export type ConfigValue = string | number | boolean | null;
+
+/**
+ * One editable config entry.
+ *
+ * `id` is a stable React key across re-orders. `original` remembers the value as the server
+ * sent it, together with the text it was rendered as: a text input can only hold a string,
+ * so without that memory a round trip through the editor would rewrite every untouched
+ * `notify: true` as the string `"true"` — silently changing the type of a value the user
+ * never looked at, in a record that another system is expected to read.
+ */
 export interface ConfigRow {
   id: string;
   key: string;
   value: string;
+  original?: { text: string; value: ConfigValue };
 }
 
 let rowCounter = 0;
@@ -36,32 +48,34 @@ export function emptyRow(): ConfigRow {
 }
 
 /** Turn a stored config object into editable rows (stable order: as received). */
-export function rowsFromConfig(
-  config: Record<string, string | number | boolean | null>,
-): ConfigRow[] {
-  const rows = Object.entries(config).map(([key, value]) => ({
-    ...emptyRow(),
-    key,
-    // Values are scalars server-side; render anything else as its JSON so nothing is lost.
-    // Scalars only, per the contract; null/absent renders as an empty field.
-    value: value === null || value === undefined ? "" : String(value),
-  }));
+export function rowsFromConfig(config: Record<string, ConfigValue>): ConfigRow[] {
+  const rows = Object.entries(config).map(([key, value]) => {
+    // Scalars only, per the contract; null renders as an empty field. The original value
+    // and its rendering are kept so an untouched row round-trips with its own type.
+    const text = value === null || value === undefined ? "" : String(value);
+    return { ...emptyRow(), key, value: text, original: { text, value: value ?? null } };
+  });
   return rows.length > 0 ? rows : [emptyRow()];
 }
 
 /**
  * Collapse rows into the config object to submit.
  *
- * Values are sent as **strings**, which is what a text input holds. Coercing "5" to a
- * number here would be guesswork about a schema the server does not publish per
- * integration, and would silently change a legitimately string-valued setting.
+ * An **edited** value is sent as a string, which is what a text input holds: coercing "5"
+ * to a number would be guesswork about a schema the server does not publish per integration,
+ * and would change a legitimately string-valued setting. An **unedited** value is sent back
+ * with the type it arrived with, because rewriting a boolean the user never touched is a
+ * silent data change, not a formatting choice.
  */
-export function toConfig(rows: readonly ConfigRow[]): Record<string, string> {
-  const config: Record<string, string> = {};
+export function toConfig(rows: readonly ConfigRow[]): Record<string, ConfigValue> {
+  const config: Record<string, ConfigValue> = {};
   for (const row of rows) {
     const key = row.key.trim();
     if (key.length === 0) continue;
-    config[key] = row.value;
+    config[key] =
+      row.original !== undefined && row.original.text === row.value
+        ? row.original.value
+        : row.value;
   }
   return config;
 }

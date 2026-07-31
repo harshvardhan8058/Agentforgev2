@@ -639,9 +639,14 @@ class UpdateIntegrationConnectionRequest(BaseModel):
 
     The config is **replaced**, not merged: merging would make removing a setting
     impossible, and the record is small enough that a client always holds all of it.
+
+    ``config`` is therefore **required**. With replace semantics an omitted field cannot mean
+    "leave it alone", so defaulting it would make ``PATCH {}`` a silent erase of every setting
+    reported as success — reachable by a client that serialises only dirty fields, or by a
+    typo. Sending ``{"config": {}}`` explicitly still clears it.
     """
 
-    config: dict[str, IntegrationConfigValue] = Field(default_factory=dict)
+    config: dict[str, IntegrationConfigValue] = Field(...)
 
 
 class IntegrationConnectionResponse(BaseModel):
@@ -649,7 +654,10 @@ class IntegrationConnectionResponse(BaseModel):
 
     connection_id: UUID
     integration: str
-    config: dict[str, IntegrationConfigValue] = Field(default_factory=dict)
+    # Required, not defaulted: the server always sends it (an empty mapping when there are no
+    # settings), so declaring it optional would make every generated client handle an absent
+    # field that never occurs.
+    config: dict[str, IntegrationConfigValue]
     created_at: datetime
 
 

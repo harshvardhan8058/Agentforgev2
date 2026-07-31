@@ -144,7 +144,7 @@
 - **Backend modules:** `enterprise/{principal,rbac,tenancy,models}`, auth service, Redis rate limiter, `api/routers/orgs.py`, migrations.
 - **Frontend:** `features/orgs/MembersView` (roster with role reassignment + member removal, team list/create/delete, team-member add/remove — all confirmed for destructive actions), `ApiKeysView` (list/create/revoke, one-time secret + copy); `Can` RBAC gate; `OrgContextBadge`, `OrgSwitcher`.
 - **Endpoints:** `POST /orgs`; members — `GET/POST /orgs/{org_id}/members`, `PATCH/DELETE /orgs/{org_id}/members/{user_id}`; teams — `GET/POST /orgs/{org_id}/teams`, `DELETE /orgs/{org_id}/teams/{team_id}`, `GET/POST /orgs/{org_id}/teams/{team_id}/members`, `DELETE /orgs/{org_id}/teams/{team_id}/members/{user_id}`; API keys — `GET/POST /orgs/{org_id}/api-keys`, `DELETE /orgs/{org_id}/api-keys/{key_id}`.
-- **RBAC:** roles owner ⊇ admin ⊇ member ⊇ viewer over `read`, `run_agents`, `ingest_documents`, `manage_api_keys`, `manage_members`. Cross-tenant access → 404 (never 403).
+- **RBAC:** roles owner ⊇ admin ⊇ member ⊇ viewer over `read`, `run_agents`, `ingest_documents`, `manage_api_keys`, `manage_integrations`, `manage_members`. Cross-tenant access → 404 (never 403). A principal's permissions are derived from its role at authentication time, so adding a permission to a role also grants it to already-issued API keys holding that role.
 - **Status:** Fully working.
 - **Keyless:** Yes (rate limiting NoOp without Redis-enabled; Redis present in compose).
 - **Optional credentials:** None.

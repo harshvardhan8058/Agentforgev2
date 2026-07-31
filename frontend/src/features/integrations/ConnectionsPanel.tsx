@@ -54,6 +54,7 @@ import {
   rowsFromConfig,
   toConfig,
   type ConfigRow,
+  type ConfigValue,
 } from "./ConnectionConfigEditor";
 
 const MANAGE_INTEGRATIONS: Permission = "manage_integrations";
@@ -62,12 +63,10 @@ const MANAGE_INTEGRATIONS: Permission = "manage_integrations";
  * Mirrors the generated `IntegrationConnectionResponse`. `config` values are JSON
  * scalars, which is what the contract declares and the server accepts.
  */
-type ConfigValue = string | number | boolean | null;
-
 interface IntegrationConnection {
   connection_id: string;
   integration: string;
-  config?: Record<string, ConfigValue>;
+  config: Record<string, ConfigValue>;
   created_at: string;
 }
 
@@ -200,7 +199,7 @@ export function ConnectionsPanel({
         {stored.length > 0 && (
           <ul className="flex flex-col gap-2" data-testid="connections-config-list">
             {stored.map((connection) => {
-              const entries = Object.entries(connection.config ?? {});
+              const entries = Object.entries(connection.config);
               const editing = edit?.connectionId === connection.connection_id;
               return (
                 <li
@@ -226,7 +225,7 @@ export function ConnectionsPanel({
                               ? null
                               : {
                                   connectionId: connection.connection_id,
-                                  rows: rowsFromConfig(connection.config ?? {}),
+                                  rows: rowsFromConfig(connection.config),
                                 },
                           )
                         }

@@ -38,17 +38,37 @@ class Integration_Connection:
     created_at: datetime
 
 
-def _reject_secret_config(config: dict | None) -> dict:
-    """Return a shallow copy of ``config``, rejecting any credential/SecretStr value (Req 11.4).
+# The value types a connection config may hold. Deliberately the same set the API contract
+# declares, so anything the store accepts can be rendered back by the response model.
+_STORABLE_VALUE_TYPES = (str, int, float, bool, type(None))
 
-    The store structurally never accepts or persists a ``SecretStr``; a defensive check keeps
-    an accidental credential out of persistence entirely.
+
+def _reject_secret_config(config: dict | None) -> dict:
+    """Return a shallow copy of ``config``, rejecting secrets and unrepresentable values.
+
+    Two rules, both structural rather than advisory:
+
+    * a ``SecretStr`` is never accepted or persisted (Req 11.4) — the store cannot become the
+      place a credential ends up;
+    * a value must be a JSON **scalar**. The column is JSONB and would happily hold a nested
+      object, but the API contract declares scalars, so a nested value written by any other
+      caller would make the *list* endpoint fail response validation for the whole
+      organization — one bad row taking out every row. Refusing it at the write keeps the
+      store's contract and the API's contract the same shape.
+
+    The *naming* policy (which keys and values look like credentials) is not enforced here —
+    that is ``integrations/config_policy.py``, applied where untrusted input enters.
     """
     materialized = dict(config or {})
     for key, value in materialized.items():
         if isinstance(value, SecretStr):
             raise ValueError(
                 f"integration connection config must not contain a secret value: {key!r}"
+            )
+        if not isinstance(value, _STORABLE_VALUE_TYPES):
+            raise ValueError(
+                "integration connection config values must be scalars "
+                f"(string, number, boolean, or null); {key!r} is {type(value).__name__}"
             )
     return materialized
 
@@ -227,7 +247,7 @@ class Pg_Integration_Connection_Store(Integration_Connection_Store):
                     SELECT id, org_id, integration, config, created_at
                     FROM integration_connections
                     WHERE org_id = :org_id
-                    ORDER BY created_at ASC
+                    ORDER BY created_at ASC, id ASC
                     """
                 ),
                 {"org_id": str(org_id)},

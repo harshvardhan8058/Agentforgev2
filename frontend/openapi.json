@@ -1134,6 +1134,7 @@
         "required": [
           "connection_id",
           "integration",
+          "config",
           "created_at"
         ],
         "title": "IntegrationConnectionResponse",
@@ -1804,7 +1805,7 @@
         "type": "object"
       },
       "UpdateIntegrationConnectionRequest": {
-        "description": "Body for ``PATCH /integrations/connections/{id}`` \u2014 replaces the stored config.\n\nThe config is **replaced**, not merged: merging would make removing a setting\nimpossible, and the record is small enough that a client always holds all of it.",
+        "description": "Body for ``PATCH /integrations/connections/{id}`` \u2014 replaces the stored config.\n\nThe config is **replaced**, not merged: merging would make removing a setting\nimpossible, and the record is small enough that a client always holds all of it.\n\n``config`` is therefore **required**. With replace semantics an omitted field cannot mean\n\"leave it alone\", so defaulting it would make ``PATCH {}`` a silent erase of every setting\nreported as success \u2014 reachable by a client that serialises only dirty fields, or by a\ntypo. Sending ``{\"config\": {}}`` explicitly still clears it.",
         "properties": {
           "config": {
             "additionalProperties": {
@@ -1830,6 +1831,9 @@
             "type": "object"
           }
         },
+        "required": [
+          "config"
+        ],
         "title": "UpdateIntegrationConnectionRequest",
         "type": "object"
       },
