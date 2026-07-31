@@ -34,6 +34,7 @@ class Permission(str, Enum):
     MANAGE_MEMBERS = "manage_members"
     MANAGE_API_KEYS = "manage_api_keys"
     MANAGE_INTEGRATIONS = "manage_integrations"
+    READ_AUDIT_LOG = "read_audit_log"
     INGEST_DOCUMENTS = "ingest_documents"
     RUN_AGENTS = "run_agents"
     READ = "read"
@@ -50,9 +51,13 @@ _MEMBER: frozenset[Permission] = _VIEWER | {
 # Integration connection configuration is administrative deployment-shaped work, granted
 # alongside API-key management: both configure how the org reaches the outside world, and
 # neither can disclose a credential (integration config is non-secret by construction).
+# Reading the audit trail is granted from admin upwards, not to every member: it names who
+# added and removed whom, and which principal issued a key. That is exactly the information
+# an admin needs for an incident and exactly what a member has no reason to browse.
 _ADMIN: frozenset[Permission] = _MEMBER | {
     Permission.MANAGE_API_KEYS,
     Permission.MANAGE_INTEGRATIONS,
+    Permission.READ_AUDIT_LOG,
 }
 _OWNER: frozenset[Permission] = _ADMIN | {Permission.MANAGE_MEMBERS}
 

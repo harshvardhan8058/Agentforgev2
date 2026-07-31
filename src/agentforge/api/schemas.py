@@ -13,7 +13,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from agentforge.enterprise.audit import Audit_Action as AuditAction
 from agentforge.enterprise.rbac import Role as RbacRole
+
+# A JSON scalar: the value type for every free-form mapping this API accepts or returns.
+# Declaring it precisely (rather than as an opaque object) states what the server actually
+# accepts, rejects nesting at the transport layer, and gives generated clients a usable type.
+JsonScalar = str | int | float | bool | None
 
 
 # --- error envelope ---
@@ -614,11 +620,9 @@ class IntegrationStatusEntry(BaseModel):
     enabled: bool
 
 
-# A connection config value is a JSON scalar. Declaring it precisely (rather than as an
-# opaque object) makes the contract state what the admission policy actually accepts, gives
-# generated clients a usable type, and rejects nested structures at the transport layer
-# before the policy has to.
-IntegrationConfigValue = str | int | float | bool | None
+# A connection config value is a JSON scalar (see ``JsonScalar`` above); named separately
+# because the integration admission policy documents itself in terms of this alias.
+IntegrationConfigValue = JsonScalar
 
 
 class CreateIntegrationConnectionRequest(BaseModel):
@@ -658,6 +662,27 @@ class IntegrationConnectionResponse(BaseModel):
     # settings), so declaring it optional would make every generated client handle an absent
     # field that never occurs.
     config: dict[str, IntegrationConfigValue]
+    created_at: datetime
+
+
+class AuditEventResponse(BaseModel):
+    """One row of ``GET /audit-events`` — an administrative action that was taken.
+
+    ``actor_email`` is resolved at read time and is ``None`` for an API-key actor (a key has
+    no display name) or for a user who has since been deleted; the audit row itself survives
+    either way, which is the whole point of an append-only trail. ``metadata`` holds
+    non-secret scalars only — an audit event records *that* an API key was created, never
+    the secret.
+    """
+
+    id: UUID
+    action: AuditAction
+    actor_kind: Literal["user", "api_key"]
+    actor_id: UUID | None = None
+    actor_email: str | None = None
+    target_type: str
+    target_id: str | None = None
+    metadata: dict[str, JsonScalar] = Field(default_factory=dict)
     created_at: datetime
 
 

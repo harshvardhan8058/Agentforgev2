@@ -338,6 +338,122 @@
         "title": "ApprovalDecisionResponse",
         "type": "object"
       },
+      "AuditEventResponse": {
+        "description": "One row of ``GET /audit-events`` \u2014 an administrative action that was taken.\n\n``actor_email`` is resolved at read time and is ``None`` for an API-key actor (a key has\nno display name) or for a user who has since been deleted; the audit row itself survives\neither way, which is the whole point of an append-only trail. ``metadata`` holds\nnon-secret scalars only \u2014 an audit event records *that* an API key was created, never\nthe secret.",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/Audit_Action"
+          },
+          "actor_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Email"
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id"
+          },
+          "actor_kind": {
+            "enum": [
+              "user",
+              "api_key"
+            ],
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_type": {
+            "title": "Target Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "actor_kind",
+          "target_type",
+          "created_at"
+        ],
+        "title": "AuditEventResponse",
+        "type": "object"
+      },
+      "Audit_Action": {
+        "description": "The closed vocabulary of audited administrative actions.\n\nDotted ``subject.verb`` in the past tense. A ``str`` enum so it serialises as its value\nin the API contract (and therefore reaches the generated client as a union type), while\nstill being a single authoritative list on the server.",
+        "enum": [
+          "org.created",
+          "member.added",
+          "member.role_changed",
+          "member.removed",
+          "team.created",
+          "team.deleted",
+          "team_member.added",
+          "team_member.removed",
+          "api_key.created",
+          "api_key.revoked",
+          "integration_connection.created",
+          "integration_connection.updated",
+          "integration_connection.deleted"
+        ],
+        "title": "Audit_Action",
+        "type": "string"
+      },
       "Body_ingest_document_documents_post": {
         "properties": {
           "file": {
@@ -2283,6 +2399,134 @@
         "summary": "Get Usage",
         "tags": [
           "analytics"
+        ]
+      }
+    },
+    "/audit-events": {
+      "get": {
+        "description": "Return the caller org's audit events, newest first (Req 4.3, 4.4).",
+        "operationId": "list_audit_events_audit_events_get",
+        "parameters": [
+          {
+            "description": "Restrict to these actions. Repeat the parameter to pass several.",
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/Audit_Action"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict to these actions. Repeat the parameter to pass several.",
+              "title": "Action"
+            }
+          },
+          {
+            "description": "Restrict to events performed by this user.",
+            "in": "query",
+            "name": "actor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict to events performed by this user.",
+              "title": "Actor Id"
+            }
+          },
+          {
+            "description": "Only events at or after this instant (inclusive).",
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events at or after this instant (inclusive).",
+              "title": "Start"
+            }
+          },
+          {
+            "description": "Only events at or before this instant (inclusive).",
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events at or before this instant (inclusive).",
+              "title": "End"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditEventResponse"
+                  },
+                  "title": "Response List Audit Events Audit Events Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Audit Events",
+        "tags": [
+          "audit"
         ]
       }
     },

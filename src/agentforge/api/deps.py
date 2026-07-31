@@ -30,7 +30,8 @@ from agentforge.config.settings import Settings
 from agentforge.conversation.base import Conversation_Store
 from agentforge.enterprise.api_keys import API_Key_Service
 from agentforge.enterprise.auth import Auth_Service
-from agentforge.enterprise.base import Identity_Store, Rate_Limiter
+from agentforge.enterprise.audit import Audit_Service
+from agentforge.enterprise.base import Audit_Log, Identity_Store, Rate_Limiter
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.principal import PrincipalKind, principal_key
 from agentforge.enterprise.rbac import Permission, RBAC_Policy
@@ -190,6 +191,16 @@ def get_api_key_service(request: Request) -> API_Key_Service:
 def get_rbac_policy(request: Request) -> RBAC_Policy:
     """Return the wired RBAC_Policy."""
     return get_enterprise_context(request).rbac
+
+
+def get_audit_log(request: Request) -> Audit_Log:
+    """Return the wired Audit_Log (the append-only administrative trail)."""
+    return get_enterprise_context(request).audit_log
+
+
+def get_audit_service(request: Request) -> Audit_Service:
+    """Return the wired Audit_Service, which records events for the acting Principal."""
+    return get_enterprise_context(request).audit_service
 
 
 def get_rate_limiter(request: Request) -> Rate_Limiter:

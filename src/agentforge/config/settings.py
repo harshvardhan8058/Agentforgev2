@@ -134,6 +134,13 @@ class Settings(BaseSettings):
     argon2_memory_cost: int = 64 * 1024  # KiB; [8 * 1024, 1_048_576]
     argon2_parallelism: int = 2  # [1, 8]
 
+    # --- enterprise: audit trail ---
+    # Failure posture for an audit write. False (default) = fail OPEN: a failed write is
+    # logged at ERROR and the audited request still succeeds, because an audit store outage
+    # must not become a platform outage. True = fail CLOSED: the request fails, which is what
+    # a regulated deployment needs when an unrecorded action is worse than a refused one.
+    audit_log_required: bool = False
+
     # --- enterprise: per-principal rate limiting (Redis-backed) ---
     # ``rate_limit_enabled=False`` forces the NoOp_Rate_Limiter regardless of Redis, so
     # the keyless/test lane is deterministic (Req 6.5).

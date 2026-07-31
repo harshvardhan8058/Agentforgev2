@@ -128,6 +128,8 @@ export async function mockCommon(page: Page): Promise<void> {
   await page.route(`${API}/orgs/*/teams`, (route) => respond(route, []));
   await page.route(`${API}/orgs/*/api-keys`, (route) => respond(route, []));
   await page.route(`${API}/integrations/connections`, (route) => respond(route, []));
+  // The audit log is a collection endpoint like the others; `{}` would be handed to a table.
+  await page.route(`${API}/audit-events**`, (route) => respond(route, []));
 
   // Trace surfaces ask whether this deployment exports traces anywhere. The catch-all's
   // `{}` would leave the notice unable to render either state, so the keyless shape is

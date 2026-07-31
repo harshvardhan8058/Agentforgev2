@@ -151,6 +151,39 @@
 - **Invariants:** an organization always retains at least one `owner` — a demotion or removal that would remove the last one is refused with `last_owner` (400), checked inside the writing transaction; removing a member also drops their team memberships in that org only; every team read/write is scoped by `org_id`, so another tenant's team is 404.
 - **Limitations:** roles are the fixed set `owner|admin|member|viewer` (no custom roles); there is no invite flow — a user must already exist before being added by email; `manage_members` is granted to `owner` only; API-key secret shown once, never persisted client-side.
 
+## 11b. Audit trail (v1.1)
+
+**Append-only administrative audit log**
+- **Purpose:** answer "who changed this, and when" — the first question of every compliance
+  review, access-related support ticket and incident postmortem. Usage records answer what a
+  run cost and traces answer what an agent did; neither answers this.
+- **Backend modules:** `enterprise/audit.py` (`Audit_Action` vocabulary, `admit_metadata`
+  policy, `Audit_Service`, `InMemory_Audit_Log`, `Pg_Audit_Log`), the `Audit_Log` seam in
+  `enterprise/base.py`, `api/routers/audit.py`, migration `0013`.
+- **Frontend:** `features/audit/AuditLogView` — filterable table (action, page size), newest
+  first, destructive actions badged, actor labels resolved, skeleton/empty/error states,
+  `read_audit_log`-gated nav entry and route.
+- **Endpoints:** `GET /audit-events?action=&actor_id=&start=&end=&limit=` (`read_audit_log`).
+- **Audited actions:** `org.created`; `member.added|role_changed|removed`;
+  `team.created|deleted`; `team_member.added|removed`; `api_key.created|revoked`;
+  `integration_connection.created|updated|deleted`. The vocabulary is a server-side enum
+  published through OpenAPI, so the console's filter options are generated rather than
+  hardcoded.
+- **RBAC:** `read_audit_log`, granted from `admin` upwards (the trail names who removed whom).
+- **Guarantees:** append-only (the seam has no update or delete); org-scoped in SQL with no
+  org parameter on the endpoint; only *successful* actions recorded; `metadata` admits
+  non-secret scalars only and refuses credential-named keys; an API-key event records the key
+  prefix, never the secret; an event survives its actor's deletion (`ON DELETE SET NULL`) and
+  is reported with an unresolvable actor rather than reattributed.
+- **Failure posture:** `AUDIT_LOG_REQUIRED=false` (default) logs at ERROR and lets the action
+  succeed; `true` fails the action instead.
+- **Status:** Fully working.
+- **Keyless:** Yes (in-memory trail; Postgres when the domain stores persist).
+- **Optional credentials:** None.
+- **Limitations:** see `docs/KNOWN_LIMITATIONS.md` — append-only is enforced by the
+  application rather than by database grants, there is no retention policy or export, and
+  authentication events (logins) are not audited.
+
 ## 12. Deployment (Phase 9)
 
 **One-command Docker stack, production overlay, CI/CD**
@@ -167,6 +200,7 @@
 ## Cross-cutting capabilities
 
 - **Uniform error envelope** `AppError { error: {code, message, details} }` across all APIs; frontend normalizes via `mapError`/`ErrorBanner`.
+- **Audit trail** over every administrative mutation (see §11b): append-only, org-scoped, credential-free, with a configurable fail-open/fail-closed posture.
 - **SSE streaming** with exactly-one-terminal invariant (single & multi-agent).
 - **Conversation context** (`POST /conversations`, `GET /conversations/{id}`) threading `conversation_id` into agent + multi-agent runs.
 - **Premium frontend platform:** dark/light theming (design tokens, no-FOWT), command palette (⌘K, RBAC-gated), keyboard shortcuts, responsive app shell, skeleton/empty/error states, markdown+citations, Monaco, charts — all lazy-loaded.

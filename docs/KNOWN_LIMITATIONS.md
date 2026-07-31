@@ -25,6 +25,26 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
 - **Multi-Agent:** the human-approval gate is opt-in (`approval_policy=human`); keyless runs auto-approve. Generated content is deterministic without an LLM key.
 - **Documents:** upload size is bounded by `max_document_bytes`; error envelopes (413/415/400/422/500) are surfaced but very large corpora are not performance-tuned.
 - **Prompt Registry:** prompt-version creation is gated behind the `ingest_documents` permission; versions are immutable by design (no edit/delete).
+- **Audit trail:** every administrative mutation is recorded and readable at
+  `GET /audit-events`, but the bounds are worth knowing before an audit:
+  - **Append-only is an application property, not a database grant.** No `UPDATE`/`DELETE`
+    statement for `audit_events` exists outside the org cascade, and the seam offers no such
+    method — but the application's database role still *could*. A deployment that must prove
+    immutability should `REVOKE UPDATE, DELETE ON audit_events` from that role (and, for
+    tamper-evidence, ship the rows to a WORM store).
+  - **Scope is administrative actions.** Authentication events (login, failed login, token
+    refresh), reads, and agent/RAG activity are **not** audited — the last of those is what
+    traces and usage records are for. Login auditing is the obvious next addition.
+  - **No IP address or user agent is recorded.** Behind the bundled nginx the socket peer is
+    the proxy, and `X-Forwarded-For` is client-controllable; recording a spoofable value that
+    an auditor would read as authoritative is worse than recording none. Doing this properly
+    needs a trusted-proxy configuration, which is deployment-specific.
+  - **No retention policy, export, or pagination beyond `limit`.** The trail grows without
+    bound (rows leave only with their organization), reads are capped at 200 newest-first
+    entries per request with no cursor, and there is no CSV/SIEM export yet.
+  - **Fail-open by default.** With `AUDIT_LOG_REQUIRED=false` a store outage means the action
+    succeeds and the entry is lost (logged at ERROR). Set it to `true` to fail closed.
+
 - **Trace export:** traces are always recorded locally; *export* is off until a destination is configured (`LANGSMITH_API_KEY` or `OTEL_EXPORTER_ENDPOINT`), which `GET /observability/status` and the console both state explicitly. Bounds worth knowing: exactly **one** destination is active (LangSmith wins if both are set — there is no fan-out to several backends); export is fire-and-forget with no retry or queue, so a collector that is down during a run loses that run's export (the trace itself is unaffected, and re-export is not implemented); only structural span attributes are exported, never the trace `detail` payload; and the OTLP path needs the optional `otel` extra, without which it logs once, reports itself unavailable (`GET /observability/status` says `enabled: false`), and exports nothing. Further bounds, all deliberate:
   - **"Enabled" means configured and importable, not reachable.** A wrong collector URL or a revoked key still reports `enabled: true`; deliverability is only discoverable by sending something, and no health probe is implemented.
   - **A streamed run that the client aborts is not exported.** The export hook fires when the consumer asks for the frame after the terminal one, so an abandoned stream skips it. The trace itself is recorded either way.

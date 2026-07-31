@@ -119,6 +119,37 @@ Notes and guarantees:
   fact as `cost_rates_configured`, which is how the console distinguishes "nothing spent"
   from "nothing priced". Both are shown on the Analytics page.
 
+## Audit trail (`AUDIT_LOG_REQUIRED`)
+
+Optional in both profiles, and **not** a credential. Every administrative mutation
+(`/orgs/*` members, teams and API keys; `/integrations/connections`) appends an append-only
+`audit_events` row for the acting principal, readable at `GET /audit-events` by a principal
+holding `read_audit_log` (granted from `admin` upwards).
+
+`AUDIT_LOG_REQUIRED` selects the **failure posture**, which is the only genuinely contested
+decision here:
+
+- **`false` (default) — fail open.** A failed audit write is logged at `ERROR` and the audited
+  request still succeeds. An audit store outage must not become a platform outage.
+- **`true` — fail closed.** The audited request fails (500) when its event cannot be
+  recorded, so no administrative action can happen unrecorded. This is what an auditor means
+  by a complete trail, at the cost of coupling the admin surface's availability to the
+  trail's.
+
+Guarantees that do not depend on configuration:
+
+- **Nothing recorded is a credential.** `metadata` admits non-secret scalars only, and a
+  credential-named key (`token`, `api_key`, `client_secret`, even `password_hash`) is refused
+  before any write. An API-key event records the key's **prefix**, never its secret.
+- **The trail is org-scoped and unreachable across tenants.** The store takes `org_id` as a
+  query parameter and the endpoint has no org parameter at all, so a caller cannot name
+  another tenant's trail.
+- **Only successful actions are recorded.** Events are appended after the action succeeds, so
+  a refused or failed request leaves no entry claiming otherwise.
+- **Persistence follows the data.** The audit log is Postgres-backed exactly when the other
+  domain stores are (`USE_DATABASE` / the production profile); the keyless lane keeps an
+  in-memory trail so auditing is testable without infrastructure.
+
 ## Trace export (`TRACING_EXPORT_ENABLED`, `LANGSMITH_API_KEY`, `OTEL_EXPORTER_ENDPOINT`)
 
 All optional in both profiles. **Recording and exporting are separate**: every run's trace is

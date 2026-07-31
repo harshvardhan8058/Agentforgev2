@@ -30,6 +30,7 @@ def install_enterprise_auth(
     org_name: str = "Test Org",
     email: str = "user@example.com",
     password: str = "correct horse battery staple",
+    **overrides,
 ) -> tuple[dict[str, str], UUID, EnterpriseContext]:
     """Wire a keyless enterprise context onto ``app`` and return ``(headers, org_id, ctx)``.
 
@@ -38,7 +39,9 @@ def install_enterprise_auth(
     Bearer ``Authorization`` header, the ``org_id`` the principal is scoped to, and the
     context itself (so a test can register additional orgs/users for cross-tenant cases).
     """
-    ctx = build_enterprise_context(settings, redis=None)
+    # ``overrides`` reaches build_enterprise_context, so a test can substitute one seam
+    # (e.g. a deliberately broken Audit_Log) while keeping the rest of the keyless graph.
+    ctx = build_enterprise_context(settings, redis=None, **overrides)
     headers, org_id = issue_principal_headers(
         ctx, role=role, org_name=org_name, email=email, password=password
     )

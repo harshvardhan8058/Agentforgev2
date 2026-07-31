@@ -25,7 +25,17 @@ from agentforge.chunking.chunker import Chunker
 from agentforge.config.settings import ConfigError, Settings
 from agentforge.enterprise.api_keys import API_Key_Service, InMemory_API_Key_Store
 from agentforge.enterprise.auth import Auth_Service
-from agentforge.enterprise.base import API_Key_Store, Identity_Store, Rate_Limiter
+from agentforge.enterprise.audit import (
+    Audit_Service,
+    InMemory_Audit_Log,
+    Pg_Audit_Log,
+)
+from agentforge.enterprise.base import (
+    API_Key_Store,
+    Audit_Log,
+    Identity_Store,
+    Rate_Limiter,
+)
 from agentforge.enterprise.identity import InMemory_Identity_Store
 from agentforge.enterprise.rate_limit import NoOp_Rate_Limiter, Redis_Rate_Limiter
 from agentforge.enterprise.rbac import RBAC_Policy
@@ -959,6 +969,8 @@ class EnterpriseContext:
     api_key_store: API_Key_Store
     api_key_service: API_Key_Service
     rate_limiter: Rate_Limiter
+    audit_log: Audit_Log
+    audit_service: Audit_Service
 
 
 def build_enterprise_context(
@@ -976,8 +988,9 @@ def build_enterprise_context(
     verifier (Req 1.6, 5.2, 9.5).
 
     Supported ``overrides`` keys (all optional): ``rbac``, ``identity_store``,
-    ``auth_service``, ``api_key_store``, ``api_key_service``, ``rate_limiter``, and
-    ``clock`` (forwarded to :func:`build_rate_limiter`).
+    ``auth_service``, ``api_key_store``, ``api_key_service``, ``rate_limiter``,
+    ``audit_log``, ``audit_service``, and ``clock`` (forwarded to
+    :func:`build_rate_limiter`).
     """
     rbac: RBAC_Policy = overrides.get("rbac") or build_rbac_policy()
     identity_store: Identity_Store = (
@@ -997,6 +1010,11 @@ def build_enterprise_context(
         settings, redis, clock=overrides.get("clock")
     )
 
+    audit_log: Audit_Log = overrides.get("audit_log") or build_audit_log(settings)
+    audit_service: Audit_Service = overrides.get("audit_service") or Audit_Service(
+        audit_log, required=settings.audit_log_required
+    )
+
     return EnterpriseContext(
         settings=settings,
         rbac=rbac,
@@ -1005,7 +1023,21 @@ def build_enterprise_context(
         api_key_store=api_key_store,
         api_key_service=api_key_service,
         rate_limiter=rate_limiter,
+        audit_log=audit_log,
+        audit_service=audit_service,
     )
+
+
+def build_audit_log(settings: Settings) -> Audit_Log:
+    """Return the Audit_Log: Postgres when the domain stores persist, in-memory otherwise.
+
+    Same predicate as every other domain store (``persist_domain_stores()``), so an audit
+    trail is durable exactly when the data it describes is. The keyless unit lane keeps an
+    in-memory trail, which is what makes auditing testable without infrastructure.
+    """
+    if settings.persist_domain_stores():
+        return Pg_Audit_Log(settings.database_url)
+    return InMemory_Audit_Log()
 
 
 

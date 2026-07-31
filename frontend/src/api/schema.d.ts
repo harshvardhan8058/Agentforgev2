@@ -161,6 +161,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Audit Events
+         * @description Return the caller org's audit events, newest first (Req 4.3, 4.4).
+         */
+        get: operations["list_audit_events_audit_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -1228,6 +1248,56 @@ export interface components {
             /** Termination Reason */
             termination_reason?: ("completed" | "max-rounds-reached" | "max-revisions-reached" | "rejected" | "aborted") | null;
         };
+        /**
+         * AuditEventResponse
+         * @description One row of ``GET /audit-events`` — an administrative action that was taken.
+         *
+         *     ``actor_email`` is resolved at read time and is ``None`` for an API-key actor (a key has
+         *     no display name) or for a user who has since been deleted; the audit row itself survives
+         *     either way, which is the whole point of an append-only trail. ``metadata`` holds
+         *     non-secret scalars only — an audit event records *that* an API key was created, never
+         *     the secret.
+         */
+        AuditEventResponse: {
+            action: components["schemas"]["Audit_Action"];
+            /** Actor Email */
+            actor_email?: string | null;
+            /** Actor Id */
+            actor_id?: string | null;
+            /**
+             * Actor Kind
+             * @enum {string}
+             */
+            actor_kind: "user" | "api_key";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: string | number | boolean | null;
+            };
+            /** Target Id */
+            target_id?: string | null;
+            /** Target Type */
+            target_type: string;
+        };
+        /**
+         * Audit_Action
+         * @description The closed vocabulary of audited administrative actions.
+         *
+         *     Dotted ``subject.verb`` in the past tense. A ``str`` enum so it serialises as its value
+         *     in the API contract (and therefore reaches the generated client as a union type), while
+         *     still being a single authoritative list on the server.
+         * @enum {string}
+         */
+        Audit_Action: "org.created" | "member.added" | "member.role_changed" | "member.removed" | "team.created" | "team.deleted" | "team_member.added" | "team_member.removed" | "api_key.created" | "api_key.revoked" | "integration_connection.created" | "integration_connection.updated" | "integration_connection.deleted";
         /** Body_ingest_document_documents_post */
         Body_ingest_document_documents_post: {
             /**
@@ -2246,6 +2316,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageReportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_audit_events_audit_events_get: {
+        parameters: {
+            query?: {
+                /** @description Restrict to these actions. Repeat the parameter to pass several. */
+                action?: components["schemas"]["Audit_Action"][] | null;
+                /** @description Restrict to events performed by this user. */
+                actor_id?: string | null;
+                /** @description Only events at or after this instant (inclusive). */
+                start?: string | null;
+                /** @description Only events at or before this instant (inclusive). */
+                end?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEventResponse"][];
                 };
             };
             /** @description Validation Error */

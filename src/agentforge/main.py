@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from agentforge.api.errors import register_exception_handlers
 from agentforge.api.routers import agent as agent_router
 from agentforge.api.routers import analytics as analytics_router
+from agentforge.api.routers import audit as audit_router
 from agentforge.api.routers import auth as auth_router
 from agentforge.api.routers import conversations as conversations_router
 from agentforge.api.routers import documents as documents_router
@@ -191,6 +192,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Phase 5 enterprise routers (auth + orgs/members/teams/api-keys).
     app.include_router(auth_router.router)
     app.include_router(orgs_router.router)
+    # Append-only administrative audit trail (who changed what, when).
+    app.include_router(audit_router.router)
     # Phase 6 observability routers (analytics + prompts + guardrails + evaluations).
     app.include_router(analytics_router.router)
     # Reports how the deployment handles run telemetry (is trace export on, and where to).
