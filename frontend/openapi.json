@@ -621,6 +621,44 @@
         "title": "CreateDatasetResponse",
         "type": "object"
       },
+      "CreateIntegrationConnectionRequest": {
+        "description": "Body for ``POST /integrations/connections`` \u2014 per-org, NON-SECRET config (Req 11.4).\n\n``config`` is a flat mapping of scalar settings (e.g. ``{\"default_channel\": \"#ops\"}``).\nCredential-shaped keys/values, nested structures, and oversized payloads are refused by\nthe admission policy in ``integrations/config_policy.py``; credentials belong in the\nserver environment, never here.",
+        "properties": {
+          "config": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Config",
+            "type": "object"
+          },
+          "integration": {
+            "minLength": 1,
+            "title": "Integration",
+            "type": "string"
+          }
+        },
+        "required": [
+          "integration"
+        ],
+        "title": "CreateIntegrationConnectionRequest",
+        "type": "object"
+      },
       "CreateOrgRequest": {
         "description": "Body for ``POST /orgs`` \u2014 an authenticated user creates an org they own.",
         "properties": {
@@ -1050,6 +1088,55 @@
           "status"
         ],
         "title": "IngestResponse",
+        "type": "object"
+      },
+      "IntegrationConnectionResponse": {
+        "description": "One stored Integration_Connection \u2014 non-secret config only (Req 11.1, 11.4).",
+        "properties": {
+          "config": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Config",
+            "type": "object"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "integration": {
+            "title": "Integration",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection_id",
+          "integration",
+          "created_at"
+        ],
+        "title": "IntegrationConnectionResponse",
         "type": "object"
       },
       "IntegrationStatusEntry": {
@@ -1714,6 +1801,36 @@
           "run_id"
         ],
         "title": "TraceResponse",
+        "type": "object"
+      },
+      "UpdateIntegrationConnectionRequest": {
+        "description": "Body for ``PATCH /integrations/connections/{id}`` \u2014 replaces the stored config.\n\nThe config is **replaced**, not merged: merging would make removing a setting\nimpossible, and the record is small enough that a client always holds all of it.",
+        "properties": {
+          "config": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Config",
+            "type": "object"
+          }
+        },
+        "title": "UpdateIntegrationConnectionRequest",
         "type": "object"
       },
       "UpdateMemberRoleRequest": {
@@ -2763,6 +2880,203 @@
         "summary": "Readiness",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/integrations/connections": {
+      "get": {
+        "description": "Return the caller org's stored connection configs, oldest first (Req 11.1).\n\n``read`` is sufficient: the records are non-secret by construction, and seeing that (say)\na default Slack channel is set is ordinary context for anybody who can use the platform.\nMutating them requires ``manage_integrations``.",
+        "operationId": "list_integration_connections_integrations_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IntegrationConnectionResponse"
+                  },
+                  "title": "Response List Integration Connections Integrations Connections Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Integration Connections",
+        "tags": [
+          "integrations"
+        ]
+      },
+      "post": {
+        "description": "Store non-secret config for one integration, scoped to the caller's org (Req 11.1).\n\nThe integration name must be one the platform ships, and the config must satisfy the\nnon-secret admission policy; both refusals are 400s naming the offending field. The\nrecord does not affect enablement \u2014 that stays a pure function of ``Settings``\n(Req 11.5) \u2014 so writing config never grants an integration any capability.",
+        "operationId": "create_integration_connection_integrations_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIntegrationConnectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationConnectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Integration Connection",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/integrations/connections/{connection_id}": {
+      "delete": {
+        "description": "Delete a connection owned by the caller's org; unknown/cross-tenant is 404.",
+        "operationId": "delete_integration_connection_integrations_connections__connection_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Integration Connection",
+        "tags": [
+          "integrations"
+        ]
+      },
+      "get": {
+        "description": "Return one connection owned by the caller's org; unknown/cross-tenant is 404.",
+        "operationId": "get_integration_connection_integrations_connections__connection_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationConnectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Integration Connection",
+        "tags": [
+          "integrations"
+        ]
+      },
+      "patch": {
+        "description": "Replace a connection's config; unknown/cross-tenant is 404, bad config is 400.",
+        "operationId": "update_integration_connection_integrations_connections__connection_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateIntegrationConnectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationConnectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Integration Connection",
+        "tags": [
+          "integrations"
         ]
       }
     },

@@ -614,6 +614,45 @@ class IntegrationStatusEntry(BaseModel):
     enabled: bool
 
 
+# A connection config value is a JSON scalar. Declaring it precisely (rather than as an
+# opaque object) makes the contract state what the admission policy actually accepts, gives
+# generated clients a usable type, and rejects nested structures at the transport layer
+# before the policy has to.
+IntegrationConfigValue = str | int | float | bool | None
+
+
+class CreateIntegrationConnectionRequest(BaseModel):
+    """Body for ``POST /integrations/connections`` — per-org, NON-SECRET config (Req 11.4).
+
+    ``config`` is a flat mapping of scalar settings (e.g. ``{"default_channel": "#ops"}``).
+    Credential-shaped keys/values, nested structures, and oversized payloads are refused by
+    the admission policy in ``integrations/config_policy.py``; credentials belong in the
+    server environment, never here.
+    """
+
+    integration: str = Field(..., min_length=1)
+    config: dict[str, IntegrationConfigValue] = Field(default_factory=dict)
+
+
+class UpdateIntegrationConnectionRequest(BaseModel):
+    """Body for ``PATCH /integrations/connections/{id}`` — replaces the stored config.
+
+    The config is **replaced**, not merged: merging would make removing a setting
+    impossible, and the record is small enough that a client always holds all of it.
+    """
+
+    config: dict[str, IntegrationConfigValue] = Field(default_factory=dict)
+
+
+class IntegrationConnectionResponse(BaseModel):
+    """One stored Integration_Connection — non-secret config only (Req 11.1, 11.4)."""
+
+    connection_id: UUID
+    integration: str
+    config: dict[str, IntegrationConfigValue] = Field(default_factory=dict)
+    created_at: datetime
+
+
 class IntegrationStatusResponse(BaseModel):
     """The org-scoped Integration_Status view: one ``{name, enabled}`` entry per integration.
 

@@ -14,13 +14,14 @@ export type Permission =
   | "run_agents"
   | "ingest_documents"
   | "manage_api_keys"
+  | "manage_integrations"
   | "manage_members";
 
 // Built incrementally so the nesting is explicit and cannot silently drift,
 // exactly mirroring `enterprise/rbac.py`:
 //   viewer = {read}
 //   member = viewer ∪ {run_agents, ingest_documents}
-//   admin  = member ∪ {manage_api_keys}
+//   admin  = member ∪ {manage_api_keys, manage_integrations}
 //   owner  = admin  ∪ {manage_members}
 const VIEWER: ReadonlySet<Permission> = new Set<Permission>(["read"]);
 const MEMBER: ReadonlySet<Permission> = new Set<Permission>([
@@ -31,6 +32,7 @@ const MEMBER: ReadonlySet<Permission> = new Set<Permission>([
 const ADMIN: ReadonlySet<Permission> = new Set<Permission>([
   ...MEMBER,
   "manage_api_keys",
+  "manage_integrations",
 ]);
 const OWNER: ReadonlySet<Permission> = new Set<Permission>([
   ...ADMIN,

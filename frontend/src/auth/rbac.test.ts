@@ -10,6 +10,7 @@ const permissionArb = fc.constantFrom<Permission>(
   "run_agents",
   "ingest_documents",
   "manage_api_keys",
+  "manage_integrations",
   "manage_members",
 );
 
@@ -61,12 +62,14 @@ describe("auth/rbac — ROLE_PERMISSIONS + can", () => {
     expect([...ROLE_PERMISSIONS.admin].sort()).toEqual([
       "ingest_documents",
       "manage_api_keys",
+      "manage_integrations",
       "read",
       "run_agents",
     ]);
     expect([...ROLE_PERMISSIONS.owner].sort()).toEqual([
       "ingest_documents",
       "manage_api_keys",
+      "manage_integrations",
       "manage_members",
       "read",
       "run_agents",

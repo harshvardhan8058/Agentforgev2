@@ -7,8 +7,13 @@ Disabled/Enabled decision is derived solely from ``Settings`` (Req 11.4, 11.5).
 Tenant isolation is enforced at the data-access layer: every method takes ``org_id`` as a
 required parameter, so a cross-tenant read/mutate matches no row → ``None``/``[]`` → the
 caller raises ``AppError("not_found", 404)`` — 404, never 403 (Req 11.1, 11.2). The
-in-memory store below is the keyless default; the Postgres-backed store and migration ``0011``
-are added in task 7.
+in-memory store below is the keyless default; the Postgres-backed store uses migration
+``0011``.
+
+The store deliberately does **not** police config *shape* — that is
+``integrations/config_policy.py``, applied where untrusted input enters. What the store
+guarantees is that a ``SecretStr`` can never be persisted and that every read/write is
+constrained by ``org_id``.
 """
 
 from __future__ import annotations
@@ -67,6 +72,24 @@ class Integration_Connection_Store(ABC):
     def list_for_org(self, org_id: UUID) -> list[Integration_Connection]:
         raise NotImplementedError
 
+    @abstractmethod
+    def update_config(
+        self, org_id: UUID, connection_id: UUID, config: dict
+    ) -> Integration_Connection | None:
+        """Replace a connection's config iff it belongs to ``org_id``.
+
+        Returns the updated record, or ``None`` when no row matched — so an unknown or
+        cross-tenant connection is the uniform 404, never a 403 (Req 11.1, 11.2). The
+        config is **replaced**, not merged: a partial merge would make removing a setting
+        impossible, and the record is small enough that the client always holds all of it.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete(self, org_id: UUID, connection_id: UUID) -> bool:
+        """Delete a connection iff it belongs to ``org_id``; ``False`` when none matched."""
+        raise NotImplementedError
+
 
 class InMemory_Integration_Connection_Store(Integration_Connection_Store):
     """Keyless default store keyed by ``(org_id, id)`` so cross-org access finds no row.
@@ -93,11 +116,35 @@ class InMemory_Integration_Connection_Store(Integration_Connection_Store):
         return self._by_key.get((org_id, connection_id))
 
     def list_for_org(self, org_id: UUID) -> list[Integration_Connection]:
-        return [
-            connection
-            for (owner_org, _cid), connection in self._by_key.items()
-            if owner_org == org_id
-        ]
+        return sorted(
+            (
+                connection
+                for (owner_org, _cid), connection in self._by_key.items()
+                if owner_org == org_id
+            ),
+            key=lambda c: (c.created_at, str(c.id)),
+        )
+
+    def update_config(
+        self, org_id: UUID, connection_id: UUID, config: dict
+    ) -> Integration_Connection | None:
+        """Replace the config of ``connection_id`` iff owned by ``org_id`` (Req 11.2)."""
+        existing = self._by_key.get((org_id, connection_id))
+        if existing is None:
+            return None
+        updated = Integration_Connection(
+            id=existing.id,
+            org_id=existing.org_id,
+            integration=existing.integration,
+            config=_reject_secret_config(config),
+            created_at=existing.created_at,
+        )
+        self._by_key[(org_id, connection_id)] = updated
+        return updated
+
+    def delete(self, org_id: UUID, connection_id: UUID) -> bool:
+        """Delete ``connection_id`` iff owned by ``org_id`` (Req 11.2)."""
+        return self._by_key.pop((org_id, connection_id), None) is not None
 
 
 class Pg_Integration_Connection_Store(Integration_Connection_Store):
@@ -186,6 +233,45 @@ class Pg_Integration_Connection_Store(Integration_Connection_Store):
                 {"org_id": str(org_id)},
             ).fetchall()
         return [self._row_to_connection(r) for r in rows]
+
+    def update_config(
+        self, org_id: UUID, connection_id: UUID, config: dict
+    ) -> Integration_Connection | None:
+        """Replace the config iff the row belongs to ``org_id``; SQL scoped by it (Req 11.2)."""
+        from sqlalchemy import text
+
+        accepted = _reject_secret_config(config)
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    UPDATE integration_connections
+                    SET config = CAST(:config AS JSONB)
+                    WHERE org_id = :org_id AND id = :id
+                    RETURNING id, org_id, integration, config, created_at
+                    """
+                ),
+                {
+                    "config": json.dumps(accepted),
+                    "org_id": str(org_id),
+                    "id": str(connection_id),
+                },
+            ).fetchone()
+        return self._row_to_connection(row) if row is not None else None
+
+    def delete(self, org_id: UUID, connection_id: UUID) -> bool:
+        """Delete the row iff it belongs to ``org_id``; SQL scoped by it (Req 11.2)."""
+        from sqlalchemy import text
+
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                text(
+                    "DELETE FROM integration_connections "
+                    "WHERE org_id = :org_id AND id = :id"
+                ),
+                {"org_id": str(org_id), "id": str(connection_id)},
+            )
+        return result.rowcount > 0
 
     @staticmethod
     def _row_to_connection(row) -> Integration_Connection:

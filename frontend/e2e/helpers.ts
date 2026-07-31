@@ -127,6 +127,7 @@ export async function mockCommon(page: Page): Promise<void> {
   await page.route(`${API}/orgs/*/members`, (route) => respond(route, []));
   await page.route(`${API}/orgs/*/teams`, (route) => respond(route, []));
   await page.route(`${API}/orgs/*/api-keys`, (route) => respond(route, []));
+  await page.route(`${API}/integrations/connections`, (route) => respond(route, []));
 
   // The analytics page always asks how the deployment is priced. The catch-all's
   // `{}` would render as absent rates rather than as the honest "prices nothing"

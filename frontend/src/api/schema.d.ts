@@ -485,6 +485,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/integrations/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Integration Connections
+         * @description Return the caller org's stored connection configs, oldest first (Req 11.1).
+         *
+         *     ``read`` is sufficient: the records are non-secret by construction, and seeing that (say)
+         *     a default Slack channel is set is ordinary context for anybody who can use the platform.
+         *     Mutating them requires ``manage_integrations``.
+         */
+        get: operations["list_integration_connections_integrations_connections_get"];
+        put?: never;
+        /**
+         * Create Integration Connection
+         * @description Store non-secret config for one integration, scoped to the caller's org (Req 11.1).
+         *
+         *     The integration name must be one the platform ships, and the config must satisfy the
+         *     non-secret admission policy; both refusals are 400s naming the offending field. The
+         *     record does not affect enablement — that stays a pure function of ``Settings``
+         *     (Req 11.5) — so writing config never grants an integration any capability.
+         */
+        post: operations["create_integration_connection_integrations_connections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/connections/{connection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Integration Connection
+         * @description Return one connection owned by the caller's org; unknown/cross-tenant is 404.
+         */
+        get: operations["get_integration_connection_integrations_connections__connection_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Integration Connection
+         * @description Delete a connection owned by the caller's org; unknown/cross-tenant is 404.
+         */
+        delete: operations["delete_integration_connection_integrations_connections__connection_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Integration Connection
+         * @description Replace a connection's config; unknown/cross-tenant is 404, bad config is 400.
+         */
+        patch: operations["update_integration_connection_integrations_connections__connection_id__patch"];
+        trace?: never;
+    };
     "/integrations/status": {
         parameters: {
             query?: never;
@@ -1271,6 +1332,23 @@ export interface components {
             name: string;
         };
         /**
+         * CreateIntegrationConnectionRequest
+         * @description Body for ``POST /integrations/connections`` — per-org, NON-SECRET config (Req 11.4).
+         *
+         *     ``config`` is a flat mapping of scalar settings (e.g. ``{"default_channel": "#ops"}``).
+         *     Credential-shaped keys/values, nested structures, and oversized payloads are refused by
+         *     the admission policy in ``integrations/config_policy.py``; credentials belong in the
+         *     server environment, never here.
+         */
+        CreateIntegrationConnectionRequest: {
+            /** Config */
+            config?: {
+                [key: string]: string | number | boolean | null;
+            };
+            /** Integration */
+            integration: string;
+        };
+        /**
          * CreateOrgRequest
          * @description Body for ``POST /orgs`` — an authenticated user creates an org they own.
          */
@@ -1506,6 +1584,28 @@ export interface components {
              * @constant
              */
             status: "ingested";
+        };
+        /**
+         * IntegrationConnectionResponse
+         * @description One stored Integration_Connection — non-secret config only (Req 11.1, 11.4).
+         */
+        IntegrationConnectionResponse: {
+            /** Config */
+            config?: {
+                [key: string]: string | number | boolean | null;
+            };
+            /**
+             * Connection Id
+             * Format: uuid
+             */
+            connection_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Integration */
+            integration: string;
         };
         /**
          * IntegrationStatusEntry
@@ -1818,6 +1918,19 @@ export interface components {
             entries?: components["schemas"]["TraceEntryModel"][];
             /** Run Id */
             run_id: string;
+        };
+        /**
+         * UpdateIntegrationConnectionRequest
+         * @description Body for ``PATCH /integrations/connections/{id}`` — replaces the stored config.
+         *
+         *     The config is **replaced**, not merged: merging would make removing a setting
+         *     impossible, and the record is small enough that a client always holds all of it.
+         */
+        UpdateIntegrationConnectionRequest: {
+            /** Config */
+            config?: {
+                [key: string]: string | number | boolean | null;
+            };
         };
         /**
          * UpdateMemberRoleRequest
@@ -2572,6 +2685,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadinessResponse"];
+                };
+            };
+        };
+    };
+    list_integration_connections_integrations_connections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationConnectionResponse"][];
+                };
+            };
+        };
+    };
+    create_integration_connection_integrations_connections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateIntegrationConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationConnectionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_integration_connection_integrations_connections__connection_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationConnectionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_integration_connection_integrations_connections__connection_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_integration_connection_integrations_connections__connection_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateIntegrationConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationConnectionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

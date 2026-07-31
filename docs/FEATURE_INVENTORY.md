@@ -128,13 +128,14 @@
 - **Purpose:** Expose third-party services as pluggable agent tools behind the Tool interface.
 - **Backend modules:** `integrations/base` (Integration_Tool, Connector ABC, error vocabulary), `integrations/{slack,gmail,google_drive,github}` (Disabled/Keyed/Mock connectors), `integrations/status`, `integrations/connection` (+ migration 0011), `integrations/governance`; wired in `config/container`; `api/routers/integrations.py`.
 - **Frontend:** No dedicated UI page in v1 (backend + status API only). Enabled tools become available to agent/multi-agent runs.
-- **Endpoints:** `GET /integrations/status` (RBAC-gated, org-scoped, `{name, enabled}`).
+- **Endpoints:** `GET /integrations/status` (RBAC-gated, org-scoped, `{name, enabled}`); connection config — `GET/POST /integrations/connections`, `GET/PATCH/DELETE /integrations/connections/{connection_id}` (`read` to list, `manage_integrations` to mutate).
 - **Tools/actions:** Slack (read_channel/post_message), Gmail (search/read/send), Drive (list/search/read — read-only), GitHub (search_code/search_issues/read_repo/create_issue).
-- **User workflow:** Set the integration's `SecretStr` token → tool auto-registers → agents can invoke it; `/integrations/status` shows which are enabled.
+- **User workflow:** Set the integration's `SecretStr` token → tool auto-registers → agents can invoke it; `/integrations/status` shows which are enabled; the Integrations page also manages per-org **non-secret** connector settings (default channel, repo, …).
+- **Non-secret guarantee:** the connection admission policy (`integrations/config_policy.py`) refuses credential-shaped keys (`token`, `api_key`, `client_secret`, …), recognisable credential values (`xoxb-`, `ghp_`, `sk-`, …), nested structures, and oversized payloads, with `invalid_config` (400) and without echoing the submitted value. Migration `0011` has no column that could hold a secret, and stored config never affects enablement.
 - **Status:** Disabled by default.
 - **Keyless:** Runs (all disabled — never invoked, no network).
 - **Optional credentials required to enable:** `SLACK_BOT_TOKEN`, `GMAIL_TOKEN`, `GOOGLE_DRIVE_TOKEN`, `GITHUB_TOKEN` (+ per-integration enable toggles).
-- **Limitations:** No frontend management UI in v1; connectors are deterministic stand-ins for real HTTP in this build; bounded timeout + result cap; single-write actions gated by `run_agents`; OAuth flows/webhooks out of scope; org connection config is non-secret only.
+- **Limitations:** connectors are deterministic stand-ins for real HTTP in this build; bounded timeout + result cap; single-write actions gated by `run_agents`; OAuth flows/webhooks out of scope; connection config is non-secret only and is not yet *read* by the connectors themselves (they take their parameters per tool call), so it is operator-facing configuration ahead of the live-connector work.
 
 ## 11. Admin (Enterprise controls)
 

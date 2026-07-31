@@ -11,8 +11,10 @@
  *    confusion: keyless installs run a deterministic fallback provider, so
  *    answers look like echoed prompt text rather than a real completion.
  *  - **Connected services** — each connector's `{name, enabled}` status.
+ *  - **Connection settings** — per-org, NON-SECRET connector configuration over
+ *    `/integrations/connections`, gated behind `manage_integrations` for writes.
  *
- * Both endpoints require only `read`. The status payload is intentionally
+ * The status/usage reads require only `read`. The status payload is intentionally
  * credential-free (name + enabled only), so nothing secret can surface here;
  * enabling a connector is an operator/deployment action, which the view explains
  * rather than pretending to offer an in-app connect flow that no API backs.
@@ -44,6 +46,7 @@ import { Badge } from "../../components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { cn } from "../../lib/cn";
+import { ConnectionsPanel } from "./ConnectionsPanel";
 
 interface IntegrationStatus {
   name: string;
@@ -351,6 +354,9 @@ export function IntegrationsView(): JSX.Element {
           )}
         </CardContent>
       </Card>
+
+      {/* ---- Per-org, non-secret connector settings ---- */}
+      <ConnectionsPanel integrationNames={integrations.map((item) => item.name)} />
     </div>
   );
 }
