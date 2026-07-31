@@ -36,6 +36,8 @@ interface IngestResult {
   document_id: string;
   filename: string;
   status: string;
+  /** True when the document was already present and nothing new was written. */
+  duplicate?: boolean;
 }
 
 /** Post one sample document through the real multipart ingest endpoint. */
@@ -80,10 +82,16 @@ export function SampleCorpusControl(): JSX.Element {
     },
     onSuccess: (results) => {
       const chunks = results.reduce((sum, r) => sum + r.chunk_count, 0);
+      // Loading twice is a realistic slip during a demo; saying so is better than
+      // implying six documents now exist.
+      const added = results.filter((r) => !r.duplicate).length;
       toast({
-        title: "Sample corpus loaded",
-        description: `${results.length} documents · ${chunks} chunks`,
-        tone: "success",
+        title: added === 0 ? "Sample corpus already loaded" : "Sample corpus loaded",
+        description:
+          added === 0
+            ? "Every sample document was already in your corpus."
+            : `${added} document${added === 1 ? "" : "s"} · ${chunks} chunks`,
+        tone: added === 0 ? "info" : "success",
       });
       void queryClient.invalidateQueries({
         queryKey: orgScopedKey(orgId, "documents"),

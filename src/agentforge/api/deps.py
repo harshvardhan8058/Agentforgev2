@@ -34,6 +34,7 @@ from agentforge.enterprise.base import Identity_Store, Rate_Limiter
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.principal import PrincipalKind, principal_key
 from agentforge.enterprise.rbac import Permission, RBAC_Policy
+from agentforge.enterprise.tenancy import set_current_org, set_current_user
 from agentforge.ingestion.service import Ingestion_Service
 from agentforge.integrations.connection import Integration_Connection_Store
 from agentforge.integrations.status import Integration_Status_Service
@@ -272,17 +273,47 @@ def get_current_principal(
     return principal
 
 
+async def bind_request_tenancy(
+    principal: Principal = Depends(get_current_principal),
+) -> Principal:
+    """Publish the acting tenant and user for the rest of the request.
+
+    ``enterprise/tenancy`` exists so cross-cutting consumers that cannot widen their
+    contract — the ``RAG_Tool``, trace writes, and the ``Instrumented_Provider`` that
+    emits usage records — can still attribute work to the right principal. The
+    orchestrator entry points published the *org*, but nothing ever published the
+    *user*, so every usage record was written with ``user_id=None`` and the analytics
+    "by user" breakdown collapsed into a single blank key. Endpoints that never enter an
+    orchestrator (notably ``POST /query``) published neither, so their usage was
+    attributed to ``NIL_ORG_ID`` and never appeared in the caller's analytics at all.
+
+    Binding both here fixes every endpoint at once, because every authorized route
+    resolves its principal through :func:`require_permission`.
+
+    This is deliberately ``async``: FastAPI runs *synchronous* dependencies in a worker
+    thread, and a ``ContextVar`` set on a worker thread is not visible to the request
+    that spawned it. Declared ``async`` it runs on the request's own task, so the values
+    are in force for the handler and for anything it later hands to
+    ``run_in_threadpool`` (which copies the current context).
+    """
+    set_current_org(principal.org_id)
+    # ``None`` for an API-key principal, which is an unattributed caller by construction.
+    set_current_user(principal.user_id)
+    return principal
+
+
 def require_permission(permission: Permission) -> Callable[..., Principal]:
     """Return a dependency enforcing ``permission`` on the current Principal (Req 7.7).
 
-    The returned callable depends on :func:`get_current_principal` and raises
+    The returned callable resolves the Principal through :func:`bind_request_tenancy`
+    (which publishes the request-scoped org and user) and raises
     ``AppError("forbidden", 403, {"required": permission})`` when the Principal's Role
     does not grant ``permission``; otherwise it returns the Principal so the handler can
     thread ``principal.org_id`` into an org-scoped store call. Adding a new endpoint
     adopts authorization by declaration alone — no bespoke logic in the handler (Req 3.6).
     """
 
-    def _dep(principal: Principal = Depends(get_current_principal)) -> Principal:
+    def _dep(principal: Principal = Depends(bind_request_tenancy)) -> Principal:
         if permission not in principal.permissions:
             raise AppError(
                 "forbidden",

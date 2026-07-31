@@ -15,9 +15,15 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timezone
 from uuid import UUID
 
-from agentforge.tracing.base import Trace, Trace_Entry, Trace_Recorder
+from agentforge.tracing.base import (
+    Agent_Run_Summary,
+    Trace,
+    Trace_Entry,
+    Trace_Recorder,
+)
 
 
 class InMemory_Trace_Recorder(Trace_Recorder):
@@ -29,6 +35,9 @@ class InMemory_Trace_Recorder(Trace_Recorder):
 
     def __init__(self) -> None:
         self._entries: dict[tuple[UUID, str], list[Trace_Entry]] = {}
+        # First-seen time per run, so listing can order newest-first like the Postgres
+        # recorder (whose `agent_runs.created_at` column provides the same ordering).
+        self._started_at: dict[tuple[UUID, str], datetime] = {}
 
     def record(
         self,
@@ -42,6 +51,7 @@ class InMemory_Trace_Recorder(Trace_Recorder):
     ) -> Trace_Entry:
         """Append an entry with the next ordinal for ``(org_id, run_id)`` (Req 10.1, 10.2)."""
         run_entries = self._entries.setdefault((org_id, run_id), [])
+        self._started_at.setdefault((org_id, run_id), datetime.now(timezone.utc))
         entry = Trace_Entry(
             run_id=run_id,
             ordinal=len(run_entries),
@@ -57,6 +67,25 @@ class InMemory_Trace_Recorder(Trace_Recorder):
         """Return ``org_id``'s ordered Trace for ``run_id`` (empty when unknown) (Req 10.3)."""
         entries = list(self._entries.get((org_id, run_id), []))
         return Trace(run_id=run_id, entries=entries)
+
+    def list_runs(self, org_id: UUID, *, limit: int = 50) -> list[Agent_Run_Summary]:
+        """Return this org's runs, most recent first, with step and tool-call counts."""
+        summaries = [
+            Agent_Run_Summary(
+                run_id=run_id,
+                created_at=self._started_at.get(
+                    (owner, run_id), datetime.now(timezone.utc)
+                ),
+                step_count=len(entries),
+                tool_call_count=sum(
+                    1 for entry in entries if entry.step_type == "tool_call"
+                ),
+            )
+            for (owner, run_id), entries in self._entries.items()
+            if owner == org_id
+        ]
+        summaries.sort(key=lambda s: s.created_at, reverse=True)
+        return summaries[:limit]
 
 
 
@@ -168,3 +197,34 @@ class Pg_Trace_Recorder(Trace_Recorder):
             for r in rows
         ]
         return Trace(run_id=run_id, entries=entries)
+
+    def list_runs(self, org_id: UUID, *, limit: int = 50) -> list[Agent_Run_Summary]:
+        """Return this org's runs, most recent first, with step and tool-call counts."""
+        from sqlalchemy import text
+
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT r.id, r.created_at, count(t.id) AS step_count,
+                           count(t.id) FILTER (WHERE t.step_type = 'tool_call')
+                               AS tool_call_count
+                    FROM agent_runs r
+                    LEFT JOIN trace_entries t ON t.run_id = r.id
+                    WHERE r.org_id = :org_id
+                    GROUP BY r.id, r.created_at
+                    ORDER BY r.created_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"org_id": str(org_id), "limit": limit},
+            ).fetchall()
+        return [
+            Agent_Run_Summary(
+                run_id=str(r[0]),
+                created_at=r[1],
+                step_count=int(r[2]),
+                tool_call_count=int(r[3]),
+            )
+            for r in rows
+        ]

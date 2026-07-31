@@ -35,6 +35,7 @@ import { Button } from "../../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { useConversation } from "./ConversationContext";
+import { RecentConversations } from "./RecentConversations";
 
 interface ConversationMessage {
   role: string;
@@ -76,6 +77,9 @@ function StartConversation(): JSX.Element {
         description="Start a conversation to preserve multi-turn context across agent and multi-agent runs."
       />
 
+      {/* The start control beside the existing threads: the page previously held only
+          the button, so it named a feature it could not show any instance of. */}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)]">
       <Card data-testid="conversation-start-card">
         <CardHeader>
           <CardTitle>New conversation</CardTitle>
@@ -111,6 +115,9 @@ function StartConversation(): JSX.Element {
           )}
         </CardContent>
       </Card>
+
+      <RecentConversations />
+      </div>
     </div>
   );
 }

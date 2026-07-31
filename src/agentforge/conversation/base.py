@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from uuid import UUID
+
+# Longest preview retained for a conversation summary. Enough to recognise a thread
+# without shipping whole message bodies in a list response.
+PREVIEW_MAX_CHARS = 160
 
 
 @dataclass
@@ -20,6 +25,22 @@ class Message:
     role: str  # "user" | "assistant" | "tool" | "system"
     content: str
     position: int  # 0-based ordinal position within the conversation (ascending)
+
+
+@dataclass
+class Conversation_Summary:
+    """A row in the org's conversation list.
+
+    Carries a ``preview`` — the first message's opening characters — because a
+    conversation is otherwise identified only by a generated UUID, which tells an
+    operator nothing about which thread it is. Message bodies are excluded so listing
+    stays cheap regardless of thread length.
+    """
+
+    id: str
+    created_at: datetime
+    message_count: int
+    preview: str | None = None
 
 
 @dataclass
@@ -60,5 +81,18 @@ class Conversation_Store(ABC):
 
         Lets the transport layer distinguish an unknown/cross-tenant conversation
         (``404``) from a known-but-empty one when serving history.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_conversations(
+        self, org_id: UUID, *, limit: int = 50
+    ) -> list[Conversation_Summary]:
+        """Return ``org_id``'s conversations, most recently created first.
+
+        Without this the store could only create and read a conversation by id, so the
+        console could start threads but never show which ones existed — the id was
+        returned once and then unrecoverable. ``limit`` bounds the response because the
+        list grows without end.
         """
         raise NotImplementedError

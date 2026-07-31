@@ -173,3 +173,64 @@ describe("SampleCorpusControl", () => {
     expect(calls).toBe(1);
   });
 });
+
+
+describe("SampleCorpusControl duplicate handling", () => {
+  it("reports that nothing was added when every sample is already present", async () => {
+    // Loading the corpus twice is a realistic slip mid-demo. Reporting success
+    // would imply six documents exist when there are still three.
+    server.use(
+      http.post(`${BASE}/documents`, async ({ request }) => {
+        const form = await request.formData();
+        return HttpResponse.json(
+          {
+            document_id: "existing",
+            filename: String(form.get("filename")),
+            chunk_count: 3,
+            status: "ingested",
+            duplicate: true,
+          },
+          { status: 201 },
+        );
+      }),
+    );
+
+    renderControl();
+    await userEvent.click(screen.getByTestId("load-sample-corpus"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("sample-corpus-loaded")).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText("Every sample document was already in your corpus."),
+    ).toBeInTheDocument();
+  });
+
+  it("still reports a normal load when the documents are new", async () => {
+    server.use(
+      http.post(`${BASE}/documents`, async ({ request }) => {
+        const form = await request.formData();
+        return HttpResponse.json(
+          {
+            document_id: "new",
+            filename: String(form.get("filename")),
+            chunk_count: 2,
+            status: "ingested",
+            duplicate: false,
+          },
+          { status: 201 },
+        );
+      }),
+    );
+
+    renderControl();
+    await userEvent.click(screen.getByTestId("load-sample-corpus"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("sample-corpus-loaded")).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText("Every sample document was already in your corpus."),
+    ).not.toBeInTheDocument();
+  });
+});

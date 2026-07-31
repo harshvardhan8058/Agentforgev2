@@ -30,6 +30,13 @@ interface IngestResult {
   document_id: string;
   filename: string;
   status: string;
+  /**
+   * True when these bytes were already in the corpus, in which case `document_id`
+   * is the document that was already there and nothing new was written. Reporting
+   * it matters: silently showing a success implies a second copy was created, and
+   * the corpus listing then appears to hold duplicates for no reason.
+   */
+  duplicate?: boolean;
 }
 
 export function UploadControl(): JSX.Element {
@@ -61,9 +68,11 @@ export function UploadControl(): JSX.Element {
     onSuccess: (data) => {
       setLastResult(data);
       toast({
-        title: "Document ingested",
-        description: `${data.filename} · ${data.chunk_count} chunks`,
-        tone: "success",
+        title: data.duplicate ? "Already in your corpus" : "Document ingested",
+        description: data.duplicate
+          ? `${data.filename} matches a document you already have — nothing was added.`
+          : `${data.filename} · ${data.chunk_count} chunks`,
+        tone: data.duplicate ? "info" : "success",
       });
       void queryClient.invalidateQueries({
         queryKey: orgScopedKey(orgId, "documents"),
@@ -147,9 +156,24 @@ export function UploadControl(): JSX.Element {
         <Card data-testid="upload-result">
           <CardContent className="flex flex-col gap-2 pt-6">
             <div className="flex items-center gap-2 text-sm font-medium text-text">
-              <CheckCircle2 className="h-4 w-4 text-success" aria-hidden="true" />
-              Ingested
+              <CheckCircle2
+                className={cn(
+                  "h-4 w-4",
+                  lastResult.duplicate ? "text-info" : "text-success",
+                )}
+                aria-hidden="true"
+              />
+              {lastResult.duplicate ? "Already in your corpus" : "Ingested"}
             </div>
+            {lastResult.duplicate && (
+              <p
+                className="text-xs leading-relaxed text-text-muted"
+                data-testid="upload-duplicate-note"
+              >
+                These are the same bytes as a document you already have, so nothing
+                was added. The existing document is shown below.
+              </p>
+            )}
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
               <dt className="text-text-muted">Document ID</dt>
               <dd className="font-mono text-xs" data-testid="result-document-id">

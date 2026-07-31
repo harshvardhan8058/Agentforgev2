@@ -46,6 +46,7 @@ import { ExampleChips } from "../../components/ui/ExampleChips";
 import { AGENT_EXAMPLES } from "../../lib/examples";
 import { useSseRun } from "./useSseRun";
 import { TraceView } from "./TraceView";
+import { RecentAgentRuns } from "./RecentAgentRuns";
 
 interface AgentRunResponse {
   answer: string;
@@ -244,6 +245,10 @@ export function SingleAgentRunView(): JSX.Element {
           </CardContent>
         </Card>
       </Can>
+
+      {/* Past runs sit under the form so a finished run stays reachable; previously
+          a run's id was only available while its result was on screen. */}
+      <RecentAgentRuns />
       </div>
 
       <div className="flex min-w-0 flex-col gap-4" data-testid="agent-output">

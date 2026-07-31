@@ -23,7 +23,7 @@ Endpoints:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
@@ -39,6 +39,7 @@ from agentforge.api.schemas import (
     CitationModel,
     FinalOutputModel,
     MultiAgentRunResult,
+    MultiAgentRunSummaryResponse,
     StartMultiAgentRunRequest,
     StartMultiAgentRunResponse,
     TraceEntryModel,
@@ -292,6 +293,34 @@ async def submit_approval(
 
 
 # --- GET /multi-agent/runs/{id} ---------------------------------------------------
+
+
+@router.get("/multi-agent/runs", response_model=list[MultiAgentRunSummaryResponse])
+async def list_multi_agent_runs(
+    limit: int = Query(default=50, ge=1, le=200),
+    ctx: MultiAgentContext = Depends(get_multi_agent_context),
+    principal: Principal = Depends(require_permission(Permission.READ)),
+) -> list[MultiAgentRunSummaryResponse]:
+    """Return the caller org's multi-agent runs, most recent first (Req 9.4, 4.2).
+
+    A run could only be fetched by an id the caller already held, so a finished
+    collaboration was unreachable once its id left the screen. Scoped to
+    ``principal.org_id`` at the data-access layer, so no other tenant's run can appear.
+    """
+    summaries = await run_in_threadpool(
+        lambda: ctx.run_store.list_runs(principal.org_id, limit=limit)
+    )
+    return [
+        MultiAgentRunSummaryResponse(
+            run_id=summary.run_id,
+            conversation_id=summary.conversation_id,
+            task=summary.task,
+            status=summary.status,
+            termination_reason=summary.termination_reason,
+            created_at=summary.created_at,
+        )
+        for summary in summaries
+    ]
 
 
 @router.get(

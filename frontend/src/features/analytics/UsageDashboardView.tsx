@@ -85,6 +85,9 @@ export function UsageDashboardView(): JSX.Element {
         by_provider: data.by_provider ?? [],
         by_model: data.by_model ?? [],
         by_user: data.by_user ?? [],
+        // Defaulted true so an older API that omits the field is not accused of
+        // being unpriced; the flag only ever downgrades a confident figure.
+        cost_rates_configured: data.cost_rates_configured ?? true,
       };
     },
   });
@@ -216,6 +219,7 @@ export function UsageDashboardView(): JSX.Element {
               <UsageTotals
                 totalTokens={report.total_tokens}
                 totalCost={report.total_cost}
+                ratesConfigured={report.cost_rates_configured}
               />
 
               <Suspense
