@@ -17,7 +17,13 @@ import { __resetTokenStoreForTests } from "../../auth/tokenStore";
 import type { Role } from "../../auth/token";
 
 const BASE = "http://localhost:8000";
-const server = setupServer();
+// The start surface now also lists existing threads, so every render of it calls
+// `GET /conversations`. Registered as a default handler (which `resetHandlers` restores)
+// so the strict `onUnhandledRequest: "error"` guard stays satisfied without every test
+// having to opt in; the listing tests below override it.
+const server = setupServer(
+  http.get(`${BASE}/conversations`, () => HttpResponse.json([])),
+);
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
@@ -169,5 +175,106 @@ describe("Conversation context (MSW)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("conversation-not-found")).toBeInTheDocument(),
     );
+  });
+});
+
+
+
+/**
+ * The conversation listing.
+ *
+ * Creating a thread returned its id once and nothing could enumerate threads
+ * afterwards, so the page titled "Conversations" could not show a single one and a
+ * thread became unreachable as soon as its id left the screen.
+ */
+describe("RecentConversations", () => {
+  it("lists existing threads by their first message, not their id", async () => {
+    server.use(
+      http.get(`${BASE}/conversations`, () =>
+        HttpResponse.json([
+          {
+            conversation_id: "c-1",
+            created_at: new Date().toISOString(),
+            message_count: 2,
+            preview: "What does onboarding provide?",
+          },
+        ]),
+      ),
+    );
+
+    renderConversations("/conversations");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("conversations-list")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("What does onboarding provide?")).toBeInTheDocument();
+    expect(screen.getByText("2 messages")).toBeInTheDocument();
+  });
+
+  it("links each row to that conversation", async () => {
+    server.use(
+      http.get(`${BASE}/conversations`, () =>
+        HttpResponse.json([
+          {
+            conversation_id: "c-42",
+            created_at: new Date().toISOString(),
+            message_count: 1,
+            preview: "Hello",
+          },
+        ]),
+      ),
+    );
+
+    renderConversations("/conversations");
+
+    const row = await screen.findByTestId("conversation-row-c-42");
+    expect(row).toHaveAttribute("href", "/conversations/c-42");
+  });
+
+  it("labels a thread with no messages rather than showing a blank row", async () => {
+    server.use(
+      http.get(`${BASE}/conversations`, () =>
+        HttpResponse.json([
+          {
+            conversation_id: "c-empty",
+            created_at: new Date().toISOString(),
+            message_count: 0,
+            preview: null,
+          },
+        ]),
+      ),
+    );
+
+    renderConversations("/conversations");
+
+    expect(await screen.findByText("Empty conversation")).toBeInTheDocument();
+    expect(screen.getByText("0 messages")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when the org has no conversations", async () => {
+    renderConversations("/conversations");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("conversations-empty")).toBeInTheDocument(),
+    );
+  });
+
+  it("surfaces a listing failure without breaking the start control", async () => {
+    // The two are independent: being unable to list must not prevent creating.
+    server.use(
+      http.get(`${BASE}/conversations`, () =>
+        HttpResponse.json(
+          { error: { code: "internal_error", message: "Boom.", details: {} } },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    renderConversations("/conversations");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("error-message")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("conversation-start")).toBeInTheDocument();
   });
 });

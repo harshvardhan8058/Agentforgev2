@@ -43,6 +43,12 @@ class IngestResponse(BaseModel):
     filename: str
     chunk_count: int
     status: Literal["ingested"]
+    # True when these bytes were already in the caller's corpus. ``document_id`` then
+    # identifies the document that was already there and nothing new was written, so the
+    # request is still a success — it just did not create anything. Kept separate from
+    # ``status`` (which stays ``"ingested"``, since the document *is* ingested) so no
+    # existing client's handling of that field changes. Defaulted for the same reason.
+    duplicate: bool = False
 
 
 # --- query (contract for Phase 2 wiring) ---
@@ -311,6 +317,45 @@ class ApiKeyMetadata(BaseModel):
 # --- observability: analytics / cost (Phase 6) ------------------------------------
 
 
+class ConversationSummaryResponse(BaseModel):
+    """One row of ``GET /conversations`` — enough to recognise and reopen a thread.
+
+    ``preview`` is the opening of the first message: a conversation is otherwise
+    identified only by a generated UUID, which tells an operator nothing about which
+    thread it is. Message bodies are excluded so listing stays cheap.
+    """
+
+    conversation_id: str
+    created_at: datetime
+    message_count: int
+    preview: str | None = None
+
+
+class AgentRunSummaryResponse(BaseModel):
+    """One row of ``GET /agent/runs``.
+
+    Limited to what the trace records: ``agent_runs.termination_reason`` exists as a
+    column but nothing writes it, so it is not reported rather than surfacing a
+    permanent ``null`` dressed as data.
+    """
+
+    run_id: str
+    created_at: datetime
+    step_count: int
+    tool_call_count: int
+
+
+class MultiAgentRunSummaryResponse(BaseModel):
+    """One row of ``GET /multi-agent/runs`` — the task, status, and how it ended."""
+
+    run_id: str
+    conversation_id: str
+    task: str
+    status: str
+    termination_reason: str | None = None
+    created_at: datetime
+
+
 class UsageBreakdownEntry(BaseModel):
     """One grouped row of a usage breakdown (by provider / model / user) (Req 3.2)."""
 
@@ -331,6 +376,12 @@ class UsageReportResponse(BaseModel):
     by_provider: list[UsageBreakdownEntry] = Field(default_factory=list)
     by_model: list[UsageBreakdownEntry] = Field(default_factory=list)
     by_user: list[UsageBreakdownEntry] = Field(default_factory=list)
+    # Whether this deployment has any non-zero cost rate configured. Costs default to
+    # zero (Req 2.4, 2.5), so a report can correctly read `0` either because nothing has
+    # been spent or because no rates were ever supplied. A client cannot tell those apart
+    # from the figures alone, and presenting an unpriced deployment's "$0.00" as a real
+    # total is misleading. Defaulted so existing clients are unaffected.
+    cost_rates_configured: bool = False
 
 
 # --- observability: prompt registry (Phase 6) -------------------------------------

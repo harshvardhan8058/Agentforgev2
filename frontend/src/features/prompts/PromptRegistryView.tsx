@@ -36,6 +36,7 @@ import { Badge } from "../../components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { RenderPromptForm } from "./RenderPromptForm";
+import { PromptComparison } from "./PromptComparison";
 import { NewVersionForm } from "./NewVersionForm";
 import PromptStudio from "./PromptStudio";
 
@@ -302,6 +303,13 @@ export function PromptRegistryView(): JSX.Element {
                 />
               </CardContent>
             </Card>
+          )}
+
+          {/* Comparing rendered *results* rather than bodies: a body diff shows what
+              changed in the prompt, this shows what it changes in the output. Renders
+              nothing until the template has two versions to compare. */}
+          {selectedName !== null && versions.data && (
+            <PromptComparison name={selectedName} versions={versions.data} />
           )}
 
           <Can permission="ingest_documents">

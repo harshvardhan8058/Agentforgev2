@@ -16,7 +16,11 @@ import { __resetTokenStoreForTests } from "../../auth/tokenStore";
 import type { Role } from "../../auth/token";
 
 const BASE = "http://localhost:8000";
-const server = setupServer();
+// The run page now also lists past runs, so every render calls
+// `GET /multi-agent/runs`. Registered as a default handler for the same reason as above.
+const server = setupServer(
+  http.get(`${BASE}/multi-agent/runs`, () => HttpResponse.json([])),
+);
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {

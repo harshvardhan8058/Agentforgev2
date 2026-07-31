@@ -45,9 +45,10 @@ class DBDocumentStore:
                 text(
                     """
                     INSERT INTO documents
-                        (id, org_id, filename, content_type, size_bytes, status, created_at)
+                        (id, org_id, filename, content_type, size_bytes, status,
+                         created_at, content_hash)
                     VALUES (:id, :org_id, :filename, :content_type, :size_bytes, :status,
-                            :created_at)
+                            :created_at, :content_hash)
                     """
                 ),
                 {
@@ -58,6 +59,7 @@ class DBDocumentStore:
                     "size_bytes": document.size_bytes,
                     "status": document.status,
                     "created_at": document.created_at,
+                    "content_hash": document.content_hash,
                 },
             )
             for chunk in chunks:
@@ -130,7 +132,8 @@ class DBDocumentStore:
             row = conn.execute(
                 text(
                     """
-                    SELECT id, filename, content_type, size_bytes, status, created_at
+                    SELECT id, filename, content_type, size_bytes, status, created_at,
+                           content_hash
                     FROM documents WHERE id = :id AND org_id = :org_id
                     """
                 ),
@@ -145,6 +148,45 @@ class DBDocumentStore:
             size_bytes=int(row[3]),
             status=row[4],
             created_at=row[5],
+            content_hash=row[6],
+        )
+
+    def find_by_content_hash(
+        self, org_id: UUID, content_hash: str
+    ) -> DocumentListing | None:
+        """Return this org's document with the given content hash, if one exists.
+
+        Served by the ``(org_id, content_hash)`` index from migration 0012. Ordered by
+        ``created_at`` so, if pre-existing duplicates were ingested before hashing (they
+        carry a NULL hash and so cannot match) or a concurrent upload slipped past the
+        application check, the oldest copy is the canonical one.
+        """
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT d.id, d.filename, d.content_type, d.size_bytes, d.status,
+                           d.created_at, count(c.id) AS chunk_count
+                    FROM documents d
+                    LEFT JOIN chunks c ON c.document_id = d.id
+                    WHERE d.org_id = :org_id AND d.content_hash = :content_hash
+                    GROUP BY d.id
+                    ORDER BY d.created_at ASC
+                    LIMIT 1
+                    """
+                ),
+                {"org_id": str(org_id), "content_hash": content_hash},
+            ).one_or_none()
+        if row is None:
+            return None
+        return DocumentListing(
+            document_id=str(row[0]),
+            filename=row[1],
+            content_type=row[2],
+            size_bytes=int(row[3]),
+            status=row[4],
+            chunk_count=int(row[6]),
+            created_at=row[5].isoformat() if row[5] is not None else "",
         )
 
     def delete_document(self, org_id: UUID, document_id: str) -> None:

@@ -22,6 +22,11 @@ class Document:
     size_bytes: int
     status: str  # "ingested" | "rejected"
     created_at: datetime
+    # Hex SHA-256 of the uploaded bytes, used to recognise a re-upload of the same file.
+    # Identifies *content*, so the same file uploaded under two names is one document.
+    # Optional and defaulted: documents ingested before content hashing have no hash (the
+    # raw bytes are not retained, so it cannot be backfilled) and are never matched.
+    content_hash: str | None = None
 
 
 @dataclass

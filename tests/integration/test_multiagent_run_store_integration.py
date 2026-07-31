@@ -153,3 +153,47 @@ async def test_pg_multi_agent_run_store_full_roundtrip(engine):
             text("DELETE FROM organizations WHERE id = ANY(:ids)"),
             {"ids": [org_id, other_org]},
         )
+
+
+
+async def test_pg_multi_agent_run_store_lists_runs(engine):
+    """``list_runs`` is raw SQL; only real Postgres proves the columns and ordering."""
+    dsn = _dsn()
+    assert dsn is not None  # narrowed by the skip in the fixture
+
+    org_id = str(uuid.uuid4())
+    other_org_id = str(uuid.uuid4())
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO organizations (id, name) VALUES (:id, 'MA List Org')"),
+            {"id": org_id},
+        )
+        await conn.execute(
+            text("INSERT INTO organizations (id, name) VALUES (:id, 'MA Other Org')"),
+            {"id": other_org_id},
+        )
+
+    store = Pg_Multi_Agent_Run_Store(dsn)
+    conversation_store = PgConversation_Store(dsn)
+
+    first = store.create(org_id, conversation_store.create(org_id), "First task")
+    second = store.create(org_id, conversation_store.create(org_id), "Second task")
+
+    # Another tenant's run must never appear.
+    store.create(
+        other_org_id, conversation_store.create(other_org_id), "Their task"
+    )
+
+    rows = store.list_runs(org_id)
+    by_run = {row.run_id: row for row in rows}
+
+    assert set(by_run) == {first.id, second.id}
+    # The task is what identifies a run to a person, so it must survive the round trip.
+    assert by_run[first.id].task == "First task"
+    assert by_run[first.id].status == "running"
+    assert by_run[first.id].termination_reason is None
+    assert by_run[first.id].conversation_id == first.conversation_id
+
+    # Newest first, and the limit is applied by the query.
+    assert [row.run_id for row in rows] == [second.id, first.id]
+    assert [row.run_id for row in store.list_runs(org_id, limit=1)] == [second.id]

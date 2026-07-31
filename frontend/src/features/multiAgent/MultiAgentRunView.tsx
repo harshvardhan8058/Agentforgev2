@@ -56,6 +56,7 @@ import { useSseRun } from "../agent/useSseRun";
 import { useConversation } from "../conversations/ConversationContext";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { MultiAgentRunResult } from "./MultiAgentRunResult";
+import { RecentMultiAgentRuns } from "./RecentMultiAgentRuns";
 import { WorkflowVisualizer } from "./WorkflowVisualizer";
 
 interface StartRunResponse {
@@ -220,6 +221,17 @@ export function MultiAgentRunView(): JSX.Element {
           </CardContent>
         </Card>
       </Can>
+
+      {/* Past runs sit under the form. Selecting one shows its persisted result in the
+          output column, so a finished collaboration can be reopened rather than re-run. */}
+      <RecentMultiAgentRuns
+        selectedRunId={run?.run_id ?? null}
+        onSelect={(runId) => {
+          setRun({ run_id: runId, conversation_id: "", status: "terminated" });
+          setShowResult(true);
+          setResultRefresh((n) => n + 1);
+        }}
+      />
       </div>
 
       <div className="flex min-w-0 flex-col gap-4" data-testid="multi-output">

@@ -121,3 +121,69 @@ def test_read_principal_gets_own_org_report_only(wired):
     by_provider = {e["key"]: e["total_tokens"] for e in body["by_provider"]}
     assert by_provider == {"fallback": 20, "groq": 10}
     assert sum(e["total_tokens"] for e in body["by_provider"]) == body["total_tokens"]
+
+
+
+# --- cost_rates_configured -------------------------------------------------------
+#
+# Costs default to zero (Req 2.4, 2.5), so a report reading `0` is ambiguous: either
+# nothing was spent, or the deployment never priced its tokens. The console showed the
+# latter as a confident "$0.00" beside a five-figure token count, which reads as a broken
+# cost feature rather than an unconfigured one. The flag lets a client tell them apart.
+
+
+def _app_with_settings(settings, usage_store):
+    """Build an app whose Settings drive the cost model, returning ``(client, headers)``."""
+    app = create_app(settings)
+    app.state.observability_context = build_observability_context(
+        settings, usage_store=usage_store
+    )
+    headers, org_id, _ctx = install_enterprise_auth(app, settings)
+    return TestClient(app, raise_server_exceptions=False), headers, org_id
+
+
+def test_rates_not_configured_is_reported_on_the_keyless_default():
+    store = InMemory_Usage_Store()
+    client, headers, org_id = _app_with_settings(_make_settings(), store)
+    store.add(_usage_record(org_id, tokens=100))
+
+    body = client.get("/analytics/usage", headers=headers).json()
+
+    assert body["total_tokens"] > 0
+    assert body["total_cost"] == "0"
+    assert body["cost_rates_configured"] is False
+
+
+def test_a_non_zero_default_rate_counts_as_configured():
+    settings = _make_settings()
+    settings.cost_default_prompt_per_1k = "0.05"
+    client, headers, _org = _app_with_settings(settings, InMemory_Usage_Store())
+
+    body = client.get("/analytics/usage", headers=headers).json()
+
+    assert body["cost_rates_configured"] is True
+
+
+def test_a_per_model_rate_table_counts_as_configured():
+    settings = _make_settings()
+    settings.cost_rate_table_json = (
+        '{"groq:llama-3.1-8b-instant": {"prompt": "0.05", "completion": "0.08"}}'
+    )
+    client, headers, _org = _app_with_settings(settings, InMemory_Usage_Store())
+
+    body = client.get("/analytics/usage", headers=headers).json()
+
+    assert body["cost_rates_configured"] is True
+
+
+def test_an_all_zero_rate_table_is_reported_as_not_configured():
+    """A table that prices everything at zero cannot produce a cost, so say so."""
+    settings = _make_settings()
+    settings.cost_rate_table_json = (
+        '{"groq:llama-3.1-8b-instant": {"prompt": "0", "completion": "0"}}'
+    )
+    client, headers, _org = _app_with_settings(settings, InMemory_Usage_Store())
+
+    body = client.get("/analytics/usage", headers=headers).json()
+
+    assert body["cost_rates_configured"] is False

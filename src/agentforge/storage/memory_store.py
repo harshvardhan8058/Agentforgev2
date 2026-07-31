@@ -63,6 +63,16 @@ class InMemoryDocumentStore:
     def get_document(self, org_id: UUID, document_id: str) -> Document | None:
         return self._documents.get((org_id, document_id))
 
+    def find_by_content_hash(
+        self, org_id: UUID, content_hash: str
+    ) -> DocumentListing | None:
+        """Return this org's document with the given content hash, if one exists."""
+        for listing in self.list_documents(org_id):
+            document = self._documents.get((org_id, listing.document_id))
+            if document is not None and document.content_hash == content_hash:
+                return listing
+        return None
+
     def delete_document(self, org_id: UUID, document_id: str) -> None:
         self._documents.pop((org_id, document_id), None)
         removed = self._chunks.pop((org_id, document_id), [])

@@ -87,3 +87,50 @@ async def test_pg_conversation_append_history_and_auto_create(engine):
             text("DELETE FROM organizations WHERE id = ANY(:ids)"),
             {"ids": [org_id, other_org]},
         )
+
+
+
+async def test_pg_conversation_listing(engine):
+    """``list_conversations`` is raw SQL, so it is only proven against real Postgres.
+
+    The in-memory double satisfies the same contract, but a correlated subquery, a
+    ``GROUP BY`` and a ``LIMIT`` cannot be validated by it — a wrong column name or
+    mis-shaped aggregate would surface only in production.
+    """
+    store = PgConversation_Store(_dsn())
+
+    org_id = str(uuid.uuid4())
+    other_org_id = str(uuid.uuid4())
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO organizations (id, name) VALUES (:id, 'List Org')"),
+            {"id": org_id},
+        )
+        await conn.execute(
+            text("INSERT INTO organizations (id, name) VALUES (:id, 'Other List Org')"),
+            {"id": other_org_id},
+        )
+
+    empty_id = store.create(org_id)
+    chatty_id = store.create(org_id)
+    store.append(org_id, chatty_id, "user", "  What does   onboarding\nprovide?  ")
+    store.append(org_id, chatty_id, "assistant", "A laptop.")
+
+    # Another tenant's conversation must never appear in this org's listing.
+    theirs = store.create(other_org_id)
+    store.append(other_org_id, theirs, "user", "their thread")
+
+    rows = store.list_conversations(org_id)
+    by_id = {row.id: row for row in rows}
+
+    assert set(by_id) == {empty_id, chatty_id}
+    assert by_id[chatty_id].message_count == 2
+    # The preview is the FIRST message, whitespace-collapsed to a single line.
+    assert by_id[chatty_id].preview == "What does onboarding provide?"
+    # A thread with no messages is listed, with no preview to show.
+    assert by_id[empty_id].message_count == 0
+    assert by_id[empty_id].preview is None
+
+    # Newest first, and the limit is applied by the query rather than in Python.
+    assert [row.id for row in rows] == [chatty_id, empty_id]
+    assert [row.id for row in store.list_conversations(org_id, limit=1)] == [chatty_id]
