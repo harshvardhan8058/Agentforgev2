@@ -12,10 +12,13 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from agentforge.enterprise.audit import Audit_Action as AuditAction
 from agentforge.enterprise.rbac import Role as RbacRole
+from agentforge.webhooks.base import Subscribable_Event as SubscribableEvent
+from agentforge.webhooks.base import Webhook_Event as WebhookEvent
+from agentforge.webhooks.security import MAX_URL_LENGTH as WEBHOOK_MAX_URL_LENGTH
 
 # A JSON scalar: the value type for every free-form mapping this API accepts or returns.
 # Declaring it precisely (rather than as an opaque object) states what the server actually
@@ -757,3 +760,123 @@ class IntegrationStatusResponse(BaseModel):
     """
 
     integrations: list[IntegrationStatusEntry] = Field(default_factory=list)
+
+
+
+# --- outbound webhooks ------------------------------------------------------------
+#
+# The response models below have NO secret field. That is the mechanism, not an omission a
+# reviewer has to verify: the router maps a `Webhook_Subscription` (which carries the signing
+# key, because signing needs it) onto `WebhookSubscriptionResponse` (which has nowhere to put
+# it), so there is no read path that could leak the secret by forgetting to strip it. The
+# secret is returned exactly once, by `CreateWebhookResponse`, and never again.
+
+
+class CreateWebhookRequest(BaseModel):
+    """Body for ``POST /webhooks`` — register an endpoint and what it should hear about.
+
+    ``events`` is typed against :class:`~agentforge.webhooks.base.Subscribable_Event`, so the
+    *contract* refuses ``webhook.ping`` (which nothing ever emits) and the generated client
+    cannot offer it. The URL is validated by the server's admission policy, not by a regex
+    here: the rules that matter (TLS, no credentials, resolves publicly) are not expressible
+    as a pattern, and duplicating half of them in the schema would produce two answers to one
+    question.
+    """
+
+    url: str = Field(..., min_length=1, max_length=WEBHOOK_MAX_URL_LENGTH)
+    # At least one event: a subscription that hears about nothing is a row that can only ever
+    # confuse whoever finds it.
+    events: list[SubscribableEvent] = Field(..., min_length=1)
+    description: str | None = Field(default=None, max_length=200)
+    # Registered active by default — the point of registering is to receive events — but
+    # settable so an endpoint can be prepared before it is ready to be called.
+    active: bool = True
+
+    @field_validator("events")
+    @classmethod
+    def _unique_events(cls, value: list[SubscribableEvent]) -> list[SubscribableEvent]:
+        """De-duplicate while preserving order.
+
+        Sending the same event twice is harmless but would be stored, echoed back, and make
+        the console's checklist disagree with itself. Normalised rather than refused: it is
+        not a mistake worth failing a request over.
+        """
+        seen: set[str] = set()
+        return [e for e in value if not (e.value in seen or seen.add(e.value))]
+
+
+class UpdateWebhookRequest(BaseModel):
+    """Body for ``PATCH /webhooks/{id}`` — a genuine partial update.
+
+    Only the fields actually present in the request body are applied, which is what makes
+    ``{"active": false}`` a pause rather than a request that also clears the description.
+    ``description: null`` is therefore meaningful and **clears** it: the alternative — treating
+    null as "leave alone" — makes a documented field permanently unclearable, which is the kind
+    of API lie that only surfaces when a customer asks why their edit did nothing.
+    """
+
+    url: str | None = Field(default=None, min_length=1, max_length=WEBHOOK_MAX_URL_LENGTH)
+    events: list[SubscribableEvent] | None = Field(default=None, min_length=1)
+    description: str | None = Field(default=None, max_length=200)
+    active: bool | None = None
+
+    @field_validator("events")
+    @classmethod
+    def _unique_events(
+        cls, value: list[SubscribableEvent] | None
+    ) -> list[SubscribableEvent] | None:
+        if value is None:
+            return None
+        seen: set[str] = set()
+        return [e for e in value if not (e.value in seen or seen.add(e.value))]
+
+
+class WebhookSubscriptionResponse(BaseModel):
+    """One registered webhook endpoint. Never carries the signing secret."""
+
+    webhook_id: UUID
+    url: str
+    events: list[SubscribableEvent]
+    description: str | None = None
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class CreateWebhookResponse(BaseModel):
+    """``POST /webhooks``: the subscription, plus the signing secret — shown exactly once.
+
+    The same shape as ``CreateApiKeyResponse``, for the same reason: a secret a client can
+    fetch again is a secret with more copies than it needs. Unlike an API key, the secret is
+    stored recoverably (a hash cannot sign an outgoing request), so the once-only exposure is
+    an application guarantee rather than a cryptographic one — stated plainly in
+    docs/KNOWN_LIMITATIONS.md rather than implied to be stronger than it is.
+    """
+
+    webhook: WebhookSubscriptionResponse
+    secret: str
+    # Says out loud what the field above means, so a client author does not have to infer the
+    # lifetime from prose in a different document.
+    secret_note: Literal[
+        "Store this now: the signing secret is shown once and cannot be retrieved again."
+    ] = "Store this now: the signing secret is shown once and cannot be retrieved again."
+
+
+class WebhookDeliveryResponse(BaseModel):
+    """One delivery attempt sequence for a subscription.
+
+    ``response_status`` is ``null`` when no response was ever obtained (DNS failure, refused
+    connection, timeout), which is the distinction between "your endpoint said 500" and "we
+    could not reach your endpoint". ``duration_ms`` covers HTTP work only, excluding the
+    backoff between retries, so it answers "how slow is this endpoint".
+    """
+
+    delivery_id: UUID
+    webhook_id: UUID
+    event: WebhookEvent
+    status: Literal["delivered", "failed"]
+    attempts: int
+    response_status: int | None = None
+    error: str | None = None
+    duration_ms: int
+    created_at: datetime

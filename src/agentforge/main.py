@@ -34,6 +34,7 @@ from agentforge.api.routers import observability as observability_router
 from agentforge.api.routers import orgs as orgs_router
 from agentforge.api.routers import prompts as prompts_router
 from agentforge.api.routers import query as query_router
+from agentforge.api.routers import webhooks as webhooks_router
 from agentforge.config.container import (
     build_agent_context,
     build_app_context,
@@ -206,6 +207,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(evaluations_router.router)
     # Phase 8 integrations router (status introspection).
     app.include_router(integrations_router.router)
+    # Outbound webhooks: register endpoints, test them, read the delivery log.
+    app.include_router(webhooks_router.router)
 
     return app
 

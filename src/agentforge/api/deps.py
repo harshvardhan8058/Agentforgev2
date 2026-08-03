@@ -57,6 +57,11 @@ from agentforge.storage.base import DocumentStore
 from agentforge.streaming.sse import SSE_Streaming_Service
 from agentforge.tracing.base import Trace_Recorder
 from agentforge.vectorstore.base import Vector_Store
+from agentforge.webhooks.emitter import Webhook_Emitter, disabled_webhook_emitter
+from agentforge.webhooks.store import (
+    Webhook_Delivery_Store,
+    Webhook_Subscription_Store,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -460,6 +465,35 @@ def get_budget_store(request: Request) -> Budget_Store:
 def get_budget_guard(request: Request) -> Budget_Guard:
     """Return the wired Budget_Guard (spend status + the enforcement decision)."""
     return get_observability_context(request).budget_guard
+
+
+def get_webhook_subscription_store(request: Request) -> Webhook_Subscription_Store:
+    """Return the wired Webhook_Subscription_Store (the org's webhook endpoints)."""
+    return get_observability_context(request).webhook_subscription_store
+
+
+def get_webhook_delivery_store(request: Request) -> Webhook_Delivery_Store:
+    """Return the wired Webhook_Delivery_Store (what was sent, and what happened)."""
+    return get_observability_context(request).webhook_delivery_store
+
+
+def get_webhook_emitter(request: Request) -> Webhook_Emitter:
+    """Return the wired Webhook_Emitter, or an inert one if no context is wired.
+
+    Deliberately non-raising, exactly like :func:`get_trace_export_service` and for the same
+    reason: the emitter is consumed by the *run* endpoints, so turning a missing observability
+    context into a 500 on ``POST /agent/run`` would let a notification concern fail the work it
+    is supposed to be reporting on. A partially-wired app runs agents normally and notifies
+    nobody.
+
+    The webhook *management* router keeps using the raising accessors above, where a missing
+    context is a genuine misconfiguration and must fail loudly rather than silently accept
+    subscriptions into a store nothing reads.
+    """
+    ctx = getattr(request.app.state, "observability_context", None)
+    if ctx is None:
+        return disabled_webhook_emitter()
+    return ctx.webhook_emitter
 
 
 def get_analytics_service(request: Request) -> Analytics_Service:

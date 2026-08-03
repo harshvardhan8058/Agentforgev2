@@ -115,6 +115,59 @@ test.describe("accessibility (axe, WCAG 2.1 AA)", () => {
     expect(results.violations).toEqual([]);
   });
 
+  test("webhooks view has no serious violations", async ({ page }) => {
+    await mockCommon(page);
+    await seedAuth(page, { role: "owner" });
+    await mockJson(page, "/webhooks", [
+      {
+        webhook_id: "11111111-1111-4111-8111-111111111111",
+        url: "https://hooks.example.com/agentforge",
+        events: ["run.completed", "guardrail.blocked"],
+        description: "Ops alerting",
+        active: true,
+        created_at: "2026-08-01T10:00:00Z",
+        updated_at: "2026-08-01T10:00:00Z",
+      },
+    ]);
+    await mockJson(page, "/webhooks/*/deliveries**", [
+      {
+        delivery_id: "22222222-2222-4222-8222-222222222222",
+        webhook_id: "11111111-1111-4111-8111-111111111111",
+        event: "run.completed",
+        status: "delivered",
+        attempts: 1,
+        response_status: 200,
+        error: null,
+        duration_ms: 84,
+        created_at: "2026-08-01T10:01:00Z",
+      },
+      {
+        delivery_id: "33333333-3333-4333-8333-333333333333",
+        webhook_id: "11111111-1111-4111-8111-111111111111",
+        event: "guardrail.blocked",
+        status: "failed",
+        attempts: 3,
+        response_status: 500,
+        error: "endpoint returned HTTP 500",
+        duration_ms: 4012,
+        created_at: "2026-08-01T10:02:00Z",
+      },
+    ]);
+
+    await page.goto("/webhooks");
+    await expect(page.getByTestId("webhooks-list")).toBeVisible();
+    // Expanded, so the delivery table (and its scrollable region) is in the scanned DOM.
+    await page
+      .getByTestId("deliveries-webhook-11111111-1111-4111-8111-111111111111")
+      .click();
+    await expect(
+      page.getByTestId("deliveries-table-11111111-1111-4111-8111-111111111111"),
+    ).toBeVisible();
+
+    const results = await scan(page);
+    expect(results.violations).toEqual([]);
+  });
+
   test("query view has no serious violations", async ({ page }) => {
     await mockCommon(page);
     await seedAuth(page, { role: "member" });

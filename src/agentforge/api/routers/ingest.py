@@ -18,10 +18,23 @@ loop.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.concurrency import run_in_threadpool
 
-from agentforge.api.deps import get_ingestion_service, require_permission
+from agentforge.api.deps import (
+    get_ingestion_service,
+    get_webhook_emitter,
+    require_permission,
+)
 from agentforge.api.errors import AppError
 from agentforge.api.schemas import IngestResponse
 from agentforge.enterprise.models import Principal
@@ -36,6 +49,8 @@ from agentforge.ingestion.service import (
     UnsupportedFormatError,
 )
 from agentforge.ingestion.extractors import ExtractionError
+from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.events import emit_document_ingested
 
 router = APIRouter(tags=["documents"])
 
@@ -67,12 +82,20 @@ def _resolve_content_type(filename: str, declared: str | None) -> str:
 )
 async def ingest_document(
     request: Request,
+    background: BackgroundTasks,
     file: UploadFile = File(...),
     filename: str | None = Form(default=None),
     service: Ingestion_Service = Depends(get_ingestion_service),
+    webhooks: Webhook_Emitter = Depends(get_webhook_emitter),
     principal: Principal = Depends(require_permission(Permission.INGEST_DOCUMENTS)),
 ) -> IngestResponse:
-    """Ingest an uploaded document into the caller's org and return its summary (Req 7.3)."""
+    """Ingest an uploaded document into the caller's org and return its summary (Req 7.3).
+
+    A successful ingestion emits ``document.ingested`` as a background task — after the
+    response, so a subscriber's endpoint cannot slow down an upload. A *rejected* upload emits
+    nothing: the caller already has the reason, and "somebody tried to upload a .exe" is
+    audit-trail material rather than a platform event a consumer would act on.
+    """
     effective_filename = filename or file.filename or "upload"
     content_type = _resolve_content_type(effective_filename, file.content_type)
     data = await file.read()
@@ -108,6 +131,17 @@ async def ingest_document(
             "embedding_error", str(exc), status.HTTP_500_INTERNAL_SERVER_ERROR
         ) from exc
 
+    background.add_task(
+        emit_document_ingested,
+        webhooks,
+        principal.org_id,
+        document_id=result.document_id,
+        filename=result.filename,
+        chunk_count=result.chunk_count,
+        # Reported rather than suppressed: "this was already in your corpus, here is the
+        # document it matched" is a real outcome a consumer indexing on ingestion needs.
+        duplicate=result.duplicate,
+    )
     return IngestResponse(
         document_id=result.document_id,
         filename=result.filename,

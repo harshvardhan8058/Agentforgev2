@@ -47,6 +47,15 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       ...jsxA11y.flatConfigs.recommended.rules,
+      // A horizontally scrollable container with no focusable child is unreachable by
+      // keyboard, which axe reports as `scrollable-region-focusable` (WCAG 2.1.1). The fix
+      // is exactly `tabIndex={0}` plus a landmark role, and the rule's default allow-list
+      // (`tabpanel` only) rejects that. `group` and `region` are added because they are the
+      // roles the fix legitimately uses; everything else still errors.
+      "jsx-a11y/no-noninteractive-tabindex": [
+        "error",
+        { tags: [], roles: ["tabpanel", "group", "region"] },
+      ],
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true },

@@ -12,6 +12,7 @@ invoked (Req 5.4, 5.6).
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -21,6 +22,8 @@ from typing import TypeVar
 from fastapi import status
 
 from agentforge.api.errors import AppError
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -97,15 +100,31 @@ def apply_input_guardrail(
     pipeline: Guardrail_Pipeline,
     content: str,
     downstream: Callable[[], T],
+    *,
+    on_block: Callable[[str | None], None] | None = None,
 ) -> T:
     """Run the input ``pipeline`` on ``content`` before invoking ``downstream``.
 
     When the pipeline blocks, raise ``AppError("guardrail_blocked", 400, {"reason": ...})``
     and do **not** invoke ``downstream`` (Req 5.4). Otherwise invoke ``downstream`` and
     return its result; a flagging pipeline still proceeds (Req 5.5, 5.6).
+
+    ``on_block`` is called with the blocking reason immediately before the refusal is raised.
+    It exists so an entry point can *report* the block — a guardrail block is precisely the
+    event a security team wants notified — without this module knowing what reporting means.
+    It is called for its side effect only and must be cheap: the callers register deferred
+    work rather than performing it, so the refusal is not held up by a notification. A failure
+    in the hook is swallowed, because a guardrail must refuse the request either way.
     """
     result = pipeline.evaluate(content)
     if result.decision is Guardrail_Decision.BLOCK:
+        if on_block is not None:
+            try:
+                on_block(result.reason)
+            except Exception:  # noqa: BLE001 - reporting must not change the decision
+                logger.warning(
+                    "Guardrail block hook failed; the block still stands.", exc_info=True
+                )
         raise AppError(
             "guardrail_blocked",
             "Input was blocked by a guardrail.",

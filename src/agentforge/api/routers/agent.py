@@ -15,7 +15,7 @@ blocking the event loop.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
@@ -28,9 +28,10 @@ from agentforge.api.deps import (
     get_streaming_service,
     get_trace_export_service,
     get_trace_recorder,
+    get_webhook_emitter,
     require_permission,
 )
-from agentforge.api.errors import AppError
+from agentforge.api.errors import AppError, defer_after_error
 from agentforge.api.schemas import (
     AgentRunRequest,
     AgentRunResponse,
@@ -48,10 +49,16 @@ from agentforge.observability.guardrails.base import (
 )
 from agentforge.observability.trace_export import Trace_Export_Service
 from agentforge.streaming.base import AgentRunInput
-from agentforge.streaming.sse import SSE_Streaming_Service
+from agentforge.streaming.sse import Completed_Run, SSE_Streaming_Service
 from agentforge.tracing.base import Trace_Recorder
+from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.events import emit_guardrail_blocked, emit_run_outcome
 
 router = APIRouter(tags=["agent"])
+
+#: The ``kind`` reported in a run webhook payload from this router, so a consumer can route on
+#: it without inspecting ids.
+_RUN_KIND = "agent"
 
 
 def _resolve_conversation(
@@ -65,10 +72,12 @@ def _resolve_conversation(
 async def run_agent(
     payload: AgentRunRequest,
     background: BackgroundTasks,
+    request: Request,
     orchestrator: Agent_Orchestrator = Depends(get_orchestrator),
     store: Conversation_Store = Depends(get_conversation_store),
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
+    webhooks: Webhook_Emitter = Depends(get_webhook_emitter),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> AgentRunResponse:
@@ -84,9 +93,23 @@ async def run_agent(
     it must add nothing to the caller's latency and must not be able to fail the run
     (Req 10.2). With the keyless NoOp exporter the task returns immediately without
     touching the trace store.
+
+    The run's outcome is emitted as a webhook from the same background task, for the same
+    reasons, and a guardrail block is emitted from the deferred-work seam
+    (:func:`~agentforge.api.errors.defer_after_error`) — the refusal is raised, not returned,
+    so it has no background task of its own to hang work on.
     """
 
     org_id = principal.org_id
+
+    def _report_block(reason: str | None) -> None:
+        """Queue the guardrail-block webhook to run after the 400 has been sent."""
+        defer_after_error(
+            request,
+            lambda: emit_guardrail_blocked(
+                webhooks, org_id, surface="agent.run", reason=reason
+            ),
+        )
 
     def _run() -> AgentRunResponse:
         conversation_id = _resolve_conversation(store, org_id, payload.conversation_id)
@@ -103,7 +126,9 @@ async def run_agent(
 
         # Input guardrail: a block prevents the orchestrator invocation entirely (Req 5.4).
         if pipeline is not None:
-            state = apply_input_guardrail(pipeline, payload.message, _invoke)
+            state = apply_input_guardrail(
+                pipeline, payload.message, _invoke, on_block=_report_block
+            )
         else:
             state = _invoke()
 
@@ -137,6 +162,16 @@ async def run_agent(
         org_id=org_id,
         user_id=principal.user_id,
     )
+    background.add_task(
+        emit_run_outcome,
+        webhooks,
+        org_id,
+        run_id=response.run_id,
+        kind=_RUN_KIND,
+        termination_reason=response.termination_reason,
+        conversation_id=response.conversation_id,
+        citation_count=len(response.citations),
+    )
     return response
 
 
@@ -146,15 +181,22 @@ async def stream_agent(
     streaming: SSE_Streaming_Service = Depends(get_streaming_service),
     store: Conversation_Store = Depends(get_conversation_store),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
+    webhooks: Webhook_Emitter = Depends(get_webhook_emitter),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> StreamingResponse:
     """Stream the agent run over Server-Sent Events, scoped to the caller's org (Req 9.1-9.9).
 
-    A streamed run cannot use a background task (the response is the stream), so export is
-    attached as the streaming service's completion hook: it runs after the terminal event
-    has been handed to the client, and a failure there is swallowed rather than becoming a
-    second terminal event (Req 9.6, 10.2).
+    A streamed run cannot use a background task (the response *is* the stream), so both
+    post-run side effects — trace export and the run-outcome webhook — attach to the streaming
+    service's completion hook. They run after the terminal event has been handed to the client,
+    and a failure there is swallowed rather than becoming a second terminal event
+    (Req 9.6, 10.2).
+
+    One consequence worth being explicit about: the connection is not fully closed until that
+    hook returns, so a slow subscriber endpoint keeps a finished stream's connection open for
+    up to the delivery budget. That is bounded (attempts x timeout, and a per-org subscription
+    cap) and documented in docs/KNOWN_LIMITATIONS.md.
     """
     org_id = principal.org_id
     conversation_id = await run_in_threadpool(
@@ -169,11 +211,22 @@ async def stream_agent(
         conversation_context=context,
         org_id=org_id,
     )
-    def _export(run_id: str) -> None:
-        trace_export.export_run(run_id, org_id=org_id, user_id=principal.user_id)
+    def _after_stream(completed: Completed_Run) -> None:
+        trace_export.export_run(
+            completed.run_id, org_id=org_id, user_id=principal.user_id
+        )
+        emit_run_outcome(
+            webhooks,
+            org_id,
+            run_id=completed.run_id,
+            kind=_RUN_KIND,
+            termination_reason=completed.termination_reason,
+            conversation_id=completed.conversation_id,
+            citation_count=completed.citation_count,
+        )
 
     return StreamingResponse(
-        streaming.iter_sse_frames(run_input, on_complete=_export),
+        streaming.iter_sse_frames(run_input, on_complete=_after_stream),
         media_type="text/event-stream",
     )
 
