@@ -28,12 +28,15 @@ from agentforge.main import create_app
 from agentforge.storage.memory_store import InMemoryDocumentStore
 from agentforge.tracing.recorder import InMemory_Trace_Recorder
 from agentforge.vectorstore.chroma_store import Chroma_Store
+from agentforge.webhooks.dispatcher import Webhook_Dispatcher
 from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.outbox import InMemory_Webhook_Outbox
 from agentforge.webhooks.store import (
     InMemory_Webhook_Delivery_Store,
     InMemory_Webhook_Subscription_Store,
 )
 from agentforge.webhooks.transport import Recording_Webhook_Transport
+from agentforge.webhooks.worker import Webhook_Delivery_Worker
 
 from tests.enterprise_helpers import install_enterprise_auth, issue_principal_headers
 from tests.fakes import DeterministicFakeEmbeddings
@@ -73,7 +76,9 @@ def _wire(settings: Settings, *, transport=None, **enterprise_overrides):
     )
     deliveries = InMemory_Webhook_Delivery_Store()
     subscriptions = InMemory_Webhook_Subscription_Store(deliveries)
+    outbox = InMemory_Webhook_Outbox()
     recording = transport or Recording_Webhook_Transport()
+    emitter = Webhook_Emitter(deliveries, recording)
     app = create_app(settings)
     app.state.settings = settings
     app.state.app_context = app_ctx
@@ -85,17 +90,13 @@ def _wire(settings: Settings, *, transport=None, **enterprise_overrides):
         trace_recorder=InMemory_Trace_Recorder(),
         webhook_subscription_store=subscriptions,
         webhook_delivery_store=deliveries,
+        webhook_outbox=outbox,
         webhook_transport=recording,
-        # No real sleeping: the retry budget is unit-tested, and an API test that waited out a
-        # backoff would only be testing patience.
-        webhook_emitter=Webhook_Emitter(
-            subscriptions,
-            deliveries,
-            recording,
-            max_attempts=settings.webhook_max_attempts,
-            timeout_seconds=settings.webhook_timeout_seconds,
-            backoff_seconds=0.0,
-            sleep=lambda _s: None,
+        webhook_emitter=emitter,
+        webhook_dispatcher=Webhook_Dispatcher(subscriptions, outbox),
+        # Driven by hand where a test needs it; never started, so no thread races an assertion.
+        webhook_worker=Webhook_Delivery_Worker(
+            outbox, subscriptions, emitter, batch_size=50
         ),
     )
     headers, org_id, ctx = install_enterprise_auth(
@@ -512,3 +513,208 @@ def test_an_unauthenticated_caller_is_refused(wired):
     client, *_rest = wired
     assert client.get("/webhooks").status_code == 401
     assert client.post("/webhooks", json={"url": _URL, "events": ["run.completed"]}).status_code == 401
+
+
+
+# --- the delivery queue -----------------------------------------------------------
+#
+# Durable delivery is only half a feature without a way to see it: before the outbox, "my webhook
+# never arrived" had no answer an operator could reach themselves.
+
+
+def test_the_queue_is_empty_when_nothing_is_outstanding(wired):
+    client, headers, _org, *_rest = wired
+    body = client.get("/webhooks/queue", headers=headers).json()
+    assert body == {"pending": 0, "abandoned": 0, "entries": []}
+
+
+def test_the_queue_reports_pending_and_abandoned_with_honest_totals(wired):
+    client, headers, org_id, _ctx, _subs, _deliveries, _transport = wired
+    webhook_id = _register(client, headers).json()["webhook"]["webhook_id"]
+    ctx = client.app.state.observability_context
+
+    from agentforge.webhooks.base import Webhook_Event
+    from agentforge.webhooks.outbox import Outbox_Entry
+
+    def _row(event=Webhook_Event.RUN_COMPLETED):
+        return ctx.webhook_outbox.enqueue(
+            Outbox_Entry.new(
+                org_id=org_id,
+                subscription_id=uuid.UUID(webhook_id),
+                event=event,
+                payload={"run_id": "r1"},
+                idempotency_key="run.completed:r1",
+            )
+        )
+
+    pending = _row()
+    gone = _row(Webhook_Event.RUN_FAILED)
+    delivered = _row()
+    ctx.webhook_outbox.abandon(gone.id, attempts=8, error="endpoint returned HTTP 500")
+    ctx.webhook_outbox.mark_delivered(delivered.id, attempts=1)
+
+    body = client.get("/webhooks/queue", headers=headers).json()
+
+    assert body["pending"] == 1
+    assert body["abandoned"] == 1
+    # Delivered rows are not listed: what arrived is the delivery log's job to report.
+    assert {e["entry_id"] for e in body["entries"]} == {str(pending.id), str(gone.id)}
+    abandoned_entry = next(e for e in body["entries"] if e["entry_id"] == str(gone.id))
+    assert abandoned_entry["status"] == "abandoned"
+    assert abandoned_entry["attempts"] == 8
+    assert abandoned_entry["last_error"] == "endpoint returned HTTP 500"
+    assert abandoned_entry["event"] == "run.failed"
+    assert abandoned_entry["idempotency_key"] == "run.completed:r1"
+
+
+def test_the_queue_can_be_filtered_by_status(wired):
+    client, headers, org_id, _ctx, _subs, _deliveries, _transport = wired
+    webhook_id = _register(client, headers).json()["webhook"]["webhook_id"]
+    ctx = client.app.state.observability_context
+
+    from agentforge.webhooks.base import Webhook_Event
+    from agentforge.webhooks.outbox import Outbox_Entry
+
+    pending = ctx.webhook_outbox.enqueue(
+        Outbox_Entry.new(
+            org_id=org_id,
+            subscription_id=uuid.UUID(webhook_id),
+            event=Webhook_Event.RUN_COMPLETED,
+            payload={},
+        )
+    )
+    gone = ctx.webhook_outbox.enqueue(
+        Outbox_Entry.new(
+            org_id=org_id,
+            subscription_id=uuid.UUID(webhook_id),
+            event=Webhook_Event.RUN_COMPLETED,
+            payload={},
+        )
+    )
+    ctx.webhook_outbox.abandon(gone.id, attempts=8, error="gone")
+
+    only_abandoned = client.get(
+        "/webhooks/queue?status=abandoned", headers=headers
+    ).json()
+    assert [e["entry_id"] for e in only_abandoned["entries"]] == [str(gone.id)]
+    # The counts stay whole-queue even when the page is filtered.
+    assert only_abandoned["pending"] == 1
+
+    only_pending = client.get("/webhooks/queue?status=pending", headers=headers).json()
+    assert [e["entry_id"] for e in only_pending["entries"]] == [str(pending.id)]
+
+
+def test_an_abandoned_entry_can_be_redelivered(wired):
+    client, headers, org_id, ctx_enterprise, _subs, _deliveries, transport = wired
+    webhook_id = _register(client, headers).json()["webhook"]["webhook_id"]
+    ctx = client.app.state.observability_context
+
+    from agentforge.webhooks.base import Webhook_Event
+    from agentforge.webhooks.outbox import Outbox_Entry
+
+    entry = ctx.webhook_outbox.enqueue(
+        Outbox_Entry.new(
+            org_id=org_id,
+            subscription_id=uuid.UUID(webhook_id),
+            event=Webhook_Event.RUN_COMPLETED,
+            payload={"run_id": "r1"},
+        )
+    )
+    ctx.webhook_outbox.abandon(entry.id, attempts=8, error="endpoint returned HTTP 500")
+
+    response = client.post(
+        f"/webhooks/queue/{entry.id}/redeliver", headers=headers
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+    # A fresh schedule, not a continuation of the one that gave up.
+    assert response.json()["attempts"] == 0
+
+    # And it really is deliverable again.
+    assert ctx.webhook_worker.run_once() == 1
+    assert transport.attempts == 1
+    assert ctx.webhook_outbox.get(org_id, entry.id).status == "delivered"
+
+    # Audited: a human chose to re-send something the platform had given up on.
+    actions = [e.action for e in ctx_enterprise.audit_log.list_for_org(org_id)]
+    assert Audit_Action.WEBHOOK_REDELIVERED.value in actions
+
+
+def test_a_pending_entry_cannot_be_redelivered(wired):
+    """It is already scheduled, so requeueing would ask for the same event twice."""
+    client, headers, org_id, _ctx, _subs, _deliveries, _transport = wired
+    webhook_id = _register(client, headers).json()["webhook"]["webhook_id"]
+    ctx = client.app.state.observability_context
+
+    from agentforge.webhooks.base import Webhook_Event
+    from agentforge.webhooks.outbox import Outbox_Entry
+
+    entry = ctx.webhook_outbox.enqueue(
+        Outbox_Entry.new(
+            org_id=org_id,
+            subscription_id=uuid.UUID(webhook_id),
+            event=Webhook_Event.RUN_COMPLETED,
+            payload={},
+        )
+    )
+
+    refused = client.post(f"/webhooks/queue/{entry.id}/redeliver", headers=headers)
+
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "not_redeliverable"
+    assert refused.json()["error"]["details"]["status"] == "pending"
+
+
+def test_redelivering_an_unknown_entry_is_a_404(wired):
+    client, headers, _org, *_rest = wired
+    missing = client.post(f"/webhooks/queue/{uuid.uuid4()}/redeliver", headers=headers)
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "not_found"
+
+
+def test_another_orgs_queue_entry_is_invisible_and_not_redeliverable(wired):
+    client, headers, org_id, ctx_enterprise, _subs, _deliveries, _transport = wired
+    webhook_id = _register(client, headers).json()["webhook"]["webhook_id"]
+    ctx = client.app.state.observability_context
+
+    from agentforge.webhooks.base import Webhook_Event
+    from agentforge.webhooks.outbox import Outbox_Entry
+
+    entry = ctx.webhook_outbox.enqueue(
+        Outbox_Entry.new(
+            org_id=org_id,
+            subscription_id=uuid.UUID(webhook_id),
+            event=Webhook_Event.RUN_COMPLETED,
+            payload={},
+        )
+    )
+    ctx.webhook_outbox.abandon(entry.id, attempts=8, error="gone")
+
+    other_headers, _other_org = issue_principal_headers(
+        ctx_enterprise, role=Role.OWNER, org_name="Other queue org", email="oq@example.com"
+    )
+
+    assert client.get("/webhooks/queue", headers=other_headers).json()["entries"] == []
+    refused = client.post(
+        f"/webhooks/queue/{entry.id}/redeliver", headers=other_headers
+    )
+    assert refused.status_code == 404
+
+
+@pytest.mark.parametrize("role", [Role.MEMBER, Role.VIEWER])
+def test_the_queue_requires_manage_webhooks(wired, role):
+    client, _owner_headers, _org, ctx_enterprise, *_rest = wired
+    headers, _org_id = issue_principal_headers(
+        ctx_enterprise,
+        role=role,
+        org_name=f"{role.value} queue org",
+        email=f"q-{role.value}@example.com",
+    )
+
+    for response in (
+        client.get("/webhooks/queue", headers=headers),
+        client.post(f"/webhooks/queue/{uuid.uuid4()}/redeliver", headers=headers),
+    ):
+        assert response.status_code == 403
+        assert response.json()["error"]["details"]["required"] == "manage_webhooks"

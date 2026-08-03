@@ -18,7 +18,7 @@ from agentforge.api.deps import (
     enforce_budget,
     get_optional_guardrail_pipeline,
     get_rag_service,
-    get_webhook_emitter,
+    get_webhook_dispatcher,
     require_permission,
 )
 from agentforge.api.errors import AppError, defer_after_error
@@ -31,8 +31,8 @@ from agentforge.observability.guardrails.base import (
     apply_input_guardrail,
 )
 from agentforge.rag.service import RAG_Service
-from agentforge.webhooks.emitter import Webhook_Emitter
-from agentforge.webhooks.events import emit_guardrail_blocked
+from agentforge.webhooks.dispatcher import Webhook_Dispatcher
+from agentforge.webhooks.events import dispatch_guardrail_blocked
 
 router = APIRouter(tags=["query"])
 
@@ -43,7 +43,7 @@ async def query(
     request: Request,
     service: RAG_Service = Depends(get_rag_service),
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
-    webhooks: Webhook_Emitter = Depends(get_webhook_emitter),
+    webhooks: Webhook_Dispatcher = Depends(get_webhook_dispatcher),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> QueryResponse:
@@ -62,7 +62,7 @@ async def query(
     def _report_block(reason: str | None) -> None:
         defer_after_error(
             request,
-            lambda: emit_guardrail_blocked(
+            lambda: dispatch_guardrail_blocked(
                 webhooks, org_id, surface="query", reason=reason
             ),
         )

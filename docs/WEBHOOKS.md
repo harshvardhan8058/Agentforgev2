@@ -77,7 +77,9 @@ Every delivery carries these headers:
 | --- | --- |
 | `X-AgentForge-Signature` | `t=<unix seconds>,v1=<hex hmac-sha256>` |
 | `X-AgentForge-Event` | The event name, e.g. `run.completed` |
-| `X-AgentForge-Delivery` | Delivery id — **stable across retries of the same event** |
+| `X-AgentForge-Delivery` | Delivery id — stable across every retry of this queued event |
+| `X-AgentForge-Attempt` | Which attempt this is, 1-based |
+| `X-AgentForge-Idempotency-Key` | **The value to deduplicate on.** Absent for events with no natural identity |
 | `X-AgentForge-Webhook-Id` | Which of your subscriptions this is |
 
 The signed material is `"<t>." + <raw request body>`. The timestamp is inside it, so a captured
@@ -127,8 +129,23 @@ The envelope is the same for every event:
 }
 ```
 
-`id` equals the `X-AgentForge-Delivery` header and is your idempotency key: every retry of the
-same event to the same endpoint carries the same value.
+`id` equals the `X-AgentForge-Delivery` header. `idempotency_key` is the **logical identity of what
+happened**, and it is the field to deduplicate on:
+
+| | `id` / `X-AgentForge-Delivery` | `idempotency_key` |
+| --- | --- | --- |
+| Stable across retries of the same queued event | yes | yes |
+| Stable across a *repeated occurrence that means the same thing* | no | yes |
+
+The second row is why both exist. Delivery is **at-least-once**, and a repeat can reach you for
+reasons that are not retries: a worker delivered and then died before recording the success, an
+operator redelivered an abandoned event, a multi-agent run was re-streamed (which genuinely re-runs
+it), or a budget threshold was re-announced after an outage. All of those carry the same
+`idempotency_key` and a different `id`. Store the key and ignore what you have already processed.
+
+Events with no natural identity — `guardrail.blocked`, which is a fact about a moment rather than
+about an entity — carry `null`, deliberately, rather than a fabricated value that would suggest
+deduplication is possible when it would lose information.
 
 Payloads carry **identifiers and outcomes, never content.** A run's answer, a document's text
 and a blocked prompt are all absent: a webhook crosses the trust boundary to an endpoint the
@@ -214,21 +231,32 @@ Sent only by `POST /webhooks/{id}/test`. Not subscribable, because nothing else 
 
 ## 4. Delivery behaviour
 
+Deliveries are **durable**. An event is written to a queue in the same request that produced it,
+before anything is dialled, and a worker drains that queue. So a deploy, a crash, or a consumer
+that is down for an hour does not lose events — it delays them.
+
 | Property | Value |
 | --- | --- |
-| Attempts | `WEBHOOK_MAX_ATTEMPTS` (default 3) |
+| Attempts | `WEBHOOK_MAX_ATTEMPTS` (default 8) |
 | Per-attempt timeout | `WEBHOOK_TIMEOUT_SECONDS` (default 4) |
-| Backoff | Exponential from `WEBHOOK_BACKOFF_SECONDS` (default 0.5): 0.5s, then 1.0s |
+| Retry schedule | Exponential from `WEBHOOK_BACKOFF_SECONDS` (default 60s): 1m, 2m, 4m, 8m, 16m, 32m, 1h4m — capped at 6h |
+| Total window | Roughly a day with the defaults |
 | Success | Any `2xx` |
 | Response body | **Never read.** Reply with an empty `2xx`; a body is ignored and not held in memory. |
 | Subscriptions per org | `WEBHOOK_MAX_PER_ORG` (default 20) |
+| Guarantee | **At-least-once.** Deduplicate on `idempotency_key`. |
 
-Answer quickly and do the work asynchronously — the platform gives up on your endpoint in a few
-seconds, and a slow endpoint delays nothing else but does waste your own retry budget.
+Answer quickly and do the work asynchronously — the platform gives up on a single attempt in a few
+seconds, and then simply tries again later.
 
-Delivery is **in-process and best-effort**: there is no durable queue, so a process restart
-mid-delivery loses that delivery, and the retry budget is spent within seconds rather than over
-hours. See `docs/KNOWN_LIMITATIONS.md`.
+Two behaviours that follow from durability:
+
+- **Pausing a subscription holds its events rather than dropping them.** Resume it and what it
+  missed is delivered (subject to the attempt window). Deleting it discards them, because there is
+  then no endpoint and no secret to sign with.
+- **After the schedule is exhausted an event is *abandoned*, not silently dropped.** It stays
+  visible on `GET /webhooks/queue` and can be redelivered explicitly. Nothing disappears without
+  somebody being able to see that it did.
 
 ---
 
@@ -270,6 +298,58 @@ that history.
 
 ---
 
+## 5a. The delivery queue
+
+What has not arrived yet, and what gave up trying.
+
+```bash
+curl -sS "https://your-agentforge/webhooks/queue?status=abandoned" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "pending": 12,
+  "abandoned": 1,
+  "entries": [
+    {
+      "entry_id": "…",
+      "webhook_id": "…",
+      "event": "run.completed",
+      "status": "abandoned",
+      "attempts": 8,
+      "next_attempt_at": "2026-08-03T18:02:11.004Z",
+      "last_error": "ConnectTimeout: the endpoint did not answer",
+      "idempotency_key": "run.completed:abc:…",
+      "created_at": "2026-08-03T09:14:02.881Z",
+      "updated_at": "2026-08-03T18:02:11.004Z"
+    }
+  ]
+}
+```
+
+`pending` and `abandoned` count the whole queue, not the returned page, so the totals stay honest
+while you page through. Delivered events are **not** listed here — that is what each subscription's
+delivery log is for, and answering "did it arrive" in two places invites the two answers to
+disagree.
+
+Put an abandoned event back in the queue, due immediately, with a fresh schedule:
+
+```bash
+curl -X POST "https://your-agentforge/webhooks/queue/$ENTRY_ID/redeliver" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Only **abandoned** entries can be redelivered; a pending one is already scheduled, so requeueing it
+would ask for the same event twice, and the API says so with a `409 not_redeliverable`. Redeliveries
+are audited (`webhook.redelivered`), because a human choosing to re-send something the platform gave
+up on is exactly the kind of action somebody asks about later.
+
+The **Webhooks** page in the console shows the same thing, with a Redeliver button on anything that
+gave up.
+
+---
+
 ## 6. Managing a subscription
 
 ```bash
@@ -301,6 +381,8 @@ you asked for.
   written down in `docs/KNOWN_LIMITATIONS.md` rather than implied to be stronger.
 - **The audit trail records the URL's origin only** (`https://hooks.example.com`), never its
   path or query, because a webhook URL's path routinely *is* a credential.
+- **Delivery is at-least-once, not exactly-once.** Exactly-once would need a distributed
+  transaction with an endpoint the platform does not control. Deduplicate on `idempotency_key`.
 - **DNS rebinding is not closed.** Between the admission check and the connect, DNS can change.
   Closing it means connecting to a pinned, pre-validated IP with the hostname in SNI plus
   `Host`, which the HTTP client here cannot express.

@@ -1187,6 +1187,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/webhooks/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Webhook Queue
+         * @description Return this organization's outstanding webhook deliveries, newest first.
+         *
+         *     Org-scoped rather than per-subscription because the question an operator arrives with is "is
+         *     anything stuck?", not "is anything stuck for endpoint 3 of 4" — and an event can outlive the
+         *     subscription page it was created from.
+         *
+         *     Delivered entries are deliberately excluded: what arrived is the delivery log's job to report,
+         *     and answering it in two places invites the two answers to disagree.
+         */
+        get: operations["list_webhook_queue_webhooks_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/queue/{entry_id}/redeliver": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeliver Webhook Queue Entry
+         * @description Put an abandoned entry back in the queue, due immediately, with a fresh attempt schedule.
+         *
+         *     Only **abandoned** entries can be redelivered, and the restriction is not bureaucracy: a
+         *     pending entry is already scheduled, so requeueing it would be asking for the same event to be
+         *     delivered twice. A ``409`` says which case the caller hit rather than silently doing nothing.
+         *
+         *     The redelivery is audited, because it is a human choosing to re-send something the platform had
+         *     given up on — exactly the kind of action somebody asks about afterwards.
+         */
+        post: operations["redeliver_webhook_queue_entry_webhooks_queue__entry_id__redeliver_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks/{webhook_id}": {
         parameters: {
             query?: never;
@@ -1258,10 +1312,10 @@ export interface paths {
          * Test Webhook
          * @description Send a ``webhook.ping`` to one subscription and report the result synchronously.
          *
-         *     The one place a delivery happens on the request path, and the only place it should: an
-         *     operator who has just pasted a URL needs to know *now* whether it works, and the whole
-         *     point is to find out before real events depend on it. Bounded to a single attempt so the
-         *     response time is one endpoint timeout rather than the full retry budget.
+         *     The one delivery that is **not** queued, and the only one that should not be: an operator who
+         *     has just pasted a URL needs to know *now* whether it works, and the whole point is to find out
+         *     before real events depend on it. Bounded to a single attempt so the response time is one
+         *     endpoint timeout rather than a retry schedule that now spans hours.
          *
          *     Works on a paused subscription too — verifying an endpoint before activating it is exactly
          *     the workflow, and refusing would make ``active: false`` mean "untestable".
@@ -1488,7 +1542,7 @@ export interface components {
          *     still being a single authoritative list on the server.
          * @enum {string}
          */
-        Audit_Action: "org.created" | "member.added" | "member.role_changed" | "member.removed" | "team.created" | "team.deleted" | "team_member.added" | "team_member.removed" | "api_key.created" | "api_key.revoked" | "budget.set" | "budget.removed" | "integration_connection.created" | "integration_connection.updated" | "integration_connection.deleted" | "webhook.created" | "webhook.updated" | "webhook.deleted";
+        Audit_Action: "org.created" | "member.added" | "member.role_changed" | "member.removed" | "team.created" | "team.deleted" | "team_member.added" | "team_member.removed" | "api_key.created" | "api_key.revoked" | "budget.set" | "budget.removed" | "integration_connection.created" | "integration_connection.updated" | "integration_connection.deleted" | "webhook.created" | "webhook.updated" | "webhook.deleted" | "webhook.redelivered";
         /** Body_ingest_document_documents_post */
         Body_ingest_document_documents_post: {
             /**
@@ -2505,6 +2559,76 @@ export interface components {
              * Format: uuid
              */
             webhook_id: string;
+        };
+        /**
+         * WebhookQueueEntryResponse
+         * @description One event waiting to be delivered, or one that gave up.
+         *
+         *     The operator-facing view of durable delivery. Before the outbox there was nothing to show
+         *     here — a failed webhook was a log line and a gap — so "which of my events have not arrived,
+         *     and why" had no answer. ``status`` is the whole point:
+         *
+         *     * ``pending`` — still scheduled; ``next_attempt_at`` says when, ``attempts`` how many times
+         *       it has been tried, ``last_error`` why the last one failed.
+         *     * ``abandoned`` — the schedule was exhausted, or the endpoint became undeliverable. Nothing
+         *       further happens without a human, which is what ``POST .../redeliver`` is for.
+         *
+         *     ``delivered`` entries are not listed: the delivery log is the record of what arrived, and
+         *     duplicating it here would give two answers to one question.
+         */
+        WebhookQueueEntryResponse: {
+            /** Attempts */
+            attempts: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Entry Id
+             * Format: uuid
+             */
+            entry_id: string;
+            event: components["schemas"]["Webhook_Event"];
+            /** Idempotency Key */
+            idempotency_key?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /**
+             * Next Attempt At
+             * Format: date-time
+             */
+            next_attempt_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "abandoned";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Webhook Id
+             * Format: uuid
+             */
+            webhook_id: string;
+        };
+        /**
+         * WebhookQueueSummaryResponse
+         * @description ``GET /webhooks/queue``: what is outstanding for this organization, and the entries.
+         *
+         *     ``pending`` and ``abandoned`` are counts over the whole queue, not over the returned page, so
+         *     a console can show "12 waiting, 3 gave up" honestly while listing only the first page.
+         */
+        WebhookQueueSummaryResponse: {
+            /** Abandoned */
+            abandoned: number;
+            /** Entries */
+            entries?: components["schemas"]["WebhookQueueEntryResponse"][];
+            /** Pending */
+            pending: number;
         };
         /**
          * WebhookSubscriptionResponse
@@ -4382,6 +4506,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateWebhookResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_webhook_queue_webhooks_queue_get: {
+        parameters: {
+            query?: {
+                /** @description Restrict to `pending` (still scheduled) or `abandoned` (gave up). Omit for both. */
+                status?: ("pending" | "abandoned") | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookQueueSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    redeliver_webhook_queue_entry_webhooks_queue__entry_id__redeliver_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookQueueEntryResponse"];
                 };
             };
             /** @description Validation Error */

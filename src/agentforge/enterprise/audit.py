@@ -95,6 +95,7 @@ class Audit_Action(str, Enum):
     WEBHOOK_CREATED = "webhook.created"
     WEBHOOK_UPDATED = "webhook.updated"
     WEBHOOK_DELETED = "webhook.deleted"
+    WEBHOOK_REDELIVERED = "webhook.redelivered"
 
 
 # --- metadata admission -----------------------------------------------------------

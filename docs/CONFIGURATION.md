@@ -196,10 +196,22 @@ missing required setting does; `WEBHOOK_TIMEOUT_SECONDS=600` would be configurin
 
 | Setting | Default | Range | What it bounds |
 | --- | --- | --- | --- |
-| `WEBHOOK_MAX_ATTEMPTS` | 3 | 1–5 | HTTP attempts per event per subscription |
+| `WEBHOOK_MAX_ATTEMPTS` | 8 | 1–20 | Attempts across the whole durable schedule, then the event is abandoned |
 | `WEBHOOK_TIMEOUT_SECONDS` | 4.0 | >0–15 | Each attempt (per network operation) |
-| `WEBHOOK_BACKOFF_SECONDS` | 0.5 | 0–5 | Base of the exponential backoff (0.5s, 1.0s, …) |
+| `WEBHOOK_BACKOFF_SECONDS` | 60.0 | 1–3600 | Base of the exponential schedule (1m, 2m, 4m, …), capped at 6h |
 | `WEBHOOK_MAX_PER_ORG` | 20 | 1–100 | Subscriptions per organization, i.e. the fan-out of one event |
+| `WEBHOOK_BATCH_SIZE` | 20 | 1–200 | Attempts one worker pass makes, so a pass costs at most batch × timeout |
+| `WEBHOOK_POLL_SECONDS` | 2.0 | 0.1–60 | Worker sleep when nothing is due — also the delivery latency floor on an idle deployment |
+| `WEBHOOK_WORKER_ENABLED` | true | bool | Whether *this* process drains the queue |
+
+The defaults describe roughly a day of retrying, which is what the failure this recovers from
+actually looks like: a consumer redeployed, a certificate expired, a disk filled. Sub-second
+retries belonged to the era when delivery happened inside the request.
+
+`WEBHOOK_WORKER_ENABLED=false` leaves the queue to another replica. Running the worker in several
+instances is safe — claiming a queued event takes a lease in one atomic statement — so this is about
+where you *want* the work, not about correctness. A web tier scaled for request latency and a small
+delivery tier is the usual split; a single container should leave it on.
 
 Two things are deliberately **not** settings:
 

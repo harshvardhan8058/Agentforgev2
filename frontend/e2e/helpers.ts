@@ -133,6 +133,10 @@ export async function mockCommon(page: Page): Promise<void> {
   // Webhook subscriptions and each subscription's delivery log are both collections.
   await page.route(`${API}/webhooks`, (route) => respond(route, []));
   await page.route(`${API}/webhooks/*/deliveries**`, (route) => respond(route, []));
+  // The delivery queue: a summary object, not a collection, so `[]` would be handed to a table.
+  await page.route(`${API}/webhooks/queue**`, (route) =>
+    respond(route, { pending: 0, abandoned: 0, entries: [] }),
+  );
   // The analytics page reads the org's spend standing; `{}` would render as absent numbers.
   await page.route(`${API}/budget`, (route) =>
     respond(route, {

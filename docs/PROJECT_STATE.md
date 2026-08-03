@@ -5,13 +5,28 @@
 # a human-readable mirror.
 
 current_phase: "v1.1 in progress. v1.0 (Phases 1-9 + production hardening) and the first five v1.1 items are merged to main (PR #3). The notification seam - outbound webhooks + budget threshold notifications - is complete on a branch and open as PR #4."
-current_branch: feat/v1.1-webhook-framework
+current_branch: feat/v1.1-durable-webhook-delivery
 base_branch: main
 open_prs:
+  - number: 5
+    title: "v1.1: durable webhook delivery (migration 0017)"
+    branch: feat/v1.1-durable-webhook-delivery
+    state: open
+    migrations_required: ["0017_create_webhook_outbox"]
+    contains:
+      - "webhook_outbox: delivery intent persisted in the request that produced the event"
+      - "dispatcher (who) / outbox (when) / worker (how) split; the emitter no longer owns a retry loop"
+      - "exponential schedule 1m..6h over 8 attempts (~1 day), lease-based claiming (FOR UPDATE SKIP LOCKED) so several instances can drain one queue"
+      - "abandoned events surfaced on GET /webhooks/queue + POST /webhooks/queue/{id}/redeliver (audited as webhook.redelivered)"
+      - "idempotency_key in every envelope + X-AgentForge-Idempotency-Key / X-AgentForge-Attempt headers"
+      - "paused subscriptions HOLD events; deleted subscriptions discard them"
+      - "worker prunes delivered outbox rows after 7 days; WEBHOOK_WORKER_ENABLED lets a web tier skip delivery"
+      - "Delivery queue panel on the Webhooks page"
+      - "zero-ceiling budget alert announces only the 100% threshold"
   - number: 4
     title: "v1.1: outbound webhook framework (migration 0015)"
     branch: feat/v1.1-webhook-framework
-    head_sha: 0ec106b
+    head_sha: b9c0a96
     state: open
     migrations_required: ["0015_create_webhooks", "0016_create_budget_notifications"]
     contains:
@@ -76,13 +91,13 @@ v1_1_roadmap_status:
 test_status:
   backend:
     command: "pytest -m 'not integration' -q"
-    tests_passing: 1108
+    tests_passing: 1172
     result: pass
     note: "Deterministic + credential-free. ~2 min. Loads the real embedding model once (test_embedding_dimension), so the first run downloads ~90 MB."
   frontend:
     command: "cd frontend && npm run ci"
     stages: [codegen:check, lint, typecheck, test, build, scan:bundle]
-    tests_passing: 487
+    tests_passing: 497
     result: pass
   e2e:
     command: "cd frontend && npm run e2e"
@@ -106,6 +121,7 @@ test_status:
       - "tests/integration/test_budget_store_integration.py (migration 0014, NUMERIC(20,8) Decimal exactness, ON CONFLICT upsert preserving created_at, CHECK constraints, org cascade) - CLOSES the gap recorded by the previous session"
       - "tests/integration/test_webhook_store_integration.py (migration 0015, TEXT[] event round-trip, :event = ANY(events), partial UPDATE clearing a column, keyset cursor with id tie-break, subscription + org cascades, status CHECK)"
       - "tests/integration/test_budget_notification_store_integration.py (migration 0016, INSERT ... ON CONFLICT DO NOTHING claim atomicity ACROSS TWO CONNECTIONS, release_except with an integer[] param, org cascade)"
+      - "tests/integration/test_webhook_outbox_integration.py (migration 0017, and the MOST IMPORTANT never-executed suite in the repo: two Pg_Webhook_Outbox instances claiming concurrently must take disjoint rows - that is FOR UPDATE SKIP LOCKED, the property durable delivery rests on, and it cannot be proven in memory)"
 
 architectural_constraints:
   backend:
@@ -119,7 +135,8 @@ architectural_constraints:
     - "Tenant isolation at the data-access layer: org_id is a required store parameter and appears in the query, not in a post-filter; cross-tenant access is 404, never 403."
     - "Domain invariants live next to the write (Identity_Store), not in the router: last_owner and the Req 2.5 team-membership rule are enforced inside the writing transaction."
     - "Additive migrations only (0001-0016), tracked by schema_migrations; the runner uses the asyncpg simple query protocol for multi-statement scripts."
-    - "Notification side channels must never affect the work they report on: webhook emission never raises, is bounded (attempts x timeout + a wall-clock deadline), and runs off the request path - BackgroundTasks for successes, the api/errors.py deferred seam for RAISED refusals, and the alert service's own single-worker pool for budget thresholds (so it neither queues ahead of a run's own post-response work nor holds a streamed connection)."
+    - "Notification side channels must never affect the work they report on: the REQUEST path only ENQUEUES (one indexed read + one INSERT per subscription, never a dial), and a separate worker delivers. Dispatch runs off the response path anyway - BackgroundTasks for successes, the api/errors.py deferred seam for RAISED refusals, the alert service's own pool for budget thresholds."
+    - "Webhook delivery is durable and at-least-once: retry state lives in webhook_outbox, not in a process, so a deploy delays events instead of losing them. Claiming leases a row in ONE statement (FOR UPDATE SKIP LOCKED), so running several application instances is safe. The price is that a repeat can reach a consumer, which is why every envelope carries an idempotency_key - the logical identity of the occurrence, stable across retries AND across a re-stream or a redelivery."
     - "A tenant-supplied URL is only ever dialled through webhooks/security.py: https-only (http for loopback outside production), no credentials/fragment, no scheme/port contradiction, and every RESOLVED address must be globally routable (an allow-list, so an unenumerated special range is still refused). Re-validated per attempt; redirects disabled; the response body is never read."
     - "A webhook signing secret is stored RECOVERABLY (a hash cannot sign) and returned exactly once at creation - the asymmetry with Argon2-hashed API keys is deliberate and documented in KNOWN_LIMITATIONS."
     - "Cost is Decimal end-to-end and crosses the API as exact strings; pricing resolves default rates -> named preset -> explicit table."

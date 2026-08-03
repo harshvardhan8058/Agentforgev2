@@ -92,6 +92,10 @@ beforeEach(() => {
   server.use(
     http.get(`${BASE}/webhooks`, () => HttpResponse.json([])),
     http.get(`${BASE}/webhooks/:id/deliveries`, () => HttpResponse.json([])),
+    // The queue panel is part of the page now; its own behaviour is covered in queue.test.tsx.
+    http.get(`${BASE}/webhooks/queue`, () =>
+      HttpResponse.json({ pending: 0, abandoned: 0, entries: [] }),
+    ),
   );
 });
 

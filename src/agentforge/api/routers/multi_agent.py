@@ -34,7 +34,7 @@ from agentforge.api.deps import (
     get_multi_agent_context,
     get_trace_export_service,
     get_optional_guardrail_pipeline,
-    get_webhook_emitter,
+    get_webhook_dispatcher,
     require_permission,
 )
 from agentforge.api.errors import AppError, defer_after_error
@@ -65,8 +65,11 @@ from agentforge.multiagent.models import (
     Multi_Agent_Run,
     Termination_Reason,
 )
-from agentforge.webhooks.emitter import Webhook_Emitter
-from agentforge.webhooks.events import emit_guardrail_blocked, emit_run_outcome
+from agentforge.webhooks.dispatcher import Webhook_Dispatcher
+from agentforge.webhooks.events import (
+    dispatch_guardrail_blocked,
+    dispatch_run_outcome,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +156,7 @@ async def start_multi_agent_run(
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
-    webhooks: Webhook_Emitter = Depends(get_webhook_emitter),
+    webhooks: Webhook_Dispatcher = Depends(get_webhook_dispatcher),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> StartMultiAgentRunResponse:
@@ -181,7 +184,7 @@ async def start_multi_agent_run(
     def _report_block(reason: str | None) -> None:
         defer_after_error(
             request,
-            lambda: emit_guardrail_blocked(
+            lambda: dispatch_guardrail_blocked(
                 webhooks, org_id, surface="multi_agent.run", reason=reason
             ),
         )
@@ -257,7 +260,7 @@ async def start_multi_agent_run(
         # human-in-the-loop policy the run pauses instead, and the decision that finishes it
         # emits the outcome (see :func:`submit_approval`).
         background.add_task(
-            emit_run_outcome,
+            dispatch_run_outcome,
             webhooks,
             org_id,
             run_id=response.run_id,
@@ -277,7 +280,7 @@ async def stream_multi_agent_run(
     run_id: str,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
-    webhooks: Webhook_Emitter = Depends(get_webhook_emitter),
+    webhooks: Webhook_Dispatcher = Depends(get_webhook_dispatcher),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> StreamingResponse:
@@ -315,7 +318,7 @@ async def stream_multi_agent_run(
 
 
 def _emit_stream_outcome(
-    webhooks: Webhook_Emitter, ctx: MultiAgentContext, run: Multi_Agent_Run, *, org_id
+    webhooks: Webhook_Dispatcher, ctx: MultiAgentContext, run: Multi_Agent_Run, *, org_id
 ) -> None:
     """Emit the run-outcome webhook for a just-finished streamed run.
 
@@ -329,7 +332,7 @@ def _emit_stream_outcome(
         reason = _termination_reason_name(persisted)
         if reason is None:
             return
-        emit_run_outcome(
+        dispatch_run_outcome(
             webhooks,
             org_id,
             run_id=persisted.id,
@@ -357,7 +360,7 @@ async def submit_approval(
     background: BackgroundTasks,
     ctx: MultiAgentContext = Depends(get_multi_agent_context),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
-    webhooks: Webhook_Emitter = Depends(get_webhook_emitter),
+    webhooks: Webhook_Dispatcher = Depends(get_webhook_dispatcher),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
 ) -> ApprovalDecisionResponse:
     """Forward an ``Approval_Decision`` to the ``Human_Approval_Gate`` (Req 9.3).
@@ -448,7 +451,7 @@ async def submit_approval(
             user_id=principal.user_id,
         )
         background.add_task(
-            emit_run_outcome,
+            dispatch_run_outcome,
             webhooks,
             org_id,
             run_id=run_id,
