@@ -21,7 +21,11 @@ import logging
 from typing import Final
 from uuid import UUID
 
-from agentforge.webhooks.base import Webhook_Delivery, Webhook_Event
+from agentforge.webhooks.base import (
+    Emission_Outcome,
+    Webhook_Delivery,
+    Webhook_Event,
+)
 from agentforge.webhooks.emitter import Webhook_Emitter
 
 logger = logging.getLogger(__name__)
@@ -154,19 +158,21 @@ def emit_budget_threshold_crossed(
     period_start: str,
     period_end: str,
     blocked: bool,
-) -> list[Webhook_Delivery]:
-    """Emit ``budget.threshold_crossed`` and return the recorded deliveries.
+) -> Emission_Outcome:
+    """Emit ``budget.threshold_crossed`` and return the full emission outcome.
 
     The only helper here that returns anything, because its caller needs it: the alert service
     claims a threshold before announcing it (so concurrent requests cannot both announce), and
-    must release that claim if nothing was actually delivered — otherwise a delivery outage
-    would silently consume the one notification an organization was going to get.
+    must release that claim if the announcement did not actually reach anybody — otherwise a
+    delivery outage, or a subscription store that was down, would silently consume the one
+    notification an organization was going to get. The *outcome* rather than the delivery list,
+    because an empty list cannot distinguish "nobody subscribed" from "could not find out".
 
     Monetary values are exact decimal **strings**, as everywhere else in this codebase: a spend
     of ``0.00013`` is not representable as a float without drift, and a webhook consumer that
     parsed a float would report a different number from the console.
     """
-    return _emit(
+    return _emit_detailed(
         emitter,
         org_id,
         Webhook_Event.BUDGET_THRESHOLD_CROSSED,
@@ -194,10 +200,26 @@ def _emit(
     paths, where an escaping exception is either logged by a framework the operator does not
     read or lost entirely.
     """
+    return _emit_detailed(emitter, org_id, event, data).deliveries_list
+
+
+def _emit_detailed(
+    emitter: Webhook_Emitter,
+    org_id: UUID,
+    event: Webhook_Event,
+    data: dict[str, object],
+) -> Emission_Outcome:
+    """Emit and report the outcome, absorbing everything.
+
+    An exception escaping the emitter is reported as ``lookup_failed`` rather than as "nobody
+    was subscribed": a caller deciding whether to retry must see a failure as a failure.
+    """
     try:
-        return emitter.emit(org_id, event, data)
+        return emitter.emit_detailed(org_id, event, data)
     except Exception:  # noqa: BLE001 - emission must never affect the caller
         logger.warning(
             "Webhook emission for %s (org %s) failed.", event.value, org_id, exc_info=True
         )
-        return []
+        return Emission_Outcome(
+            deliveries=(), considered=0, lookup_failed=True, render_failures=0
+        )

@@ -41,6 +41,7 @@ from uuid import UUID
 
 from agentforge.webhooks.base import (
     DeliveryStatus,
+    Emission_Outcome,
     Transport_Result,
     Webhook_Delivery,
     Webhook_Event,
@@ -110,10 +111,23 @@ class Webhook_Emitter:
     ) -> list[Webhook_Delivery]:
         """Deliver ``event`` to every active subscription of ``org_id`` that wants it.
 
-        Returns the recorded deliveries (empty when nothing is subscribed, which is the
-        overwhelmingly common case and costs exactly one store read). Never raises: every
-        failure — a store that is down, an unserialisable payload, a transport that misbehaves
-        — is logged and swallowed, because the caller is a finished run, not a client.
+        Returns the recorded deliveries. Never raises: every failure — a store that is down, an
+        unserialisable payload, a transport that misbehaves — is logged and swallowed, because
+        the caller is a finished run, not a client.
+
+        Callers that must distinguish "nothing was subscribed" from "we could not find out what
+        was subscribed" want :meth:`emit_detailed` instead; this returns only the deliveries,
+        which is all a fire-and-forget notification needs.
+        """
+        return self.emit_detailed(org_id, event, data).deliveries_list
+
+    def emit_detailed(
+        self, org_id: UUID, event: Webhook_Event, data: dict[str, object]
+    ) -> Emission_Outcome:
+        """Fan ``event`` out and report the outcome in full. Never raises.
+
+        The detail exists for exactly one kind of caller: one that will decide, from the result,
+        whether to try again later. See :class:`~agentforge.webhooks.base.Emission_Outcome`.
         """
         try:
             subscriptions = self._subscriptions.list_for_event(org_id, event)
@@ -124,14 +138,24 @@ class Webhook_Emitter:
                 event.value,
                 exc_info=True,
             )
-            return []
+            return Emission_Outcome(
+                deliveries=(), considered=0, lookup_failed=True, render_failures=0
+            )
 
         recorded: list[Webhook_Delivery] = []
+        render_failures = 0
         for subscription in subscriptions:
             delivery = self.send_to(subscription, event, data)
-            if delivery is not None:
-                recorded.append(delivery)
-        return recorded
+            if delivery is None:
+                render_failures += 1
+                continue
+            recorded.append(delivery)
+        return Emission_Outcome(
+            deliveries=tuple(recorded),
+            considered=len(subscriptions),
+            lookup_failed=False,
+            render_failures=render_failures,
+        )
 
     def send_to(
         self,

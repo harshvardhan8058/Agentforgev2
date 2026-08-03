@@ -1392,7 +1392,14 @@ def build_observability_context(
     # needs both the claim store and the emitter to do it exactly once.
     budget_alert_service: Budget_Alert_Service = overrides.get(
         "budget_alert_service"
-    ) or Budget_Alert_Service(budget_notification_store, webhook_emitter)
+    ) or Budget_Alert_Service(
+        budget_notification_store,
+        webhook_emitter,
+        # The budget store as well, so an announcement re-reads the ceiling it is about to warn
+        # about: a status snapshot can be up to `budget_cache_seconds` old, and a warning citing
+        # a ceiling the owner has since raised would also claim (and so silence) the real one.
+        budget_store,
+    )
 
     return ObservabilityContext(
         settings=settings,

@@ -27,6 +27,7 @@ from agentforge.config.settings import Settings
 from agentforge.conversation.store import InMemory_Conversation_Store
 from agentforge.llm.fallback_provider import Fallback_Provider
 from agentforge.main import create_app
+from agentforge.observability.budget_alerts import RETRY_COOLDOWN_SECONDS
 from agentforge.observability.models import Usage_Record
 from agentforge.observability.usage.store import InMemory_Usage_Store
 from agentforge.storage.memory_store import InMemoryDocumentStore
@@ -126,6 +127,17 @@ def _subscribe(subscriptions, org_id):
     )
 
 
+def _drain(client) -> None:
+    """Wait for off-band announcements to finish.
+
+    `dispatch` deliberately does NOT use the request's background tasks — that would queue the
+    announcement ahead of trace export and hold a streamed connection open — so the response can
+    return before the delivery happens. Draining makes the assertion deterministic instead of
+    lucky.
+    """
+    client.app.state.observability_context.budget_alert_service.drain()
+
+
 def _announced(transport) -> list[dict]:
     """The payload of every budget notification the transport saw."""
     out = []
@@ -151,6 +163,7 @@ def test_crossing_a_threshold_on_a_spending_request_notifies_once(wired):
     first = client.post("/query", headers=headers, json={"query": "hello"})
     assert first.status_code == 200
 
+    _drain(client)
     announced = _announced(transport)
     assert [a["threshold_percent"] for a in announced] == [80]
     assert announced[0]["spent"] == "85"
@@ -160,6 +173,7 @@ def test_crossing_a_threshold_on_a_spending_request_notifies_once(wired):
     # Every later request still observes the crossing, and says nothing more.
     for _ in range(3):
         assert client.post("/query", headers=headers, json={"query": "again"}).status_code == 200
+    _drain(client)
     assert len(_announced(transport)) == 1
 
 
@@ -171,6 +185,7 @@ def test_an_agent_run_also_notifies(wired):
     _spend(usage_store, org_id, "90")
 
     assert client.post("/agent/run", headers=headers, json={"message": "hi"}).status_code == 200
+    _drain(client)
     assert [a["threshold_percent"] for a in _announced(transport)] == [80]
 
 
@@ -185,6 +200,7 @@ def test_a_blocked_request_still_notifies_after_the_refusal(wired):
     assert refused.status_code == 402
     assert refused.json()["error"]["code"] == "budget_exceeded"
 
+    _drain(client)
     announced = _announced(transport)
     assert [a["threshold_percent"] for a in announced] == [80, 100]
     # Both carry the fact that traffic is actually being refused, not merely warned about.
@@ -198,6 +214,7 @@ def test_no_notification_below_the_first_threshold(wired):
     _spend(usage_store, org_id, "40")
 
     assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
     assert _announced(transport) == []
 
 
@@ -207,6 +224,7 @@ def test_no_notification_without_a_budget(wired):
     _spend(usage_store, org_id, "9999")
 
     assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
     assert _announced(transport) == []
 
 
@@ -216,6 +234,7 @@ def test_a_request_with_no_subscriber_is_unaffected(wired):
     _spend(usage_store, org_id, "150")
 
     assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
     assert transport.attempts == 0
 
 
@@ -226,6 +245,7 @@ def test_another_organizations_subscriber_is_never_told(wired):
     _spend(usage_store, org_id, "150")
 
     assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
     assert transport.attempts == 0
 
 
@@ -235,6 +255,7 @@ def test_raising_the_ceiling_lets_the_next_crossing_notify_again(wired):
     _set_budget(client, headers, "100")
     _spend(usage_store, org_id, "85")
     assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
     assert len(_announced(transport)) == 1
 
     # The owner raises the ceiling: 85 of 1000 is 8.5%, so the old claim no longer applies.
@@ -242,6 +263,7 @@ def test_raising_the_ceiling_lets_the_next_crossing_notify_again(wired):
     _spend(usage_store, org_id, "800")  # 885 of 1000 = 88.5%
 
     assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
     announced = _announced(transport)
     assert [a["threshold_percent"] for a in announced] == [80, 80]
     assert announced[1]["limit_amount"] == "1000"
@@ -253,12 +275,14 @@ def test_removing_the_budget_resets_the_notification_history(wired):
     _set_budget(client, headers, "100")
     _spend(usage_store, org_id, "85")
     assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
     assert len(_announced(transport)) == 1
 
     assert client.delete("/budget", headers=headers).status_code == 204
     _set_budget(client, headers, "100")
 
     assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
     assert len(_announced(transport)) == 2
 
 
@@ -272,23 +296,89 @@ def test_the_notification_is_signed_like_every_other_event(wired):
 
     assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
 
+    _drain(client)
     _url, body, sent_headers = transport.calls[0]
     assert verify_signature(subscription.secret, body, sent_headers[SIGNATURE_HEADER])
 
 
-def test_a_failing_subscriber_does_not_fail_the_request_and_is_retried_later(wired):
+def test_a_failing_subscriber_does_not_fail_the_request_and_is_retried_after_a_cooldown(wired):
+    """A broken endpoint must not consume the notification — nor be hammered on every request."""
     client, headers, org_id, usage_store, subscriptions, transport = wired
     _subscribe(subscriptions, org_id)
     _set_budget(client, headers, "100")
     _spend(usage_store, org_id, "85")
 
+    alerts = client.app.state.observability_context.budget_alert_service
     broken = Recording_Webhook_Transport(succeed_from_attempt=None)
     client.app.state.observability_context.webhook_emitter._transport = broken
 
     assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
     assert broken.attempts == 1
 
-    # The claim was released because nothing was delivered, so the next request retries.
+    # The very next request does NOT retry: without a cooldown, an org over 80% with a broken
+    # endpoint would re-emit the whole delivery budget on every request for the rest of the month.
     client.app.state.observability_context.webhook_emitter._transport = transport
     assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
+    assert _announced(transport) == []
+
+    # Once the cooldown has elapsed, the notification the org is still owed is delivered.
+    elapsed = [alerts._clock() + RETRY_COOLDOWN_SECONDS]
+    alerts._clock = lambda: elapsed[0]
+    assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
+    assert [a["threshold_percent"] for a in _announced(transport)] == [80]
+
+
+def test_a_streamed_run_also_notifies_without_holding_the_stream(wired):
+    """The two surfaces whose post-response mechanics the off-band dispatch protects.
+
+    A streamed response has no background-task slot of its own until the body drains, so an
+    announcement attached to it would arrive late AND keep the client's connection open for a
+    subscriber's timeout. Dispatching off-band means the notification is already on its way while
+    the stream is still being read.
+    """
+    client, headers, org_id, usage_store, subscriptions, transport = wired
+    _subscribe(subscriptions, org_id)
+    _set_budget(client, headers, "100")
+    _spend(usage_store, org_id, "85")
+
+    with client.stream(
+        "POST", "/agent/stream", headers=headers, json={"message": "hello"}
+    ) as response:
+        assert response.status_code == 200
+        frames = "".join(response.iter_text())
+    assert "completion" in frames
+
+    _drain(client)
+    assert [a["threshold_percent"] for a in _announced(transport)] == [80]
+
+
+def test_a_metering_failure_does_not_erase_the_notification_history(wired):
+    """`reconcile` is the destructive operation, and the guard fabricates a zero when blind."""
+    client, headers, org_id, usage_store, subscriptions, transport = wired
+    _subscribe(subscriptions, org_id)
+    _set_budget(client, headers, "100")
+    _spend(usage_store, org_id, "85")
+    assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
+    assert len(_announced(transport)) == 1
+
+    # Metering goes down, and the owner edits the budget while it is down.
+    guard = client.app.state.observability_context.budget_guard
+
+    class _BrokenAnalytics:
+        def usage_report(self, *args, **kwargs):
+            raise RuntimeError("analytics down")
+
+    guard._analytics = _BrokenAnalytics()
+    guard.invalidate(org_id)
+    assert _set_budget(client, headers, "100").status_code == 200
+
+    # The claim survived, so the org is not told about the same crossing twice.
+    guard._analytics = client.app.state.observability_context.analytics_service
+    guard.invalidate(org_id)
+    assert client.post("/query", headers=headers, json={"query": "hello"}).status_code == 200
+    _drain(client)
     assert len(_announced(transport)) == 1

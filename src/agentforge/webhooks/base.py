@@ -146,6 +146,48 @@ class Webhook_Delivery:
 
 
 @dataclass(frozen=True)
+class Emission_Outcome:
+    """What happened when one event was fanned out, in enough detail to act on.
+
+    The delivery list alone cannot be acted on, because an empty one means four different
+    things: nobody was subscribed, the subscription lookup failed, the payload could not be
+    rendered, or every matching subscription was inactive. A caller that must decide whether to
+    *retry later* — the budget-threshold notifier, which claims a threshold once per period —
+    needs "nothing was attempted because nothing is subscribed" separated from "nothing was
+    attempted because we could not find out what is subscribed". Collapsing them silently
+    consumed an organization's one notification for the month.
+    """
+
+    deliveries: tuple[Webhook_Delivery, ...]
+    #: Subscriptions that matched the event and were attempted.
+    considered: int
+    #: True when the subscription lookup itself failed, so the fan-out never happened.
+    lookup_failed: bool
+    #: Subscriptions whose payload could not be rendered (a programming error at the call site).
+    render_failures: int
+
+    @property
+    def deliveries_list(self) -> list[Webhook_Delivery]:
+        """The deliveries as a list, for callers that only want what was recorded."""
+        return list(self.deliveries)
+
+    @property
+    def delivered(self) -> int:
+        """How many subscriptions accepted the event."""
+        return sum(1 for d in self.deliveries if d.status == "delivered")
+
+    @property
+    def attempted_and_failed(self) -> bool:
+        """True when something was tried and none of it worked — the retryable case."""
+        return self.considered > 0 and self.delivered == 0
+
+    @property
+    def failed_before_delivery(self) -> bool:
+        """True when the fan-out could not even be performed, which is always retryable."""
+        return self.lookup_failed or self.render_failures > 0
+
+
+@dataclass(frozen=True)
 class Transport_Result:
     """The outcome of a single HTTP attempt, as reported by a :class:`Webhook_Transport`.
 

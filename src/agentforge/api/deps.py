@@ -14,11 +14,11 @@ import logging
 from collections.abc import Callable
 from uuid import UUID
 
-from fastapi import BackgroundTasks, Depends, Request, status
+from fastapi import Depends, Request, status
 from fastapi.concurrency import run_in_threadpool
 
 from agentforge.agent.orchestrator import Agent_Orchestrator
-from agentforge.api.errors import AppError, defer_after_error
+from agentforge.api.errors import AppError
 from agentforge.config.container import (
     AgentContext,
     AppContext,
@@ -407,7 +407,6 @@ def get_trace_export_service(request: Request) -> Trace_Export_Service:
 
 async def enforce_budget(
     request: Request,
-    background: BackgroundTasks,
     principal: Principal = Depends(get_current_principal),
 ) -> Principal:
     """Refuse new work when the org is over a **blocking** spend budget (Req 3.x, 8.x).
@@ -440,18 +439,19 @@ async def enforce_budget(
     status_ = await run_in_threadpool(ctx.budget_guard.status, principal.org_id)
 
     # Threshold notifications ride the status this dependency already computed, so warning an
-    # owner costs no extra aggregation. `pending` is pure, so the overwhelming majority of
-    # requests — no ceiling, or nowhere near it — schedule nothing at all; only a request that
-    # has actually crossed a threshold pays for a claim and a delivery, and it pays for them
-    # after the response.
-    alerts = getattr(ctx, "budget_alert_service", None)
-    if alerts is not None and alerts.pending(status_):
-        if status_.blocked:
-            # The refusal below is raised, not returned, so there is no response to attach a
-            # background task to; the deferred-work seam runs it after the 402 has been sent.
-            defer_after_error(request, lambda: alerts.announce(status_))
-        else:
-            background.add_task(alerts.announce, status_)
+    # owner costs no extra aggregation. `pending` is pure and consults an in-process memo, so the
+    # overwhelming majority of requests — no ceiling, nowhere near it, or already notified —
+    # schedule nothing at all.
+    #
+    # `dispatch` hands the work to the alert service's own small pool rather than to this
+    # request's `BackgroundTasks`. Those are shared with the routers, so an announcement would
+    # queue ahead of trace export and the `run.completed` webhook; and on a streamed response
+    # they are attached to the response, which would hold the client's connection open for a
+    # subscriber's timeout. It also bounds the blast radius: a slow endpoint occupies one
+    # dedicated worker instead of a share of the pool every store call in the platform uses.
+    alerts = ctx.budget_alert_service
+    if alerts.pending(status_):
+        alerts.dispatch(status_)
 
     if status_.blocked:
         logger.warning(
