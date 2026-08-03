@@ -131,6 +131,11 @@ describe("BudgetCard (MSW)", () => {
     expect(screen.getByTestId("budget-remaining")).toHaveTextContent("0.99987");
     expect(screen.getByTestId("budget-percent")).toHaveTextContent("0.01");
     expect(screen.getByTestId("budget-progress")).toBeInTheDocument();
+    // The owner reading a percentage is the person who wants to know that crossing it reaches
+    // them without their having to come back and look.
+    expect(screen.getByTestId("budget-alert-note")).toHaveTextContent(
+      /budget\.threshold_crossed/,
+    );
   });
 
   it("distinguishes over-budget-warning from actively-blocking", async () => {

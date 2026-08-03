@@ -206,3 +206,34 @@ def test_the_transport_admits_loopback_only_outside_production():
     production = build_observability_context(_settings(profile="production"))
     assert local.webhook_transport._allow_loopback is True
     assert production.webhook_transport._allow_loopback is False
+
+
+
+# --- budget threshold notifications -----------------------------------------------
+
+
+def test_keyless_context_wires_the_in_memory_notification_store():
+    from agentforge.observability.budget_alerts import (
+        Budget_Alert_Service,
+        InMemory_Budget_Notification_Store,
+    )
+
+    ctx = build_observability_context(_settings(profile="local"))
+    assert isinstance(
+        ctx.budget_notification_store, InMemory_Budget_Notification_Store
+    )
+    assert isinstance(ctx.budget_alert_service, Budget_Alert_Service)
+
+
+def test_production_context_wires_the_postgres_notification_store():
+    from agentforge.observability.budget_alerts import Pg_Budget_Notification_Store
+
+    ctx = build_observability_context(_settings(profile="production"))
+    assert isinstance(ctx.budget_notification_store, Pg_Budget_Notification_Store)
+
+
+def test_the_alert_service_announces_through_the_wired_emitter():
+    """Announcing a threshold IS a webhook emission, so it must use the one wired emitter."""
+    ctx = build_observability_context(_settings())
+    assert ctx.budget_alert_service._emitter is ctx.webhook_emitter
+    assert ctx.budget_alert_service._store is ctx.budget_notification_store

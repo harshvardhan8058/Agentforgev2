@@ -140,6 +140,12 @@ from agentforge.observability.budget import (
     InMemory_Budget_Store,
     Pg_Budget_Store,
 )
+from agentforge.observability.budget_alerts import (
+    Budget_Alert_Service,
+    Budget_Notification_Store,
+    InMemory_Budget_Notification_Store,
+    Pg_Budget_Notification_Store,
+)
 from agentforge.observability.trace_export import Trace_Export_Service
 from agentforge.observability.tracing_exporter import (
     Tracing_Exporter,
@@ -1056,6 +1062,18 @@ def build_budget_store(settings: Settings) -> Budget_Store:
     return InMemory_Budget_Store()
 
 
+def build_budget_notification_store(settings: Settings) -> Budget_Notification_Store:
+    """Return the Budget_Notification_Store: Postgres when the domain stores persist.
+
+    Persistence matters more here than it looks: this store is what stops a threshold
+    notification repeating. In-memory, a restart re-announces every crossed threshold once —
+    acceptable for the keyless lane, and the reason the production path is DB-backed.
+    """
+    if settings.persist_domain_stores():
+        return Pg_Budget_Notification_Store(settings.database_url)
+    return InMemory_Budget_Notification_Store()
+
+
 def build_webhook_delivery_store(settings: Settings) -> Webhook_Delivery_Store:
     """Return the Webhook_Delivery_Store: Postgres when the domain stores persist, else memory."""
     if settings.persist_domain_stores():
@@ -1233,6 +1251,8 @@ class ObservabilityContext:
     trace_export_service: Trace_Export_Service
     budget_store: Budget_Store
     budget_guard: Budget_Guard
+    budget_notification_store: Budget_Notification_Store
+    budget_alert_service: Budget_Alert_Service
     webhook_subscription_store: Webhook_Subscription_Store
     webhook_delivery_store: Webhook_Delivery_Store
     webhook_transport: Webhook_Transport
@@ -1281,8 +1301,8 @@ def build_observability_context(
     ``cost_model``, ``usage_recorder``, ``usage_sink``, ``analytics_service``,
     ``prompt_store``, ``prompt_registry``, ``guardrail_pipeline``, ``evaluation_store``,
     ``evaluators``, ``pipeline_runner``, ``evaluation_framework``,
-    ``webhook_subscription_store``, ``webhook_delivery_store``, ``webhook_transport``, and
-    ``webhook_emitter``.
+    ``webhook_subscription_store``, ``webhook_delivery_store``, ``webhook_transport``,
+    ``webhook_emitter``, ``budget_notification_store``, and ``budget_alert_service``.
     """
     tracing_exporter: Tracing_Exporter = (
         overrides.get("tracing_exporter") or build_tracing_exporter(settings)
@@ -1364,12 +1384,24 @@ def build_observability_context(
         backoff_seconds=settings.webhook_backoff_seconds,
     )
 
+    budget_notification_store: Budget_Notification_Store = overrides.get(
+        "budget_notification_store"
+    ) or build_budget_notification_store(settings)
+    # Built after the emitter, because announcing a threshold IS a webhook emission: this
+    # service is the only thing in the platform that turns a *condition* into an event, and it
+    # needs both the claim store and the emitter to do it exactly once.
+    budget_alert_service: Budget_Alert_Service = overrides.get(
+        "budget_alert_service"
+    ) or Budget_Alert_Service(budget_notification_store, webhook_emitter)
+
     return ObservabilityContext(
         settings=settings,
         tracing_exporter=tracing_exporter,
         trace_export_service=trace_export_service,
         budget_store=budget_store,
         budget_guard=budget_guard,
+        budget_notification_store=budget_notification_store,
+        budget_alert_service=budget_alert_service,
         webhook_subscription_store=webhook_subscription_store,
         webhook_delivery_store=webhook_delivery_store,
         webhook_transport=webhook_transport,

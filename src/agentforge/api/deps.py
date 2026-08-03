@@ -14,11 +14,11 @@ import logging
 from collections.abc import Callable
 from uuid import UUID
 
-from fastapi import Depends, Request, status
+from fastapi import BackgroundTasks, Depends, Request, status
 from fastapi.concurrency import run_in_threadpool
 
 from agentforge.agent.orchestrator import Agent_Orchestrator
-from agentforge.api.errors import AppError
+from agentforge.api.errors import AppError, defer_after_error
 from agentforge.config.container import (
     AgentContext,
     AppContext,
@@ -47,6 +47,7 @@ from agentforge.observability.evaluation.framework import Evaluation_Framework
 from agentforge.observability.guardrails.base import Guardrail_Pipeline
 from agentforge.observability.prompt_registry.registry import Prompt_Registry
 from agentforge.observability.budget import Budget_Guard, Budget_Store
+from agentforge.observability.budget_alerts import Budget_Alert_Service
 from agentforge.observability.trace_export import (
     Trace_Export_Service,
     disabled_trace_export_service,
@@ -406,6 +407,7 @@ def get_trace_export_service(request: Request) -> Trace_Export_Service:
 
 async def enforce_budget(
     request: Request,
+    background: BackgroundTasks,
     principal: Principal = Depends(get_current_principal),
 ) -> Principal:
     """Refuse new work when the org is over a **blocking** spend budget (Req 3.x, 8.x).
@@ -436,6 +438,21 @@ async def enforce_budget(
         # unlimited one, and a governance concern must never be the reason work cannot run.
         return principal
     status_ = await run_in_threadpool(ctx.budget_guard.status, principal.org_id)
+
+    # Threshold notifications ride the status this dependency already computed, so warning an
+    # owner costs no extra aggregation. `pending` is pure, so the overwhelming majority of
+    # requests — no ceiling, or nowhere near it — schedule nothing at all; only a request that
+    # has actually crossed a threshold pays for a claim and a delivery, and it pays for them
+    # after the response.
+    alerts = getattr(ctx, "budget_alert_service", None)
+    if alerts is not None and alerts.pending(status_):
+        if status_.blocked:
+            # The refusal below is raised, not returned, so there is no response to attach a
+            # background task to; the deferred-work seam runs it after the 402 has been sent.
+            defer_after_error(request, lambda: alerts.announce(status_))
+        else:
+            background.add_task(alerts.announce, status_)
+
     if status_.blocked:
         logger.warning(
             "Refusing work for org %s: spend %s has reached the budget of %s.",
@@ -460,6 +477,11 @@ async def enforce_budget(
 def get_budget_store(request: Request) -> Budget_Store:
     """Return the wired Budget_Store (the org's spend ceiling)."""
     return get_observability_context(request).budget_store
+
+
+def get_budget_alert_service(request: Request) -> Budget_Alert_Service:
+    """Return the wired Budget_Alert_Service (threshold notifications, claimed once)."""
+    return get_observability_context(request).budget_alert_service
 
 
 def get_budget_guard(request: Request) -> Budget_Guard:

@@ -25,6 +25,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from agentforge.api.deps import (
     get_audit_service,
+    get_budget_alert_service,
     get_budget_guard,
     get_budget_store,
     require_permission,
@@ -34,6 +35,7 @@ from agentforge.enterprise.audit import Audit_Action, Audit_Service
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.rbac import Permission
 from agentforge.observability.budget import Budget_Guard, Budget_Status, Budget_Store
+from agentforge.observability.budget_alerts import Budget_Alert_Service
 
 router = APIRouter(tags=["budget"])
 
@@ -79,6 +81,7 @@ async def set_budget(
     payload: SetBudgetRequest,
     store: Budget_Store = Depends(get_budget_store),
     guard: Budget_Guard = Depends(get_budget_guard),
+    alerts: Budget_Alert_Service = Depends(get_budget_alert_service),
     audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(require_permission(Permission.MANAGE_BUDGET)),
 ) -> BudgetStatusResponse:
@@ -101,6 +104,10 @@ async def set_budget(
         metadata={"limit_amount": str(budget.limit_amount), "action": budget.action},
     )
     status_ = await run_in_threadpool(guard.status, principal.org_id)
+    # Threshold notifications are claimed once per period, so a ceiling change has to reconcile
+    # them: raising a budget from 100 to 1000 puts the org back under 80%, and without this the
+    # next genuine crossing would be silent because the old ceiling's claim still stood.
+    await run_in_threadpool(alerts.reconcile, status_)
     return _to_response(status_)
 
 
@@ -108,6 +115,7 @@ async def set_budget(
 async def delete_budget(
     store: Budget_Store = Depends(get_budget_store),
     guard: Budget_Guard = Depends(get_budget_guard),
+    alerts: Budget_Alert_Service = Depends(get_budget_alert_service),
     audit: Audit_Service = Depends(get_audit_service),
     principal: Principal = Depends(require_permission(Permission.MANAGE_BUDGET)),
 ) -> Response:
@@ -118,6 +126,10 @@ async def delete_budget(
     """
     removed = await run_in_threadpool(store.delete, principal.org_id)
     guard.invalidate(principal.org_id)
+    # No ceiling means no threshold is crossed, so every claim for this period goes: setting a
+    # budget again later should notify from scratch rather than inherit the old one's history.
+    status_ = await run_in_threadpool(guard.status, principal.org_id)
+    await run_in_threadpool(alerts.reconcile, status_)
     if removed:
         await run_in_threadpool(
             audit.record,
