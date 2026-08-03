@@ -101,10 +101,25 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
 - **Evaluations:** evaluators are deterministic; dataset/run creation is gated behind `run_agents`.
 - **Outbound webhooks:** deliveries are real HTTPS requests, signed and logged, but the delivery
   machinery is deliberately in-process. Bounds worth knowing:
-  - **No durable queue.** Delivery is best-effort: a process restart mid-delivery loses that
-    delivery, and the retry budget (`WEBHOOK_MAX_ATTEMPTS` attempts, `WEBHOOK_TIMEOUT_SECONDS`
-    each, exponential backoff) is spent within seconds rather than over hours. A durable queue is
-    different infrastructure, not a bigger loop, so it is scoped out rather than half-built.
+  - **Delivery is durable, and at-least-once.** Events are queued in `webhook_outbox`
+    (migration 0017) before anything is dialled and retried on an expanding schedule for about a
+    day, so a restart or a consumer outage delays rather than loses them. What that costs is
+    exactly-once: a worker that delivers and then dies before recording the success will deliver
+    again, so every envelope carries an `idempotency_key` and consumers are expected to use it.
+    Exactly-once would require a distributed transaction with an endpoint the platform does not
+    control.
+  - **The queue is only durable where the domain stores are.** With Postgres it survives restarts
+    and several application instances can drain it safely (`FOR UPDATE SKIP LOCKED`). On the
+    keyless path the outbox is in memory: single-process, and a restart drops what had not gone
+    out. That is the same trade-off every other store makes on that path.
+  - **One attempt per worker pass, and the worker is one thread.** Throughput is
+    `WEBHOOK_BATCH_SIZE` attempts per pass; a deployment with a very large fan-out and many slow
+    endpoints should run delivery on its own replica (`WEBHOOK_WORKER_ENABLED=false` on the web
+    tier) rather than expecting one process to keep up.
+  - **Abandoned events need a human.** After `WEBHOOK_MAX_ATTEMPTS` the event is marked
+    `abandoned` and stays visible on `GET /webhooks/queue` until somebody redelivers it. There is
+    no alert when that happens — the queue is a page you have to look at, which is the same gap
+    budget notifications closed for spend.
   - **The signing secret is stored recoverably**, unlike `api_keys.secret_hash` (Argon2). A hash
     cannot *sign* an outgoing request, which is what a webhook secret is for — the same reason
     Stripe and GitHub do this. It is returned exactly once, at creation, and no read path in the
@@ -115,22 +130,21 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
     by resolving the host and refusing anything not globally routable, but between that check and
     the connect, DNS can change. Closing it properly means connecting to a pinned, pre-validated
     IP with the hostname carried in SNI plus `Host`, which the HTTP client here cannot express.
-  - **A streamed run's connection stays open until its post-stream hook returns.** A streamed
-    response has no background-task slot of its own, so trace export and the run-outcome webhook
-    run inside the generator after the terminal frame. The client already has every frame, but
-    the connection is held for up to the delivery budget. Bounded by attempts × timeout and the
-    per-org subscription cap; the budget-threshold notification is *not* affected, because it
-    dispatches off-band.
+  - **A streamed run's connection stays open until its post-stream hook returns** — but that hook
+    is now one indexed read plus one INSERT per subscription, not an HTTP delivery, so the window
+    is microseconds rather than a subscriber's timeout. Trace export still runs there too.
   - **Input guardrail blocks are emitted for the non-streaming surfaces only.** `/agent/stream`
     and the multi-agent stream do not run input guardrails at all today, so `guardrail.blocked`
     covers `/query`, `/agent/run`, and `/multi-agent/runs`. Output guardrails flag rather than
     block, so they emit nothing.
-  - **The delivery log has no retention bound.** Rows accumulate with traffic and are removed
-    only when their subscription is deleted (`ON DELETE CASCADE`). A retention job is future
-    work; `Webhook_Delivery_Store.drop_for_subscription` is the scoped statement it would call.
+  - **The delivery log has no retention bound.** Rows accumulate with traffic and are removed only
+    when their subscription is deleted (`ON DELETE CASCADE`). The *outbox* is pruned (delivered
+    rows are swept hourly by the worker after seven days), but the attempt log it writes is not.
+    `Webhook_Delivery_Store.drop_for_subscription` is the scoped statement a retention job would
+    call.
   - **Re-streaming a multi-agent run emits its outcome again.** `POST /multi-agent/runs/{id}/stream`
-    *re-runs* the collaboration, so it is genuinely a second run of the same id, with a different
-    delivery id. Consumers that must not act twice should key on `data.run_id`.
+    *re-runs* the collaboration, so it is genuinely a second run of the same id. Both deliveries
+    carry the same `idempotency_key`, so a consumer that keys on it acts once.
   - **A delivery row can be lost in one narrow case:** if the subscription is deleted while its
     event is in flight, the row's foreign key no longer resolves, so the event is sent but the
     record of it is not written — for a subscription that no longer exists.

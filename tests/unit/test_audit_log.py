@@ -389,6 +389,7 @@ def test_the_recorded_action_vocabulary_is_stable():
         "webhook.created",
         "webhook.updated",
         "webhook.deleted",
+        "webhook.redelivered",
     }
 
 

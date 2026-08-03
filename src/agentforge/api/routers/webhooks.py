@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -34,6 +35,7 @@ from agentforge.api.deps import (
     get_settings,
     get_webhook_delivery_store,
     get_webhook_emitter,
+    get_webhook_outbox,
     get_webhook_subscription_store,
     require_permission,
 )
@@ -43,6 +45,8 @@ from agentforge.api.schemas import (
     CreateWebhookResponse,
     UpdateWebhookRequest,
     WebhookDeliveryResponse,
+    WebhookQueueEntryResponse,
+    WebhookQueueSummaryResponse,
     WebhookSubscriptionResponse,
 )
 from agentforge.config.settings import Settings
@@ -59,6 +63,7 @@ from agentforge.webhooks.base import (
     Webhook_Subscription,
 )
 from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.outbox import Outbox_Entry, Webhook_Outbox
 from agentforge.webhooks.security import (
     WebhookUrlRejected,
     generate_webhook_secret,
@@ -77,6 +82,9 @@ router = APIRouter(tags=["webhooks"])
 #: Bounded like every other listing endpoint: the delivery log grows with traffic, so an
 #: unbounded page would be a way to ask the database for everything.
 _MAX_DELIVERY_LIMIT = 100
+
+#: Bounded like every other listing endpoint.
+_MAX_QUEUE_LIMIT = 100
 
 #: How many event names an audit row spells out. The count is always exact; the list is what
 #: fits inside the audit metadata value bound.
@@ -373,10 +381,10 @@ async def test_webhook(
 ) -> WebhookDeliveryResponse:
     """Send a ``webhook.ping`` to one subscription and report the result synchronously.
 
-    The one place a delivery happens on the request path, and the only place it should: an
-    operator who has just pasted a URL needs to know *now* whether it works, and the whole
-    point is to find out before real events depend on it. Bounded to a single attempt so the
-    response time is one endpoint timeout rather than the full retry budget.
+    The one delivery that is **not** queued, and the only one that should not be: an operator who
+    has just pasted a URL needs to know *now* whether it works, and the whole point is to find out
+    before real events depend on it. Bounded to a single attempt so the response time is one
+    endpoint timeout rather than a retry schedule that now spans hours.
 
     Works on a paused subscription too — verifying an endpoint before activating it is exactly
     the workflow, and refusing would make ``active: false`` mean "untestable".
@@ -386,14 +394,12 @@ async def test_webhook(
         raise _not_found(webhook_id)
 
     delivery = await run_in_threadpool(
-        lambda: emitter.send_to(
+        lambda: emitter.send_test(
             subscription,
-            Webhook_Event.PING,
             {
                 "message": "This is a test delivery from AgentForge.",
                 "webhook_id": str(subscription.id),
             },
-            max_attempts=1,
         )
     )
     if delivery is None:
@@ -466,3 +472,110 @@ async def list_webhook_deliveries(
         )
     )
     return [_to_delivery_response(row) for row in rows]
+
+
+
+# --- the delivery queue -----------------------------------------------------------
+#
+# Durable delivery is only half a feature without a way to see it. These two endpoints are what
+# turn "your webhook did not arrive" from a support conversation into something an operator can
+# answer, and act on, themselves.
+
+
+def _to_queue_entry(entry: Outbox_Entry) -> WebhookQueueEntryResponse:
+    return WebhookQueueEntryResponse(
+        entry_id=entry.id,
+        webhook_id=entry.subscription_id,
+        event=entry.event,
+        # `delivered` is filtered out before this point; the narrower response type says so.
+        status="abandoned" if entry.status == "abandoned" else "pending",
+        attempts=entry.attempts,
+        next_attempt_at=entry.next_attempt_at,
+        last_error=entry.last_error,
+        idempotency_key=entry.idempotency_key,
+        created_at=entry.created_at,
+        updated_at=entry.updated_at,
+    )
+
+
+@router.get("/webhooks/queue", response_model=WebhookQueueSummaryResponse)
+async def list_webhook_queue(
+    status_filter: Literal["pending", "abandoned"] | None = Query(
+        default=None,
+        alias="status",
+        description=(
+            "Restrict to `pending` (still scheduled) or `abandoned` (gave up). Omit for both."
+        ),
+    ),
+    limit: int = Query(default=25, ge=1, le=_MAX_QUEUE_LIMIT),
+    outbox: Webhook_Outbox = Depends(get_webhook_outbox),
+    principal: Principal = Depends(require_permission(Permission.MANAGE_WEBHOOKS)),
+) -> WebhookQueueSummaryResponse:
+    """Return this organization's outstanding webhook deliveries, newest first.
+
+    Org-scoped rather than per-subscription because the question an operator arrives with is "is
+    anything stuck?", not "is anything stuck for endpoint 3 of 4" — and an event can outlive the
+    subscription page it was created from.
+
+    Delivered entries are deliberately excluded: what arrived is the delivery log's job to report,
+    and answering it in two places invites the two answers to disagree.
+    """
+    counts = await run_in_threadpool(outbox.status_counts, principal.org_id)
+    entries = await run_in_threadpool(
+        lambda: outbox.list_outstanding(
+            principal.org_id, status=status_filter, limit=limit
+        )
+    )
+    return WebhookQueueSummaryResponse(
+        pending=counts.get("pending", 0),
+        abandoned=counts.get("abandoned", 0),
+        entries=[_to_queue_entry(entry) for entry in entries],
+    )
+
+
+@router.post(
+    "/webhooks/queue/{entry_id}/redeliver",
+    response_model=WebhookQueueEntryResponse,
+)
+async def redeliver_webhook_queue_entry(
+    entry_id: UUID,
+    outbox: Webhook_Outbox = Depends(get_webhook_outbox),
+    audit: Audit_Service = Depends(get_audit_service),
+    principal: Principal = Depends(require_permission(Permission.MANAGE_WEBHOOKS)),
+) -> WebhookQueueEntryResponse:
+    """Put an abandoned entry back in the queue, due immediately, with a fresh attempt schedule.
+
+    Only **abandoned** entries can be redelivered, and the restriction is not bureaucracy: a
+    pending entry is already scheduled, so requeueing it would be asking for the same event to be
+    delivered twice. A ``409`` says which case the caller hit rather than silently doing nothing.
+
+    The redelivery is audited, because it is a human choosing to re-send something the platform had
+    given up on — exactly the kind of action somebody asks about afterwards.
+    """
+    requeued = await run_in_threadpool(outbox.requeue, principal.org_id, entry_id)
+    if requeued is None:
+        existing = await run_in_threadpool(outbox.get, principal.org_id, entry_id)
+        if existing is None:
+            raise AppError(
+                "not_found",
+                "Queued webhook delivery not found.",
+                status.HTTP_404_NOT_FOUND,
+                {"entry_id": str(entry_id)},
+            )
+        raise AppError(
+            "not_redeliverable",
+            "Only an abandoned delivery can be redelivered; this one is "
+            f"{existing.status}.",
+            status.HTTP_409_CONFLICT,
+            {"entry_id": str(entry_id), "status": existing.status},
+        )
+
+    await run_in_threadpool(
+        audit.record,
+        principal,
+        Audit_Action.WEBHOOK_REDELIVERED,
+        target_type="webhook",
+        target_id=str(requeued.subscription_id),
+        metadata={"entry_id": str(entry_id), "event": requeued.event.value},
+    )
+    return _to_queue_entry(requeued)

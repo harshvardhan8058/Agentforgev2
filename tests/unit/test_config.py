@@ -107,12 +107,18 @@ def test_embedding_dimension_exposed(monkeypatch):
 
 
 def test_webhook_delivery_defaults(monkeypatch):
+    """The defaults describe a DURABLE schedule: eight attempts on a 60s exponential base spans
+    roughly a day, which is what "a consumer broke overnight and was fixed in the morning" needs.
+    """
     apply_base_env(monkeypatch)
     settings = load_settings()
-    assert settings.webhook_max_attempts == 3
+    assert settings.webhook_max_attempts == 8
     assert settings.webhook_timeout_seconds == 4.0
-    assert settings.webhook_backoff_seconds == 0.5
+    assert settings.webhook_backoff_seconds == 60.0
     assert settings.webhook_max_per_org == 20
+    assert settings.webhook_batch_size == 20
+    assert settings.webhook_poll_seconds == 2.0
+    assert settings.webhook_worker_enabled is True
 
 
 def test_webhook_loopback_is_allowed_locally_and_never_in_production(monkeypatch):
@@ -131,10 +137,14 @@ def test_webhook_loopback_is_allowed_locally_and_never_in_production(monkeypatch
         ("WEBHOOK_MAX_ATTEMPTS", "50"),
         ("WEBHOOK_TIMEOUT_SECONDS", "0"),
         ("WEBHOOK_TIMEOUT_SECONDS", "600"),
-        ("WEBHOOK_BACKOFF_SECONDS", "-1"),
-        ("WEBHOOK_BACKOFF_SECONDS", "60"),
+        ("WEBHOOK_BACKOFF_SECONDS", "0"),
+        ("WEBHOOK_BACKOFF_SECONDS", "99999"),
         ("WEBHOOK_MAX_PER_ORG", "0"),
         ("WEBHOOK_MAX_PER_ORG", "10000"),
+        ("WEBHOOK_BATCH_SIZE", "0"),
+        ("WEBHOOK_BATCH_SIZE", "5000"),
+        ("WEBHOOK_POLL_SECONDS", "0"),
+        ("WEBHOOK_POLL_SECONDS", "120"),
     ],
 )
 def test_an_out_of_range_webhook_bound_aborts_startup_naming_the_key(

@@ -32,7 +32,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from agentforge.api.deps import (
     get_ingestion_service,
-    get_webhook_emitter,
+    get_webhook_dispatcher,
     require_permission,
 )
 from agentforge.api.errors import AppError
@@ -49,8 +49,8 @@ from agentforge.ingestion.service import (
     UnsupportedFormatError,
 )
 from agentforge.ingestion.extractors import ExtractionError
-from agentforge.webhooks.emitter import Webhook_Emitter
-from agentforge.webhooks.events import emit_document_ingested
+from agentforge.webhooks.dispatcher import Webhook_Dispatcher
+from agentforge.webhooks.events import dispatch_document_ingested
 
 router = APIRouter(tags=["documents"])
 
@@ -86,7 +86,7 @@ async def ingest_document(
     file: UploadFile = File(...),
     filename: str | None = Form(default=None),
     service: Ingestion_Service = Depends(get_ingestion_service),
-    webhooks: Webhook_Emitter = Depends(get_webhook_emitter),
+    webhooks: Webhook_Dispatcher = Depends(get_webhook_dispatcher),
     principal: Principal = Depends(require_permission(Permission.INGEST_DOCUMENTS)),
 ) -> IngestResponse:
     """Ingest an uploaded document into the caller's org and return its summary (Req 7.3).
@@ -132,7 +132,7 @@ async def ingest_document(
         ) from exc
 
     background.add_task(
-        emit_document_ingested,
+        dispatch_document_ingested,
         webhooks,
         principal.org_id,
         document_id=result.document_id,

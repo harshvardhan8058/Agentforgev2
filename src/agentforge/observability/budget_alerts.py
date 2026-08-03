@@ -47,8 +47,8 @@ from agentforge.observability.budget import (
     Budget_Store,
     format_percent,
 )
-from agentforge.webhooks.emitter import Webhook_Emitter
-from agentforge.webhooks.events import emit_budget_threshold_crossed
+from agentforge.webhooks.dispatcher import Webhook_Dispatcher
+from agentforge.webhooks.events import dispatch_budget_threshold_crossed
 
 logger = logging.getLogger(__name__)
 
@@ -60,15 +60,25 @@ logger = logging.getLogger(__name__)
 BUDGET_THRESHOLDS: Final[tuple[int, ...]] = (80, 100)
 
 
-def crossed_thresholds(percent_used: Decimal | None) -> tuple[int, ...]:
+def crossed_thresholds(
+    percent_used: Decimal | None, *, limit_amount: Decimal | None = None
+) -> tuple[int, ...]:
     """Return every threshold that ``percent_used`` has reached, ascending.
 
-    ``None`` (no budget set) crosses nothing: an unlimited organization has no threshold to
-    pass. A pure function, so the request path can ask "is there anything to announce" without
-    touching a store.
+    ``None`` (no budget set) crosses nothing: an unlimited organization has no threshold to pass.
+    A pure function, so the request path can ask "is there anything to announce" without touching
+    a store.
+
+    A **zero ceiling** reports only the 100% threshold. "Spend nothing" is 100% used from the first
+    request, so announcing 80% as well would tell an organization it was approaching a limit it had
+    already reached, and "80% of zero" is not a quantity. The payload's ``percent_used`` stays
+    authoritative for the consumer — nobody should be recomputing ``spent / limit_amount`` when the
+    denominator can legitimately be zero.
     """
     if percent_used is None:
         return ()
+    if limit_amount is not None and limit_amount == 0:
+        return (100,) if 100 in BUDGET_THRESHOLDS else ()
     return tuple(t for t in BUDGET_THRESHOLDS if percent_used >= Decimal(t))
 
 
@@ -254,21 +264,19 @@ class Pg_Budget_Notification_Store(Budget_Notification_Store):
         return int(result.rowcount)
 
 
-#: How long a failed announcement waits before it may be retried. Without a cooldown, an
-#: organization over 80% with a broken endpoint would re-claim and re-emit the whole delivery
-#: budget on *every* request for the rest of the month — turning the emitter's careful per-event
-#: bound into an unbounded one, and pointing it at a URL the tenant chose.
-RETRY_COOLDOWN_SECONDS: Final[float] = 300.0
-
-#: How many times one threshold may be announced in a period before the platform gives up.
-#: A consumer that has been unreachable five times over 25 minutes is not going to be reached by
-#: a sixth attempt on the next request.
-MAX_ANNOUNCE_ATTEMPTS: Final[int] = 5
+#: Kept only so a lookup failure is retried promptly rather than never: once an announcement has
+#: been ENQUEUED, the outbox owns its retries, so this service no longer needs a cooldown, an
+#: attempt cap, or any notion of delivery failure at all. That machinery existed because
+#: announcing used to mean dialling; it does not any more.
+RETRY_COOLDOWN_SECONDS: Final[float] = 0.0
 
 #: Bounded queue for off-band announcements. One worker, because announcements are rare and
 #: strictly ordered work is easier to reason about; a small backlog, so a burst is absorbed and
 #: an unbounded one is dropped rather than queued forever.
 _DISPATCH_WORKERS: Final[int] = 1
+
+#: Sentinel attempt count meaning "announced; do not revisit this period".
+_SETTLED: Final[int] = -1
 _MAX_QUEUED_ANNOUNCEMENTS: Final[int] = 32
 
 
@@ -297,14 +305,14 @@ class Budget_Alert_Service:
     def __init__(
         self,
         store: Budget_Notification_Store,
-        emitter: Webhook_Emitter,
+        dispatcher: Webhook_Dispatcher,
         budgets: Budget_Store | None = None,
         *,
         executor: Executor | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._store = store
-        self._emitter = emitter
+        self._dispatcher = dispatcher
         # Optional: when present, `announce` re-reads the ceiling it is about to warn about, so a
         # snapshot taken before an owner raised their budget cannot send a warning citing the old
         # limit (and, worse, claim the threshold the raise just un-crossed).
@@ -335,7 +343,9 @@ class Budget_Alert_Service:
         """
         if not status.spend_is_authoritative:
             return ()
-        crossed = crossed_thresholds(status.percent_used)
+        crossed = crossed_thresholds(
+            status.percent_used, limit_amount=status.limit_amount
+        )
         if not crossed:
             return ()
         now = self._clock()
@@ -424,8 +434,8 @@ class Budget_Alert_Service:
                 )
                 continue
 
-            outcome = emit_budget_threshold_crossed(
-                self._emitter,
+            outcome = dispatch_budget_threshold_crossed(
+                self._dispatcher,
                 status.org_id,
                 threshold_percent=threshold,
                 # Exact decimal strings, as everywhere else money crosses this API.
@@ -439,7 +449,10 @@ class Budget_Alert_Service:
                 # So a consumer can tell "you are being warned" from "your runs are refused".
                 blocked=status.blocked,
             )
-            if outcome.failed_before_delivery or outcome.attempted_and_failed:
+            if outcome.failed_before_enqueue:
+                # Nothing durable was written, so the notification is still owed. Released rather
+                # than kept, and with no cooldown, because retrying costs one indexed read — the
+                # dialling that made retries expensive now happens in the worker.
                 self._release(status, threshold)
             else:
                 self._clear_attempts(status, threshold)
@@ -467,7 +480,9 @@ class Budget_Alert_Service:
                 status.org_id,
             )
             return 0
-        keep = crossed_thresholds(status.percent_used)
+        keep = crossed_thresholds(
+            status.percent_used, limit_amount=status.limit_amount
+        )
         try:
             dropped = self._store.release_except(status.org_id, status.period_start, keep)
         except Exception:  # noqa: BLE001
@@ -497,7 +512,9 @@ class Budget_Alert_Service:
         if record is None:
             return True
         last_attempt, attempts = record
-        if attempts >= MAX_ANNOUNCE_ATTEMPTS:
+        # A settled threshold is marked with a sentinel attempt count and never revisited this
+        # period; anything else was a lookup failure and may be retried at once.
+        if attempts == _SETTLED:
             return False
         return (now - last_attempt) >= RETRY_COOLDOWN_SECONDS
 
@@ -510,15 +527,15 @@ class Budget_Alert_Service:
     def _clear_attempts(self, status: Budget_Status, threshold: int) -> None:
         """Mark the threshold as settled: announced, and never to be retried this period.
 
-        The attempt count is set beyond the cap rather than deleted, so the memo keeps answering
-        "nothing to do here" without a store round trip for the rest of the period.
+        Marked with a sentinel rather than deleted, so the memo keeps answering "nothing to do
+        here" without a store round trip for the rest of the period.
         """
         key = (status.org_id, status.period_start, threshold)
         with self._lock:
-            self._attempts[key] = (self._clock(), MAX_ANNOUNCE_ATTEMPTS)
+            self._attempts[key] = (self._clock(), _SETTLED)
 
     def _release(self, status: Budget_Status, threshold: int) -> None:
-        """Undo a claim whose announcement did not reach anybody, so it can be retried."""
+        """Undo a claim whose announcement was never enqueued, so it can be retried."""
         try:
             self._store.release(status.org_id, status.period_start, threshold)
         except Exception:  # noqa: BLE001

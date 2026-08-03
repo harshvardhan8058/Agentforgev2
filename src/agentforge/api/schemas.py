@@ -880,3 +880,46 @@ class WebhookDeliveryResponse(BaseModel):
     error: str | None = None
     duration_ms: int
     created_at: datetime
+
+
+
+class WebhookQueueEntryResponse(BaseModel):
+    """One event waiting to be delivered, or one that gave up.
+
+    The operator-facing view of durable delivery. Before the outbox there was nothing to show
+    here — a failed webhook was a log line and a gap — so "which of my events have not arrived,
+    and why" had no answer. ``status`` is the whole point:
+
+    * ``pending`` — still scheduled; ``next_attempt_at`` says when, ``attempts`` how many times
+      it has been tried, ``last_error`` why the last one failed.
+    * ``abandoned`` — the schedule was exhausted, or the endpoint became undeliverable. Nothing
+      further happens without a human, which is what ``POST .../redeliver`` is for.
+
+    ``delivered`` entries are not listed: the delivery log is the record of what arrived, and
+    duplicating it here would give two answers to one question.
+    """
+
+    entry_id: UUID
+    webhook_id: UUID
+    event: WebhookEvent
+    status: Literal["pending", "abandoned"]
+    attempts: int
+    next_attempt_at: datetime
+    last_error: str | None = None
+    # The logical identity of the occurrence, as sent to the consumer — so an operator can match a
+    # stuck entry against what the consumer says it did or did not receive.
+    idempotency_key: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WebhookQueueSummaryResponse(BaseModel):
+    """``GET /webhooks/queue``: what is outstanding for this organization, and the entries.
+
+    ``pending`` and ``abandoned`` are counts over the whole queue, not over the returned page, so
+    a console can show "12 waiting, 3 gave up" honestly while listing only the first page.
+    """
+
+    pending: int
+    abandoned: int
+    entries: list[WebhookQueueEntryResponse] = Field(default_factory=list)

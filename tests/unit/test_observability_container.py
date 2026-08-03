@@ -186,19 +186,53 @@ def test_production_context_wires_postgres_webhook_stores():
     assert isinstance(ctx.webhook_delivery_store, Pg_Webhook_Delivery_Store)
 
 
-def test_the_emitter_is_built_from_the_configured_bounds():
+def test_the_emitter_owns_the_attempt_and_the_worker_owns_the_schedule():
+    """The split that makes delivery durable: retry state in the store, not in a process."""
     ctx = build_observability_context(
         _settings(
-            webhook_max_attempts=2,
+            webhook_max_attempts=5,
             webhook_timeout_seconds=1.5,
-            webhook_backoff_seconds=0.25,
+            webhook_backoff_seconds=30.0,
+            webhook_batch_size=7,
         )
     )
-    emitter = ctx.webhook_emitter
-    assert emitter._max_attempts == 2
-    assert emitter._timeout_seconds == 1.5
-    assert emitter._backoff_seconds == 0.25
-    assert emitter._transport is ctx.webhook_transport
+    assert ctx.webhook_emitter._timeout_seconds == 1.5
+    assert ctx.webhook_emitter._transport is ctx.webhook_transport
+    # No schedule on the emitter at all — it makes one attempt and reports it.
+    assert not hasattr(ctx.webhook_emitter, "_max_attempts")
+
+    worker = ctx.webhook_worker
+    assert worker._max_attempts == 5
+    assert worker._backoff_seconds == 30.0
+    assert worker._batch_size == 7
+    assert worker._outbox is ctx.webhook_outbox
+    assert worker._emitter is ctx.webhook_emitter
+
+
+def test_the_dispatcher_writes_to_the_outbox_the_worker_drains():
+    """One queue, or an event is enqueued where nothing is looking for it."""
+    ctx = build_observability_context(_settings())
+    assert ctx.webhook_dispatcher._outbox is ctx.webhook_outbox
+    assert ctx.webhook_dispatcher._subscriptions is ctx.webhook_subscription_store
+
+
+def test_keyless_context_wires_the_in_memory_outbox():
+    from agentforge.webhooks.outbox import InMemory_Webhook_Outbox
+
+    assert isinstance(
+        build_observability_context(_settings(profile="local")).webhook_outbox,
+        InMemory_Webhook_Outbox,
+    )
+
+
+def test_production_context_wires_the_postgres_outbox():
+    """The one store whose persistence changes a guarantee rather than a convenience."""
+    from agentforge.webhooks.outbox import Pg_Webhook_Outbox
+
+    assert isinstance(
+        build_observability_context(_settings(profile="production")).webhook_outbox,
+        Pg_Webhook_Outbox,
+    )
 
 
 def test_the_transport_admits_loopback_only_outside_production():
@@ -232,8 +266,8 @@ def test_production_context_wires_the_postgres_notification_store():
     assert isinstance(ctx.budget_notification_store, Pg_Budget_Notification_Store)
 
 
-def test_the_alert_service_announces_through_the_wired_emitter():
-    """Announcing a threshold IS a webhook emission, so it must use the one wired emitter."""
+def test_the_alert_service_announces_through_the_wired_dispatcher():
+    """Announcing a threshold IS enqueueing a webhook, so it must use the one wired dispatcher."""
     ctx = build_observability_context(_settings())
-    assert ctx.budget_alert_service._emitter is ctx.webhook_emitter
+    assert ctx.budget_alert_service._dispatcher is ctx.webhook_dispatcher
     assert ctx.budget_alert_service._store is ctx.budget_notification_store

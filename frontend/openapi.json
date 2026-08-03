@@ -456,7 +456,8 @@
           "integration_connection.deleted",
           "webhook.created",
           "webhook.updated",
-          "webhook.deleted"
+          "webhook.deleted",
+          "webhook.redelivered"
         ],
         "title": "Audit_Action",
         "type": "string"
@@ -2464,6 +2465,111 @@
           "created_at"
         ],
         "title": "WebhookDeliveryResponse",
+        "type": "object"
+      },
+      "WebhookQueueEntryResponse": {
+        "description": "One event waiting to be delivered, or one that gave up.\n\nThe operator-facing view of durable delivery. Before the outbox there was nothing to show\nhere \u2014 a failed webhook was a log line and a gap \u2014 so \"which of my events have not arrived,\nand why\" had no answer. ``status`` is the whole point:\n\n* ``pending`` \u2014 still scheduled; ``next_attempt_at`` says when, ``attempts`` how many times\n  it has been tried, ``last_error`` why the last one failed.\n* ``abandoned`` \u2014 the schedule was exhausted, or the endpoint became undeliverable. Nothing\n  further happens without a human, which is what ``POST .../redeliver`` is for.\n\n``delivered`` entries are not listed: the delivery log is the record of what arrived, and\nduplicating it here would give two answers to one question.",
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "entry_id": {
+            "format": "uuid",
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "event": {
+            "$ref": "#/components/schemas/Webhook_Event"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "next_attempt_at": {
+            "format": "date-time",
+            "title": "Next Attempt At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "abandoned"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "webhook_id": {
+            "format": "uuid",
+            "title": "Webhook Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "webhook_id",
+          "event",
+          "status",
+          "attempts",
+          "next_attempt_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WebhookQueueEntryResponse",
+        "type": "object"
+      },
+      "WebhookQueueSummaryResponse": {
+        "description": "``GET /webhooks/queue``: what is outstanding for this organization, and the entries.\n\n``pending`` and ``abandoned`` are counts over the whole queue, not over the returned page, so\na console can show \"12 waiting, 3 gave up\" honestly while listing only the first page.",
+        "properties": {
+          "abandoned": {
+            "title": "Abandoned",
+            "type": "integer"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/WebhookQueueEntryResponse"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending",
+          "abandoned"
+        ],
+        "title": "WebhookQueueSummaryResponse",
         "type": "object"
       },
       "WebhookSubscriptionResponse": {
@@ -5217,6 +5323,118 @@
         ]
       }
     },
+    "/webhooks/queue": {
+      "get": {
+        "description": "Return this organization's outstanding webhook deliveries, newest first.\n\nOrg-scoped rather than per-subscription because the question an operator arrives with is \"is\nanything stuck?\", not \"is anything stuck for endpoint 3 of 4\" \u2014 and an event can outlive the\nsubscription page it was created from.\n\nDelivered entries are deliberately excluded: what arrived is the delivery log's job to report,\nand answering it in two places invites the two answers to disagree.",
+        "operationId": "list_webhook_queue_webhooks_queue_get",
+        "parameters": [
+          {
+            "description": "Restrict to `pending` (still scheduled) or `abandoned` (gave up). Omit for both.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "abandoned"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict to `pending` (still scheduled) or `abandoned` (gave up). Omit for both.",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookQueueSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Webhook Queue",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/webhooks/queue/{entry_id}/redeliver": {
+      "post": {
+        "description": "Put an abandoned entry back in the queue, due immediately, with a fresh attempt schedule.\n\nOnly **abandoned** entries can be redelivered, and the restriction is not bureaucracy: a\npending entry is already scheduled, so requeueing it would be asking for the same event to be\ndelivered twice. A ``409`` says which case the caller hit rather than silently doing nothing.\n\nThe redelivery is audited, because it is a human choosing to re-send something the platform had\ngiven up on \u2014 exactly the kind of action somebody asks about afterwards.",
+        "operationId": "redeliver_webhook_queue_entry_webhooks_queue__entry_id__redeliver_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookQueueEntryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Redeliver Webhook Queue Entry",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
     "/webhooks/{webhook_id}": {
       "delete": {
         "description": "Delete a subscription and its delivery log; unknown or cross-tenant is 404.\n\nThe log goes with it (``ON DELETE CASCADE``, mirrored by the in-memory store). That is\ndeliberate: a delivery record describes a subscription and is meaningless without it, and\ndeleting the subscription is the tenant's only way to remove that history.",
@@ -5406,7 +5624,7 @@
     },
     "/webhooks/{webhook_id}/test": {
       "post": {
-        "description": "Send a ``webhook.ping`` to one subscription and report the result synchronously.\n\nThe one place a delivery happens on the request path, and the only place it should: an\noperator who has just pasted a URL needs to know *now* whether it works, and the whole\npoint is to find out before real events depend on it. Bounded to a single attempt so the\nresponse time is one endpoint timeout rather than the full retry budget.\n\nWorks on a paused subscription too \u2014 verifying an endpoint before activating it is exactly\nthe workflow, and refusing would make ``active: false`` mean \"untestable\".",
+        "description": "Send a ``webhook.ping`` to one subscription and report the result synchronously.\n\nThe one delivery that is **not** queued, and the only one that should not be: an operator who\nhas just pasted a URL needs to know *now* whether it works, and the whole point is to find out\nbefore real events depend on it. Bounded to a single attempt so the response time is one\nendpoint timeout rather than a retry schedule that now spans hours.\n\nWorks on a paused subscription too \u2014 verifying an endpoint before activating it is exactly\nthe workflow, and refusing would make ``active: false`` mean \"untestable\".",
         "operationId": "test_webhook_webhooks__webhook_id__test_post",
         "parameters": [
           {

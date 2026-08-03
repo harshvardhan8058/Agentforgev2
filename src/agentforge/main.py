@@ -154,9 +154,25 @@ async def lifespan(app: FastAPI):
             app.state.observability_context.trace_export_service.enabled,
         )
 
+    # 10. Start the webhook delivery worker. It drains the durable outbox, so webhook delivery
+    #     survives a restart and retries over hours rather than seconds — which is the whole
+    #     reason the outbox exists. Started here, after the graph is composed, and stopped in the
+    #     finally block below so a shutdown does not abandon a leased row for its full lease.
+    #
+    #     WEBHOOK_WORKER_ENABLED=false leaves the queue to another replica: a web tier scaled for
+    #     requests should not necessarily also be the delivery tier, and running the worker in
+    #     several instances is safe but not always wanted.
+    worker = app.state.observability_context.webhook_worker
+    if settings.webhook_worker_enabled:
+        worker.start()
+    else:
+        logger.info("Webhook delivery worker disabled for this process.")
+
     try:
         yield
     finally:
+        # Before the engine goes: the worker holds store handles.
+        worker.stop()
         await engine.dispose()
         redis_client = getattr(app.state, "redis", None)
         if redis_client is not None:

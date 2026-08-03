@@ -58,7 +58,12 @@ from agentforge.storage.base import DocumentStore
 from agentforge.streaming.sse import SSE_Streaming_Service
 from agentforge.tracing.base import Trace_Recorder
 from agentforge.vectorstore.base import Vector_Store
-from agentforge.webhooks.emitter import Webhook_Emitter, disabled_webhook_emitter
+from agentforge.webhooks.dispatcher import (
+    Webhook_Dispatcher,
+    disabled_webhook_dispatcher,
+)
+from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.outbox import Webhook_Outbox
 from agentforge.webhooks.store import (
     Webhook_Delivery_Store,
     Webhook_Subscription_Store,
@@ -499,23 +504,32 @@ def get_webhook_delivery_store(request: Request) -> Webhook_Delivery_Store:
     return get_observability_context(request).webhook_delivery_store
 
 
+def get_webhook_outbox(request: Request) -> Webhook_Outbox:
+    """Return the wired Webhook_Outbox (delivery intent, durable)."""
+    return get_observability_context(request).webhook_outbox
+
+
 def get_webhook_emitter(request: Request) -> Webhook_Emitter:
-    """Return the wired Webhook_Emitter, or an inert one if no context is wired.
+    """Return the wired Webhook_Emitter (one signed attempt, used by the test-send endpoint)."""
+    return get_observability_context(request).webhook_emitter
+
+
+def get_webhook_dispatcher(request: Request) -> Webhook_Dispatcher:
+    """Return the wired Webhook_Dispatcher, or an inert one if no context is wired.
 
     Deliberately non-raising, exactly like :func:`get_trace_export_service` and for the same
-    reason: the emitter is consumed by the *run* endpoints, so turning a missing observability
-    context into a 500 on ``POST /agent/run`` would let a notification concern fail the work it
-    is supposed to be reporting on. A partially-wired app runs agents normally and notifies
-    nobody.
+    reason: the dispatcher is consumed by the *run* endpoints, so turning a missing observability
+    context into a 500 on ``POST /agent/run`` would let a notification concern fail the work it is
+    supposed to be reporting on. A partially-wired app runs agents normally and notifies nobody.
 
-    The webhook *management* router keeps using the raising accessors above, where a missing
-    context is a genuine misconfiguration and must fail loudly rather than silently accept
-    subscriptions into a store nothing reads.
+    The webhook *management* router uses the raising accessors above, where a missing context is a
+    genuine misconfiguration and must fail loudly rather than silently accept subscriptions into a
+    store nothing reads.
     """
     ctx = getattr(request.app.state, "observability_context", None)
     if ctx is None:
-        return disabled_webhook_emitter()
-    return ctx.webhook_emitter
+        return disabled_webhook_dispatcher()
+    return ctx.webhook_dispatcher
 
 
 def get_analytics_service(request: Request) -> Analytics_Service:

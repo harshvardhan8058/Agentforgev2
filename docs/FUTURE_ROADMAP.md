@@ -58,12 +58,18 @@ the leftovers):
   to per-org endpoints for `run.completed`, `run.failed`, `document.ingested`,
   `guardrail.blocked`, and `budget.threshold_crossed`, with a delivery log and a console page.
   See `docs/WEBHOOKS.md`. What it left open, in the order I would take it:
-  - **Durable delivery.** Deliveries are in-process and best-effort, so a restart mid-delivery
-    loses one and the retry budget is spent in seconds. A queue (outbox table + a worker, or
-    Redis) would make delivery survive a deploy and let retries stretch over hours — the single
-    biggest gap between this and Stripe's.
-  - **Delivery-log retention.** Rows accumulate with traffic and are removed only with their
-    subscription. A retention window plus a prune job; the scoped statement already exists.
+  - ~~**Durable delivery.**~~ **done** (migration 0017). An outbox written in the request that
+    produced the event, an exponential schedule spanning about a day, leases so several instances
+    can drain one queue, abandoned-event visibility over `GET /webhooks/queue`, operator-driven
+    redelivery, and an `idempotency_key` in every envelope. What it left open:
+    - **A dead-letter alert.** An abandoned event is visible but nothing announces it — the same
+      gap budget notifications closed for spend. The webhook seam could report on itself.
+    - **Throughput.** One worker thread, `WEBHOOK_BATCH_SIZE` attempts per pass. A deployment with
+      a very large fan-out wants either several delivery replicas (already safe) or an async
+      transport that overlaps attempts within a pass.
+  - **Delivery-log retention.** The *outbox* is pruned (delivered rows swept after seven days);
+    the `webhook_deliveries` attempt log is not. A retention window plus a prune job; the scoped
+    statement already exists.
   - **Secret rotation.** Re-registering is the rotation today, which means a consumer outage.
     A `POST /webhooks/{id}/rotate-secret` returning the new secret once, with a grace window
     where both signatures verify, is the shape consumers expect.

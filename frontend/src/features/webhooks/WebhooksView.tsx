@@ -64,6 +64,7 @@ import { Input } from "../../components/ui/Input";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { formatWhen } from "../../lib/formatWhen";
+import { DeliveryQueuePanel } from "./DeliveryQueuePanel";
 import type { components } from "../../api/schema";
 
 const MANAGE_WEBHOOKS: Permission = "manage_webhooks";
@@ -402,6 +403,11 @@ export function WebhooksView(): JSX.Element {
           {create.isError && <ErrorBanner error={create.error} />}
         </CardContent>
       </Card>
+
+      {/* Placed above the subscription list because it is the page's incident surface: an
+          operator arriving after a consumer outage wants "what did I miss" before "what am I
+          subscribed to". */}
+      <DeliveryQueuePanel orgId={orgId} />
 
       <p className="sr-only" aria-live="polite" data-testid="webhooks-status">
         {webhooks.isFetching

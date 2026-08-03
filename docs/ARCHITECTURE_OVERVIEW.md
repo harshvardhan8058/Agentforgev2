@@ -195,7 +195,7 @@ stateDiagram-v2
 
 ## 7. Data model & migrations
 
-Sixteen additive SQL migrations, one per phase area, applied in order on startup (halting and naming the failing id on error):
+Seventeen additive SQL migrations, one per phase area, applied in order on startup (halting and naming the failing id on error):
 
 ```mermaid
 flowchart LR
@@ -206,7 +206,7 @@ flowchart LR
     m9 --> m10[0010 evaluations] --> m11[0011 integration connections]
     m11 --> m12[0012 document content hash] --> m13[0013 audit events]
     m13 --> m14[0014 spend budgets] --> m15[0015 webhooks]
-    m15 --> m16[0016 budget notifications]
+    m15 --> m16[0016 budget notifications] --> m17[0017 webhook outbox]
 ```
 
 All resources are `org_id`-scoped; cross-tenant access resolves to 404, never 403. Two tables
@@ -233,19 +233,34 @@ flowchart LR
     subgraph after[After the response]
         bg[BackgroundTasks]
         deferred[deferred-work seam<br/>api/errors.py]
-        pool[alert service pool<br/>1 worker, bounded queue]
+        pool[alert service pool]
     end
-    emitter[Webhook_Emitter<br/>claim-free, bounded retries]
+    dispatcher[Webhook_Dispatcher<br/>who: one row per subscription]
+    outbox[(webhook_outbox<br/>when: durable schedule)]
+    worker[Webhook_Delivery_Worker<br/>leases a batch, one attempt each]
+    emitter[Webhook_Emitter<br/>how: render, sign, one attempt]
     admission[URL admission<br/>re-checked per attempt]
     endpointx[(tenant endpoint)]
     log[(webhook_deliveries)]
 
-    run -->|success| bg --> emitter
-    guard -->|400 raised| deferred --> emitter
-    budget -->|threshold crossed| pool --> emitter
-    emitter --> admission --> endpointx
+    run -->|success| bg --> dispatcher
+    guard -->|400 raised| deferred --> dispatcher
+    budget -->|threshold crossed| pool --> dispatcher
+    dispatcher --> outbox
+    worker -->|claim due| outbox
+    worker --> emitter --> admission --> endpointx
     emitter --> log
 ```
+
+The split across dispatcher / outbox / worker is what makes the guarantees available. Enqueueing is
+bounded work whose cost does not depend on a consumer, so it is safe while a caller waits;
+delivering is unbounded work that depends entirely on a consumer, so it must not be. Retry state
+lives in the table rather than in a process, which is what survives a deploy.
+
+Three scheduling mechanisms feed the dispatcher, each for a reason. Successful runs use FastAPI's
+`BackgroundTasks`. A *refusal* is raised rather than returned, so it has no response to hang work
+on — hence the deferred-work seam in `api/errors.py`. Budget notifications use the alert service's
+own pool, so a claim round trip never lands on the request path.
 
 Three scheduling mechanisms, each for a reason. Successful runs use FastAPI's `BackgroundTasks`.
 A *refusal* is raised rather than returned, so it has no response to hang work on — hence the
