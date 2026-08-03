@@ -24,7 +24,15 @@ from agentforge.webhooks.transport import Recording_Webhook_Transport
 from agentforge.webhooks.worker import SETTLED_RETENTION, Webhook_Delivery_Worker
 
 ORG = uuid.uuid4()
-NOW = datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc)
+
+# Anchored to the REAL clock, not a fixed literal, and that is load-bearing rather than lazy.
+# The worker's clock is injectable (so the retry schedule can be asserted without waiting), but
+# the in-memory outbox stamps `updated_at` from the real clock when it settles a row. A fixed
+# literal therefore made the retention test depend on the time of day it ran: with a base of
+# 12:00, `clock.advance(7 days + 1h)` put the prune cutoff at 13:00, so a row stamped at 14:00
+# real time was "not old enough" and the test failed every afternoon. Anchoring the fake clock to
+# real time keeps every advance relative and the test deterministic.
+NOW = datetime.now(timezone.utc)
 
 
 class _Clock:

@@ -137,7 +137,11 @@ class Webhook_Outbox:
     def claim_due(
         self, *, limit: int, now: datetime | None = None
     ) -> list[Outbox_Entry]:  # pragma: no cover - interface
-        """Atomically lease up to ``limit`` due entries and return them."""
+        """Atomically lease up to ``limit`` due entries and return them, oldest due first.
+
+        The order is part of the contract, not incidental: the longest-waiting event should be
+        attempted first, and a caller that had to re-sort would be compensating for the store.
+        """
         raise NotImplementedError
 
     def mark_delivered(
@@ -422,7 +426,15 @@ class Pg_Webhook_Outbox(Webhook_Outbox):
                     "limit": limit,
                 },
             ).fetchall()
-        return [self._row(row) for row in rows]
+        claimed = [self._row(row) for row in rows]
+        # The ORDER BY inside the sub-select decides WHICH rows are claimed; it does not decide
+        # the order `RETURNING` hands them back, which SQL leaves unspecified and PostgreSQL
+        # varies with the plan. Sorting here makes the seam's contract — oldest due first — true
+        # of the returned list too, so the worker attempts the longest-waiting event first
+        # instead of in whatever order the executor happened to produce. Cheap: the batch is at
+        # most `WEBHOOK_BATCH_SIZE`.
+        claimed.sort(key=lambda entry: (entry.next_attempt_at, str(entry.id)))
+        return claimed
 
     def mark_delivered(self, entry_id: UUID, *, attempts: int) -> None:
         self._settle(entry_id, status="delivered", attempts=attempts, error=None)

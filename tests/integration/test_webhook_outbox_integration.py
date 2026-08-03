@@ -54,6 +54,24 @@ def outbox():
     return Pg_Webhook_Outbox(_dsn())
 
 
+@pytest.fixture(autouse=True)
+async def _own_the_queue(engine):
+    """Empty ``webhook_outbox`` before each test in this module.
+
+    Every other integration suite isolates itself by creating a fresh organization, because
+    every query it makes is org-scoped. The outbox is the one store whose central queries —
+    ``claim_due`` and ``prune_settled`` — are deliberately **global**: a delivery worker drains
+    the whole queue, not one tenant's slice, and scoping them by org would defeat the purpose.
+
+    A test about queue mechanics therefore has to own the queue, or a row left behind by an
+    earlier test is indistinguishable from one this test enqueued. Depends on ``engine`` so the
+    migration that creates the table has run first.
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM webhook_outbox"))
+    yield
+
+
 def _org(name: str = "Outbox Org"):
     return Pg_Identity_Store(_dsn()).create_organization(name).id
 
