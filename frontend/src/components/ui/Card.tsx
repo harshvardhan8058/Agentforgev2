@@ -39,15 +39,24 @@ export function CardHeader({
 export function CardTitle({
   className,
   children,
+  /**
+   * Heading level to render. Defaults to `h3`, which is right for a card nested under a
+   * section heading — but a card that is itself a top-level section of a page whose title is
+   * an `h1` needs `h2`, or the document skips a level (axe `heading-order`, WCAG 1.3.1).
+   * The level is a property of where the card sits, so only the caller can know it.
+   */
+  as: Heading = "h3",
   ...rest
-}: HTMLAttributes<HTMLHeadingElement>): JSX.Element {
+}: HTMLAttributes<HTMLHeadingElement> & {
+  as?: "h2" | "h3" | "h4";
+}): JSX.Element {
   return (
-    <h3
+    <Heading
       className={cn("text-lg font-semibold leading-none text-text", className)}
       {...rest}
     >
       {children}
-    </h3>
+    </Heading>
   );
 }
 

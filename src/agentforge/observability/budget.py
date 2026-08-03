@@ -262,9 +262,16 @@ class Budget_Guard:
         self._store = store
         self._analytics = analytics
         self._cache_seconds = cache_seconds
-        # org_id -> (computed_at, spend). Guarded by a lock: the guard is called from worker
-        # threads, and a dict mutation racing a read is not worth debugging later.
-        self._cache: dict[UUID, tuple[datetime, Decimal]] = {}
+        # (org_id, period_start) -> (computed_at, spend). Guarded by a lock: the guard is
+        # called from worker threads, and a dict mutation racing a read is not worth debugging
+        # later.
+        #
+        # The PERIOD is part of the key, not just the org. Keyed on the org alone, a request
+        # arriving in the first seconds of a new month would be answered with last month's
+        # month-to-date total — so an organization that ended July over a blocking budget would
+        # start August still refused, for the length of the cache window, with a number no
+        # dashboard agreed with. A cache whose value depends on the period must say so.
+        self._cache: dict[tuple[UUID, datetime], tuple[datetime, Decimal]] = {}
         self._lock = threading.Lock()
 
     def status(self, org_id: UUID, *, now: datetime | None = None) -> Budget_Status:
@@ -294,15 +301,21 @@ class Budget_Guard:
         Called when the budget itself changes, so raising a ceiling takes effect immediately
         rather than after the cache window — an operator unblocking their own org should not
         have to wait, and that is the one case where the delay would be actively confusing.
+
+        Drops every period held for the org, not just the current one: the caller's intent is
+        "forget what you know about this tenant", and leaving a stale entry for a neighbouring
+        period would reintroduce exactly the staleness the period-aware key removed.
         """
         with self._lock:
-            self._cache.pop(org_id, None)
+            for key in [k for k in self._cache if k[0] == org_id]:
+                del self._cache[key]
 
     def _spend_for_period(
         self, org_id: UUID, period_start: datetime, moment: datetime
     ) -> Decimal:
+        cache_key = (org_id, period_start)
         with self._lock:
-            cached = self._cache.get(org_id)
+            cached = self._cache.get(cache_key)
             if cached is not None and (moment - cached[0]).total_seconds() < self._cache_seconds:
                 return cached[1]
         try:
@@ -318,5 +331,5 @@ class Budget_Guard:
             )
             return Decimal(0)
         with self._lock:
-            self._cache[org_id] = (moment, spent)
+            self._cache[cache_key] = (moment, spent)
         return spent

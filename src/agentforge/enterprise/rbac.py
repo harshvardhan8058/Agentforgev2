@@ -34,6 +34,7 @@ class Permission(str, Enum):
     MANAGE_MEMBERS = "manage_members"
     MANAGE_API_KEYS = "manage_api_keys"
     MANAGE_INTEGRATIONS = "manage_integrations"
+    MANAGE_WEBHOOKS = "manage_webhooks"
     READ_AUDIT_LOG = "read_audit_log"
     MANAGE_BUDGET = "manage_budget"
     INGEST_DOCUMENTS = "ingest_documents"
@@ -52,9 +53,16 @@ _MEMBER: frozenset[Permission] = _VIEWER | {
 # Integration connection configuration is administrative deployment-shaped work, granted
 # alongside API-key management: both configure how the org reaches the outside world, and
 # neither can disclose a credential (integration config is non-secret by construction).
+#
+# Webhook management joins them for the same reason and with one extra consideration: managing
+# a subscription cannot *disclose* anything, because the signing secret is returned exactly
+# once at creation and no read path can produce it again. Reading the delivery log is gated on
+# the same permission rather than on `read`, because a failure summary can name an internal
+# hostname or a TLS error from the tenant's own infrastructure.
 _ADMIN: frozenset[Permission] = _MEMBER | {
     Permission.MANAGE_API_KEYS,
     Permission.MANAGE_INTEGRATIONS,
+    Permission.MANAGE_WEBHOOKS,
 }
 # Setting a spend ceiling is OWNER-only for the same reason as the audit trail: it is a
 # financial control, and the role that owns the organization is the one that owns its budget.

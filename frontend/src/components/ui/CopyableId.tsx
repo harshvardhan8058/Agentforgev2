@@ -70,11 +70,21 @@ export function CopyableId({
   label = "id",
   testId,
   className,
+  /**
+   * Show the whole value instead of eliding its middle.
+   *
+   * Eliding is right for an identifier, which is looked up rather than read, and wrong for a
+   * value the operator has to *store*: a webhook signing secret is shown exactly once, and a
+   * shortened rendering of it would be unusable if the clipboard is unavailable — which is
+   * precisely the deployment this component already has a fallback for.
+   */
+  full = false,
 }: {
   value: string;
   label?: string;
   testId?: string;
   className?: string;
+  full?: boolean;
 }): JSX.Element {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -99,11 +109,14 @@ export function CopyableId({
       data-testid={testId}
     >
       <code
-        className="truncate font-mono text-xs text-text-subtle"
+        className={cn(
+          "font-mono text-xs text-text-subtle",
+          full ? "break-all" : "truncate",
+        )}
         title={value}
         data-testid={testId ? `${testId}-value` : undefined}
       >
-        {shortenId(value)}
+        {full ? value : shortenId(value)}
       </code>
       <button
         type="button"

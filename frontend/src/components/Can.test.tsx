@@ -15,6 +15,7 @@ const permissionArb = fc.constantFrom<Permission>(
   "manage_api_keys",
   "manage_budget",
   "manage_integrations",
+  "manage_webhooks",
   "read_audit_log",
   "manage_members",
 );

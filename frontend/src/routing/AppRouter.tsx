@@ -87,6 +87,11 @@ const IntegrationsView = lazy(() =>
     default: m.IntegrationsView,
   })),
 );
+const WebhooksView = lazy(() =>
+  import("../features/webhooks/WebhooksView").then((m) => ({
+    default: m.WebhooksView,
+  })),
+);
 const NotFoundView = lazy(() =>
   import("../features/misc/NotFoundView").then((m) => ({ default: m.NotFoundView })),
 );
@@ -122,6 +127,7 @@ export function AppRouter(): JSX.Element {
           <Route path="/integrations" element={<IntegrationsView />} />
           <Route path="/members" element={<MembersView />} />
           <Route path="/api-keys" element={<ApiKeysView />} />
+          <Route path="/webhooks" element={<WebhooksView />} />
           <Route path="/audit" element={<AuditLogView />} />
           <Route path="*" element={<NotFoundView />} />
         </Route>

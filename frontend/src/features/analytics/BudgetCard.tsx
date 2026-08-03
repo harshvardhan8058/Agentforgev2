@@ -199,6 +199,13 @@ export function BudgetCard(): JSX.Element {
                   </time>
                   .
                 </p>
+                {/* Said here rather than only in the docs: an owner reading a percentage is
+                    exactly the person who wants to know whether crossing it will reach them
+                    without their having to come back and look. */}
+                <p className="text-xs text-text-subtle" data-testid="budget-alert-note">
+                  Crossing 80% and 100% notifies any webhook subscribed to{" "}
+                  <code>budget.threshold_crossed</code>, once per period.
+                </p>
               </div>
             )}
 

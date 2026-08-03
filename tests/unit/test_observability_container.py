@@ -124,3 +124,116 @@ def test_only_container_names_concrete_observability_impls():
         source = inspect.getsource(module)
         for name in concretes:
             assert name not in source, f"{module.__name__} must not name {name}"
+
+
+
+# --- webhook seam wiring ----------------------------------------------------------
+
+
+def test_keyless_context_wires_in_memory_webhook_stores_paired():
+    """The keyless pair must cascade like the Postgres pair, which means it must be paired."""
+    from agentforge.webhooks.base import Webhook_Event
+    from agentforge.webhooks.store import (
+        InMemory_Webhook_Delivery_Store,
+        InMemory_Webhook_Subscription_Store,
+    )
+
+    ctx = build_observability_context(_settings(profile="local"))
+    assert isinstance(ctx.webhook_subscription_store, InMemory_Webhook_Subscription_Store)
+    assert isinstance(ctx.webhook_delivery_store, InMemory_Webhook_Delivery_Store)
+
+    # Deleting a subscription removes its delivery log, which only holds if the subscription
+    # store was handed the delivery store the context also exposes.
+    import uuid
+
+    from agentforge.webhooks.base import Webhook_Delivery
+
+    org_id = uuid.uuid4()
+    subscription = ctx.webhook_subscription_store.create(
+        org_id,
+        url="https://hooks.example.com/h",
+        secret="k",
+        events=(Webhook_Event.RUN_COMPLETED,),
+    )
+    ctx.webhook_delivery_store.record(
+        Webhook_Delivery(
+            id=uuid.uuid4(),
+            org_id=org_id,
+            subscription_id=subscription.id,
+            event=Webhook_Event.RUN_COMPLETED,
+            status="delivered",
+            attempts=1,
+            response_status=200,
+            error=None,
+            duration_ms=1,
+            created_at=__import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc
+            ),
+        )
+    )
+    ctx.webhook_subscription_store.delete(org_id, subscription.id)
+    assert ctx.webhook_delivery_store.list_for_subscription(org_id, subscription.id) == []
+
+
+def test_production_context_wires_postgres_webhook_stores():
+    from agentforge.webhooks.store import (
+        Pg_Webhook_Delivery_Store,
+        Pg_Webhook_Subscription_Store,
+    )
+
+    ctx = build_observability_context(_settings(profile="production"))
+    assert isinstance(ctx.webhook_subscription_store, Pg_Webhook_Subscription_Store)
+    assert isinstance(ctx.webhook_delivery_store, Pg_Webhook_Delivery_Store)
+
+
+def test_the_emitter_is_built_from_the_configured_bounds():
+    ctx = build_observability_context(
+        _settings(
+            webhook_max_attempts=2,
+            webhook_timeout_seconds=1.5,
+            webhook_backoff_seconds=0.25,
+        )
+    )
+    emitter = ctx.webhook_emitter
+    assert emitter._max_attempts == 2
+    assert emitter._timeout_seconds == 1.5
+    assert emitter._backoff_seconds == 0.25
+    assert emitter._transport is ctx.webhook_transport
+
+
+def test_the_transport_admits_loopback_only_outside_production():
+    local = build_observability_context(_settings(profile="local"))
+    production = build_observability_context(_settings(profile="production"))
+    assert local.webhook_transport._allow_loopback is True
+    assert production.webhook_transport._allow_loopback is False
+
+
+
+# --- budget threshold notifications -----------------------------------------------
+
+
+def test_keyless_context_wires_the_in_memory_notification_store():
+    from agentforge.observability.budget_alerts import (
+        Budget_Alert_Service,
+        InMemory_Budget_Notification_Store,
+    )
+
+    ctx = build_observability_context(_settings(profile="local"))
+    assert isinstance(
+        ctx.budget_notification_store, InMemory_Budget_Notification_Store
+    )
+    assert isinstance(ctx.budget_alert_service, Budget_Alert_Service)
+
+
+def test_production_context_wires_the_postgres_notification_store():
+    from agentforge.observability.budget_alerts import Pg_Budget_Notification_Store
+
+    ctx = build_observability_context(_settings(profile="production"))
+    assert isinstance(ctx.budget_notification_store, Pg_Budget_Notification_Store)
+
+
+def test_the_alert_service_announces_through_the_wired_emitter():
+    """Announcing a threshold IS a webhook emission, so it must use the one wired emitter."""
+    ctx = build_observability_context(_settings())
+    assert ctx.budget_alert_service._emitter is ctx.webhook_emitter
+    assert ctx.budget_alert_service._store is ctx.budget_notification_store

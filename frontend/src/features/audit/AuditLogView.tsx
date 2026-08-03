@@ -93,6 +93,9 @@ const ACTION_META: Record<AuditAction, { label: string; destructive: boolean }> 
     label: "Connector settings removed",
     destructive: true,
   },
+  "webhook.created": { label: "Webhook registered", destructive: false },
+  "webhook.updated": { label: "Webhook updated", destructive: false },
+  "webhook.deleted": { label: "Webhook removed", destructive: true },
 };
 
 const ALL_ACTIONS = Object.keys(ACTION_META) as AuditAction[];

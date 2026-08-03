@@ -140,6 +140,20 @@ class Settings(BaseSettings):
     # request path; the cost is a bounded overshoot within the window (docs/CONFIGURATION.md).
     budget_cache_seconds: float = 30.0
 
+    # --- outbound webhooks ---
+    # Every one of these is BOUNDED at the type level, not merely defaulted, because each is a
+    # multiplier on how long a worker thread can be held by somebody else's slow endpoint:
+    # attempts x timeout is the worst case per subscription, and per-org fan-out multiplies it
+    # again. An operator who set WEBHOOK_TIMEOUT_SECONDS=600 would be configuring an outage,
+    # so the value is refused at startup naming the key rather than accepted and regretted.
+    webhook_max_attempts: int = Field(default=3, ge=1, le=5)
+    webhook_timeout_seconds: float = Field(default=4.0, gt=0.0, le=15.0)
+    webhook_backoff_seconds: float = Field(default=0.5, ge=0.0, le=5.0)
+    # Cap on subscriptions per organization. Bounds the fan-out of a single event, which is
+    # the only unbounded quantity in the delivery path; 20 endpoints is far past any real
+    # deployment's needs and far short of a way to turn one run into a minute of HTTP.
+    webhook_max_per_org: int = Field(default=20, ge=1, le=100)
+
     # --- enterprise: audit trail ---
     # Failure posture for an audit write. False (default) = fail OPEN: a failed write is
     # logged at ERROR and the audited request still succeeds, because an audit store outage
@@ -279,6 +293,20 @@ class Settings(BaseSettings):
         1.3, 10.1). Mirrors the existing ``active_*`` selector helpers.
         """
         return self.use_database or self.profile == "production"
+
+    def allow_loopback_webhooks(self) -> bool:
+        """Return whether a webhook URL may point at loopback (and therefore may be ``http``).
+
+        True outside production, so a developer can point a subscription at a local listener
+        and actually see a signed request arrive — which is the difference between a webhook
+        feature somebody can adopt and one they have to deploy to test. False in production,
+        where a loopback destination could only ever mean the platform calling itself.
+
+        A method rather than a stored flag, and derived from the profile rather than from its
+        own setting, so no deployment can accidentally enable it: there is no environment
+        variable to set.
+        """
+        return self.profile != "production"
 
     def integration_enabled(self, name: str) -> bool:
         """Return whether the named integration is Enabled (Req 3.4, 3.6, 3.7).

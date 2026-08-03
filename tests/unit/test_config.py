@@ -96,3 +96,52 @@ def test_embedding_dimension_exposed(monkeypatch):
     settings = load_settings()
     assert isinstance(settings.embedding_dimension, int)
     assert settings.embedding_dimension == 384
+
+
+
+# --- webhook delivery bounds ------------------------------------------------------
+#
+# Each of these multiplies how long a worker thread can be held by somebody else's slow
+# endpoint, so they are bounded at the type level and a bad value must abort startup naming
+# the key — not be accepted and discovered as an outage.
+
+
+def test_webhook_delivery_defaults(monkeypatch):
+    apply_base_env(monkeypatch)
+    settings = load_settings()
+    assert settings.webhook_max_attempts == 3
+    assert settings.webhook_timeout_seconds == 4.0
+    assert settings.webhook_backoff_seconds == 0.5
+    assert settings.webhook_max_per_org == 20
+
+
+def test_webhook_loopback_is_allowed_locally_and_never_in_production(monkeypatch):
+    apply_base_env(monkeypatch)
+    assert load_settings().allow_loopback_webhooks() is True
+
+    monkeypatch.setenv("PROFILE", "production")
+    monkeypatch.setenv("JWT_SECRET", "prod-signing-secret")
+    assert load_settings().allow_loopback_webhooks() is False
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("WEBHOOK_MAX_ATTEMPTS", "0"),
+        ("WEBHOOK_MAX_ATTEMPTS", "50"),
+        ("WEBHOOK_TIMEOUT_SECONDS", "0"),
+        ("WEBHOOK_TIMEOUT_SECONDS", "600"),
+        ("WEBHOOK_BACKOFF_SECONDS", "-1"),
+        ("WEBHOOK_BACKOFF_SECONDS", "60"),
+        ("WEBHOOK_MAX_PER_ORG", "0"),
+        ("WEBHOOK_MAX_PER_ORG", "10000"),
+    ],
+)
+def test_an_out_of_range_webhook_bound_aborts_startup_naming_the_key(
+    monkeypatch, key: str, value: str
+):
+    apply_base_env(monkeypatch)
+    monkeypatch.setenv(key, value)
+    with pytest.raises(ConfigError) as caught:
+        load_settings()
+    assert key.lower() in caught.value.missing

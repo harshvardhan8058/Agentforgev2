@@ -17,6 +17,7 @@ import {
   LayoutDashboard,
   MessagesSquare,
   Plug,
+  Radio,
   Search,
   ShieldCheck,
   SlidersHorizontal,
@@ -158,6 +159,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: "API Keys",
     icon: KeyRound,
     permission: "manage_api_keys",
+    group: "Administration",
+  },
+  {
+    id: "nav-webhooks",
+    path: "/webhooks",
+    label: "Webhooks",
+    icon: Radio,
+    permission: "manage_webhooks",
     group: "Administration",
   },
   {

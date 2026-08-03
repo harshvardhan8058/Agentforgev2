@@ -38,6 +38,7 @@ test.describe("navigation", () => {
       { nav: "nav-nav-integrations", view: "integrations-view" },
       { nav: "nav-nav-members", view: "members-view" },
       { nav: "nav-nav-api-keys", view: "api-keys-view" },
+      { nav: "nav-nav-webhooks", view: "webhooks-view" },
       { nav: "nav-nav-audit", view: "audit-view" },
     ];
 

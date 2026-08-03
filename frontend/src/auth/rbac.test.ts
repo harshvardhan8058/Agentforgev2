@@ -13,6 +13,7 @@ const permissionArb = fc.constantFrom<Permission>(
   "manage_budget",
   "manage_integrations",
   "manage_members",
+  "manage_webhooks",
   "read_audit_log",
 );
 
@@ -65,6 +66,7 @@ describe("auth/rbac — ROLE_PERMISSIONS + can", () => {
       "ingest_documents",
       "manage_api_keys",
       "manage_integrations",
+      "manage_webhooks",
       "read",
       "run_agents",
     ]);
@@ -74,6 +76,7 @@ describe("auth/rbac — ROLE_PERMISSIONS + can", () => {
       "manage_budget",
       "manage_integrations",
       "manage_members",
+      "manage_webhooks",
       "read",
       "read_audit_log",
       "run_agents",

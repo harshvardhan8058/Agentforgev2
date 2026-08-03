@@ -285,6 +285,52 @@ def test_the_cache_is_per_org():
     assert guard.status(other).blocked is False
 
 
+def test_the_cache_is_per_period_so_a_new_month_is_not_answered_with_the_old_one():
+    """Keyed on the org alone, the first seconds of a new month reported last month's total.
+
+    That is not a rounding nuisance: an organization that ended the month over a *blocking*
+    budget would start the next one still refused, for the length of the cache window, with a
+    number no dashboard agreed with.
+    """
+    usage = InMemory_Usage_Store()
+    budgets = InMemory_Budget_Store()
+    budgets.upsert(ORG, limit_amount=Decimal("10"), action="block")
+    guard = Budget_Guard(budgets, Analytics_Service(usage), cache_seconds=300.0)
+
+    july_end = datetime(2026, 7, 31, 23, 59, 30, tzinfo=timezone.utc)
+    usage.add(_usage(ORG, "50", july_end))
+
+    # July: over the ceiling, and cached for five minutes.
+    assert guard.status(ORG, now=july_end).blocked is True
+
+    # Thirty seconds later it is August. The cached July figure must not answer for it.
+    august = datetime(2026, 8, 1, 0, 0, 0, tzinfo=timezone.utc)
+    august_status = guard.status(ORG, now=august)
+    assert august_status.period_start == datetime(2026, 8, 1, tzinfo=timezone.utc)
+    assert august_status.spent == Decimal("0")
+    assert august_status.blocked is False
+
+
+def test_invalidating_drops_every_period_held_for_the_org():
+    """"Forget what you know about this tenant" cannot leave a neighbouring period behind."""
+    usage = InMemory_Usage_Store()
+    budgets = InMemory_Budget_Store()
+    budgets.upsert(ORG, limit_amount=Decimal("10"), action="block")
+    guard = Budget_Guard(budgets, Analytics_Service(usage), cache_seconds=300.0)
+
+    july = datetime(2026, 7, 15, tzinfo=timezone.utc)
+    august = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    guard.status(ORG, now=july)
+    guard.status(ORG, now=august)
+
+    usage.add(_usage(ORG, "50", july))
+    usage.add(_usage(ORG, "50", august))
+    guard.invalidate(ORG)
+
+    assert guard.status(ORG, now=july).spent == Decimal("50")
+    assert guard.status(ORG, now=august).spent == Decimal("50")
+
+
 # --- the store --------------------------------------------------------------------
 
 

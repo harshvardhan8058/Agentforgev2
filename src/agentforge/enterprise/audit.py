@@ -92,6 +92,10 @@ class Audit_Action(str, Enum):
     INTEGRATION_CONNECTION_UPDATED = "integration_connection.updated"
     INTEGRATION_CONNECTION_DELETED = "integration_connection.deleted"
 
+    WEBHOOK_CREATED = "webhook.created"
+    WEBHOOK_UPDATED = "webhook.updated"
+    WEBHOOK_DELETED = "webhook.deleted"
+
 
 # --- metadata admission -----------------------------------------------------------
 
