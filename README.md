@@ -32,6 +32,9 @@ hosted model or a specific integration.
 | **Guardrails** | A safety pipeline applied to every answer, with transparent flags. |
 | **Evaluations** | Curated datasets and evaluators to measure answer quality over time. |
 | **Analytics** | Per-organization token usage and cost, verbatim and provider-attributed. |
+| **Spend budgets** | A monthly ceiling per organization that warns or refuses new runs, with notifications at 80% and 100%. |
+| **Audit trail** | An append-only record of who changed the organization, keyset-paginated, with a configurable fail-open/fail-closed posture. |
+| **Outbound webhooks** | Signed HTTPS deliveries for run, ingestion, guardrail and budget events, with SSRF-hardened URL admission, bounded retries and a delivery log. See **[docs/WEBHOOKS.md](docs/WEBHOOKS.md)**. |
 | **Enterprise auth & tenancy** | JWT + API keys, an RBAC map (owner ⊇ admin ⊇ member ⊇ viewer), and **strict per-`org_id` isolation** enforced at the data-access layer. |
 | **Operator console** | A React + TypeScript SPA (Linear/Vercel-class UX) — command palette, dark/light themes, WCAG 2.1 AA, and route-level code splitting. |
 
@@ -243,6 +246,7 @@ plus `pull` + `up -d`.
 - [Architecture overview](docs/ARCHITECTURE_OVERVIEW.md)
 - [Configuration reference](docs/CONFIGURATION.md)
 - [Feature inventory](docs/FEATURE_INVENTORY.md)
+- [Webhooks (consumer guide)](docs/WEBHOOKS.md)
 - [Deployment guide](docs/DEPLOYMENT.md)
 - [Infrastructure & CI/CD](docs/INFRASTRUCTURE.md)
 - [Known limitations](docs/KNOWN_LIMITATIONS.md)

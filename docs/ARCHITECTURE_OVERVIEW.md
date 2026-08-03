@@ -195,7 +195,7 @@ stateDiagram-v2
 
 ## 7. Data model & migrations
 
-Fourteen additive SQL migrations, one per phase area, applied in order on startup (halting and naming the failing id on error):
+Sixteen additive SQL migrations, one per phase area, applied in order on startup (halting and naming the failing id on error):
 
 ```mermaid
 flowchart LR
@@ -205,13 +205,53 @@ flowchart LR
     m7 --> m8[0008 usage records] --> m9[0009 prompt registry]
     m9 --> m10[0010 evaluations] --> m11[0011 integration connections]
     m11 --> m12[0012 document content hash] --> m13[0013 audit events]
-    m13 --> m14[0014 spend budgets]
+    m13 --> m14[0014 spend budgets] --> m15[0015 webhooks]
+    m15 --> m16[0016 budget notifications]
 ```
 
 All resources are `org_id`-scoped; cross-tenant access resolves to 404, never 403. Two tables
 carry deliberate non-cascade rules: `usage_records.user_id` and `audit_events.actor_user_id`
 are `ON DELETE SET NULL`, so deleting a user cannot erase the cost it incurred or the record
 of what it did.
+
+`budget_notifications` (0016) is the one table whose **primary key is a claim** rather than an
+identity: `(org_id, period_start, threshold_percent)` plus `INSERT … ON CONFLICT DO NOTHING` is
+how two concurrent requests observing the same budget crossing produce exactly one notification.
+
+## 7a. Notification flow (webhooks)
+
+The platform could observe everything and tell nobody until 0015. One seam now serves runs,
+ingestion, guardrails and spend:
+
+```mermaid
+flowchart LR
+    subgraph request[Request path]
+        run[run / ingest / query]
+        guard[input guardrail]
+        budget[budget enforcement]
+    end
+    subgraph after[After the response]
+        bg[BackgroundTasks]
+        deferred[deferred-work seam<br/>api/errors.py]
+        pool[alert service pool<br/>1 worker, bounded queue]
+    end
+    emitter[Webhook_Emitter<br/>claim-free, bounded retries]
+    admission[URL admission<br/>re-checked per attempt]
+    endpointx[(tenant endpoint)]
+    log[(webhook_deliveries)]
+
+    run -->|success| bg --> emitter
+    guard -->|400 raised| deferred --> emitter
+    budget -->|threshold crossed| pool --> emitter
+    emitter --> admission --> endpointx
+    emitter --> log
+```
+
+Three scheduling mechanisms, each for a reason. Successful runs use FastAPI's `BackgroundTasks`.
+A *refusal* is raised rather than returned, so it has no response to hang work on — hence the
+deferred-work seam in `api/errors.py`, which attaches the task to the error response the
+exception handler builds. Budget notifications use the alert service's own pool, so they neither
+queue ahead of a run's own post-response work nor hold a streamed connection open.
 
 ## 8. CI/CD pipeline
 

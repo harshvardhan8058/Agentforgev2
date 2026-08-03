@@ -197,24 +197,70 @@ embedding model once, so its first run downloads ~90 MB.
   set `OTEL_EXPORTER_ENDPOINT` at a local collector (`docker run otel/opentelemetry-collector`)
   and confirm one `agent.run` span with its children arrives.
 
+## 4a. The notification seam — done (PR #4, branch `feat/v1.1-webhook-framework`)
+
+The item §5 below used to call "the highest-value next capability" is built. Two commits plus a
+self-review round: `e18cf67` (webhook framework, migration 0015), `59b4715` (budget threshold
+notifications, migration 0016), `0ec106b` (14 review findings fixed, 3 of them blocking).
+
+**What exists now.** `src/agentforge/webhooks/` — a closed event vocabulary, SSRF URL admission,
+HMAC signing, in-memory + Postgres stores, an httpx transport, a bounded emitter, and one module
+where each event's payload is defined once. Six endpoints under `/webhooks` behind a new
+`manage_webhooks` permission (admin and above), a console page, and emission from every run,
+ingestion and input-guardrail path. `docs/WEBHOOKS.md` is the consumer contract.
+
+**Five decisions a future session should not relitigate without reading the reasoning:**
+
+1. **The secret is stored recoverably.** A hash cannot *sign*. It is returned once at creation
+   and no read path can produce it again, so the once-only exposure is an application guarantee,
+   not a cryptographic one. Same choice as Stripe and GitHub, and written down as a limitation
+   rather than dressed up.
+2. **URL admission is an allow-list** (`ip.is_global` plus an explicit multicast check), not a
+   deny-list of RFC1918 ranges. Deny-lists have to enumerate loopback, link-local, CGNAT,
+   IPv4-mapped IPv6, benchmarking and documentation ranges correctly, and the interesting
+   bypasses are always the range somebody forgot.
+3. **Every event is single-shot except the budget threshold**, which is a *condition* — true for
+   every request for weeks. That is the whole reason `budget_notifications` exists, and it is why
+   no other event needs claim state.
+4. **Emission is off the request path, three different ways**, because there are three different
+   situations: `BackgroundTasks` for a successful response; the new `defer_after_error` seam in
+   `api/errors.py` for a *raised* refusal (which has no response to hang work on — this is why a
+   guardrail block could not be reported before); and the alert service's own single-worker pool
+   for budget thresholds, so an announcement neither queues ahead of a run's own post-response
+   work nor holds a streamed connection open.
+5. **`Budget_Status.spend_is_authoritative`** exists because the guard fails open at
+   `Decimal(0)`: "spend is zero" and "spend is unknown" are the same value and opposite facts,
+   and the notification reconciler was reading the latter as "nothing is crossed, delete every
+   claim".
+
+**The self-review round is worth reading before extending this.** Three defects it caught are the
+kind that recur: an empty delivery list meaning four different things (so a store outage
+permanently consumed an organization's one notification); an unlocked check-then-set in the
+in-memory claim store (double-claimed in 46 of 500 concurrent trials, while its own docstring
+promised atomicity); and adding `BackgroundTasks` to a *dependency*, which silently reordered
+every router's post-response work and attached tasks to streaming responses. All three are now
+regression-tested.
+
 ## 5. Recommended next steps, in order
 
-1. **Land PR #2.** Watch the `integration` lane specifically (§4.1). If a store method fails
-   there, it will be a SQL/type detail, not a design problem — the in-memory equivalents are
-   covered by 793 passing tests. The PR is now seven commits and touches four roadmap items;
-   splitting it is possible but the commits are independently reviewable and the branch is
-   green as a whole.
-2. **A notification / webhook seam** — the highest-value next capability, and the one three
-   existing features are all waiting for. A budget threshold crossing, a guardrail block, and a
-   run completion are the same shape (an org-scoped event that someone outside the console
-   needs to hear about), and today all three require somebody to be looking at a page. One
-   seam — an org-scoped, RBAC-managed webhook subscription with signed deliveries, bounded
-   retries, and a delivery log — serves all of them, and the audit trail already gives it a
-   place to record subscription changes. Design note for whoever picks it up: deliveries must
-   be off the request path (the trace-export attachment points are the precedent), signatures
-   must be HMAC over the raw body with a per-subscription secret that is shown once, and the
-   delivery log needs the same keyset pagination the audit trail uses.
-3. **Audit export + retention** — a SIEM/CSV export and a retention policy are what an auditor
+1. **Land PR #4.** Watch the `integration` lane specifically: it contains the **first ever
+   execution** of `test_webhook_store_integration.py`, `test_budget_store_integration.py` and
+   `test_budget_notification_store_integration.py`. The claim-atomicity assertion (two separate
+   connections racing one `INSERT … ON CONFLICT DO NOTHING`) has never run anywhere, and it is
+   the load-bearing property of the notification design. `Pg_Budget_Store` also finally has a
+   suite, closing the gap the previous session recorded as its first task.
+2. **Webhook delivery durability** — the single biggest gap between this and Stripe's or
+   GitHub's webhooks, and the one every other webhook item is smaller than. Delivery is
+   in-process and best-effort today: a restart mid-delivery loses it, and the retry budget is
+   spent in seconds rather than over hours. The shape: an outbox table written in the same
+   transaction as the triggering work, a worker that drains it with exponential backoff over
+   hours, and the existing `Webhook_Transport` seam underneath unchanged. The delivery log
+   already has the row shape; what is missing is a queue and a worker loop.
+3. **Delivery-log retention** (rows accumulate with traffic; `drop_for_subscription` is the
+   scoped statement a prune job would call) and **secret rotation** with a grace window where
+   both the old and new signatures verify. Re-registering is the rotation today, which means a
+   consumer outage.
+4. **Audit export + retention** — a SIEM/CSV export and a retention policy are what an auditor
    asks for immediately after "do you have a trail"; the cursor they need already exists.
 4. **Export durability** (from the trace-export work). Export is
    fire-and-forget: a collector that is down during a run loses that run's export, and only

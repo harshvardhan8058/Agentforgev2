@@ -187,6 +187,42 @@ Guarantees that do not depend on configuration:
   domain stores are (`USE_DATABASE` / the production profile); the keyless lane keeps an
   in-memory trail so auditing is testable without infrastructure.
 
+## Outbound webhooks (`WEBHOOK_MAX_ATTEMPTS`, `WEBHOOK_TIMEOUT_SECONDS`, `WEBHOOK_BACKOFF_SECONDS`, `WEBHOOK_MAX_PER_ORG`)
+
+All optional in both profiles, and all **bounded at the type level** rather than merely
+defaulted — because each is a multiplier on how long a worker thread can be held by somebody
+else's slow endpoint. An out-of-range value aborts startup naming the key, in the same way a
+missing required setting does; `WEBHOOK_TIMEOUT_SECONDS=600` would be configuring an outage.
+
+| Setting | Default | Range | What it bounds |
+| --- | --- | --- | --- |
+| `WEBHOOK_MAX_ATTEMPTS` | 3 | 1–5 | HTTP attempts per event per subscription |
+| `WEBHOOK_TIMEOUT_SECONDS` | 4.0 | >0–15 | Each attempt (per network operation) |
+| `WEBHOOK_BACKOFF_SECONDS` | 0.5 | 0–5 | Base of the exponential backoff (0.5s, 1.0s, …) |
+| `WEBHOOK_MAX_PER_ORG` | 20 | 1–100 | Subscriptions per organization, i.e. the fan-out of one event |
+
+Two things are deliberately **not** settings:
+
+- **Loopback destinations.** `http://localhost:9000` is admissible outside the production
+  profile and refused in it, derived from `PROFILE` with no environment variable of its own —
+  so no deployment can accidentally enable it. It exists so a developer can point a
+  subscription at a local listener and watch a signed request arrive.
+- **The signing secret.** Generated per subscription by the server and returned once, at
+  creation. There is nothing to configure and no way to supply your own.
+
+See `docs/WEBHOOKS.md` for the consumer-facing contract (signature verification, event
+payloads, the delivery log) and `docs/KNOWN_LIMITATIONS.md` for what the delivery machinery
+does not promise.
+
+## Budget threshold notifications
+
+No settings. Crossing **80%** or **100%** of the monthly ceiling emits
+`budget.threshold_crossed` to any subscribed webhook, at most once per organization per period
+per threshold. The thresholds are a module constant (`BUDGET_THRESHOLDS` in
+`observability/budget_alerts.py`): making them configurable means parsing and validating a
+list, and adding a third is a one-line change with no migration. The retry cooldown (5 minutes)
+and attempt cap (5 per period) are constants for the same reason.
+
 ## Trace export (`TRACING_EXPORT_ENABLED`, `LANGSMITH_API_KEY`, `OTEL_EXPORTER_ENDPOINT`)
 
 All optional in both profiles. **Recording and exporting are separate**: every run's trace is

@@ -53,10 +53,25 @@ the leftovers):
   image — a design change rather than a packaging tweak.
 - **Docs & DX:** expand `DEPLOYMENT.md` rollback runbooks, add a quickstart, and document the
   integration-lane test suite (credential-free, but needs a `pgvector` database).
-- **Budget notifications (new, from the budget work):** crossing a threshold is visible on the
-  dashboard and in the API, but nothing emails, webhooks, or alerts — and an owner who has to
-  look is an owner who finds out late. A webhook/notification seam would serve budget
-  thresholds, guardrail blocks, and run completion at once, and is the natural next capability.
+- ~~**Budget notifications / a webhook seam**~~ — **done.** The webhook framework (migration
+  0015) and budget threshold notifications (migration 0016) shipped together: signed deliveries
+  to per-org endpoints for `run.completed`, `run.failed`, `document.ingested`,
+  `guardrail.blocked`, and `budget.threshold_crossed`, with a delivery log and a console page.
+  See `docs/WEBHOOKS.md`. What it left open, in the order I would take it:
+  - **Durable delivery.** Deliveries are in-process and best-effort, so a restart mid-delivery
+    loses one and the retry budget is spent in seconds. A queue (outbox table + a worker, or
+    Redis) would make delivery survive a deploy and let retries stretch over hours — the single
+    biggest gap between this and Stripe's.
+  - **Delivery-log retention.** Rows accumulate with traffic and are removed only with their
+    subscription. A retention window plus a prune job; the scoped statement already exists.
+  - **Secret rotation.** Re-registering is the rotation today, which means a consumer outage.
+    A `POST /webhooks/{id}/rotate-secret` returning the new secret once, with a grace window
+    where both signatures verify, is the shape consumers expect.
+  - **More events, and a filter.** `evaluation.completed`, `prompt.published`,
+    `member.role_changed` are the obvious next ones. Beyond a handful, subscriptions want a
+    filter (by run kind, by cost threshold) rather than a longer checklist.
+  - **Guardrail blocks on the streaming surfaces**, which do not run input guardrails at all
+    today — a coverage asymmetry rather than a webhook limitation.
 - **Audit export + retention (new, from the audit work):** a SIEM/CSV export and a retention
   policy are what an auditor asks for after "do you have a trail". Both are small next to the
   trail itself, and the keyset cursor they need already exists.

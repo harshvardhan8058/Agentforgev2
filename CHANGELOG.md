@@ -8,11 +8,101 @@ This file starts at v1.1. Everything before it is v1.0 — Phases 1–9 plus the
 production-hardening pass — and is documented per phase in `docs/FEATURE_INVENTORY.md`
 with the merged-PR index in `docs/SESSION_HANDOFF.md`.
 
-## [Unreleased] — v1.1 work in progress
+## [Unreleased] — outbound webhooks + budget notifications
 
-Branch `feat/v1.1-admin-crud-and-cost-defaults` ([PR #2](https://github.com/harshvardhan8058/Agentforgev2/pull/2)).
-Closes three v1.1 roadmap items. **No migration is required** — every change reuses the
-existing tables.
+Branch `feat/v1.1-webhook-framework` ([PR #4](https://github.com/harshvardhan8058/Agentforgev2/pull/4)).
+**Requires migrations `0015` and `0016`.**
+
+The platform could observe everything and tell nobody. A run finished, a guardrail blocked an
+input, an organization crossed its spend threshold — each was visible to whoever went looking,
+and to nobody else. This closes the notification gap three separate roadmap items were waiting
+on, and puts the first real consumer on it.
+
+### Added
+
+- **Outbound webhook framework** (migration `0015`: `webhook_subscriptions`,
+  `webhook_deliveries`). Per-organization HTTPS endpoints that receive a signed POST for
+  `run.completed`, `run.failed`, `document.ingested`, `guardrail.blocked`, and
+  `budget.threshold_crossed`. `GET/POST /webhooks`, `PATCH/DELETE /webhooks/{id}`,
+  `POST /webhooks/{id}/test`, and `GET /webhooks/{id}/deliveries` (keyset-paginated), all behind
+  a new `manage_webhooks` permission granted from **admin** upwards. The signing secret is
+  returned exactly once, at creation: no other response model has a field for it, so there is no
+  path that could leak it by forgetting to strip it.
+- **URL admission as an allow-list, not a deny-list.** A webhook URL is an address the *server*
+  then fetches, so: `https` only (`http` for loopback outside production), no credentials or
+  fragment, no scheme/port contradiction, and every address the host resolves to must be
+  globally routable — which excludes loopback, RFC1918, link-local (so cloud metadata is
+  unreachable), CGNAT, IPv4-mapped IPv6, and the documentation/benchmarking ranges in one check
+  rather than a list somebody has to keep complete. Re-validated before **every** attempt,
+  redirects disabled, and the response body never read.
+- **Stripe-shaped signatures.** `X-AgentForge-Signature: t=<unix>,v1=<hmac-sha256 of "t.body">`,
+  so a captured payload is not replayable. `verify_signature()` ships as platform code, not just
+  as prose, so the documented consumer recipe is executable and tested.
+- **Bounded, logged delivery.** 3 attempts, 4s each, exponential backoff, a wall-clock deadline
+  for the whole sequence, and one delivery row per (event, subscription) recording the attempt
+  count. `duration_ms` excludes the backoff, so it answers "how slow is this endpoint".
+- **A deferred-work seam for error paths** (`api/errors.py`). The success paths had
+  `BackgroundTasks`; a *refusal* is raised rather than returned, so it had nothing — which is why
+  a guardrail block could not be reported. Work is now parked on the request and run after the
+  error response is sent.
+- **Budget threshold notifications** (migration `0016`: `budget_notifications`). Crossing 80% or
+  100% of the monthly ceiling emits `budget.threshold_crossed`, at most once per organization per
+  period per threshold. A threshold is a *condition*, not an event — once true it stays true for
+  weeks — so the first request to observe a crossing **claims** it: the table's primary key is
+  the claim, and `INSERT … ON CONFLICT DO NOTHING` decides the winner. Announcements dispatch
+  off-band (the service owns a single-worker pool), so they neither queue ahead of a run's own
+  post-response work nor hold a streamed connection open. A failed announcement releases its
+  claim and retries after a cooldown; changing the ceiling reconciles the claims, so raising a
+  budget re-arms the notification the raise un-crossed.
+- **Webhooks console page** (`/webhooks`, `manage_webhooks`-gated): register, pause/resume,
+  re-point, remove, send a test, and page the delivery log with the server's keyset cursor. The
+  event checklist is generated from the contract, so it cannot offer an event the server does not
+  emit. The secret appears in a dismissible panel rather than a toast — it must not vanish on a
+  timer while being copied.
+- **`docs/WEBHOOKS.md`**: the consumer contract — signature verification, every event's payload,
+  delivery semantics, and what to deduplicate on.
+- **Three audited actions**: `webhook.created`, `webhook.updated`, `webhook.deleted`. The audit
+  row records the URL's **origin** only (`https://hooks.example.com`), never its path or query,
+  because a webhook URL's path routinely *is* a credential.
+
+### Fixed
+
+- **`Budget_Guard` cached month-to-date spend keyed on the organization alone**, so a request in
+  the first seconds of a new month was answered with last month's total: an organization that
+  ended July over a *blocking* budget would start August still refused, for the length of the
+  cache window, with a number no dashboard agreed with. The key is now `(org, period_start)`.
+- **A fail-open spend figure was indistinguishable from a real one.** The guard reports zero when
+  metering is unavailable, so "spend is zero" and "spend is unknown" were the same value and
+  opposite facts — and the notification reconciler read the latter as "nothing is crossed, delete
+  every claim". `Budget_Status` now carries `spend_is_authoritative`, and the fail-open value is
+  neither cached nor acted on.
+- **`--color-success` failed WCAG AA at small sizes in the light theme** (`#16a34a` is 3.29:1 on
+  white; AA needs 4.5:1). Now `#136c33` (6.5:1, and 5.2:1 on its own badge tint). This affected
+  every `text-success` usage across the console, not only the new page.
+- **`CardTitle` takes an optional heading level.** The level is a property of where the card
+  sits, not of the component, and a card that is a top-level section under an `h1` needs `h2` or
+  the document skips a level (axe `heading-order`).
+- **`Pg_Budget_Store` had no integration test at all** — recorded as a gap in the previous
+  session and closed here, together with a new one for the webhook stores and the claim store
+  (including that a second connection cannot also win a claim).
+
+### Changed
+
+- `httpx` moves from a dev dependency to a runtime one: it is what delivers webhooks.
+- `SSE_Streaming_Service`'s completion hook now receives a `Completed_Run` record rather than a
+  bare run id, so a streamed run emits the same outcome event a non-streamed one does.
+- `apply_input_guardrail` takes an optional `on_block` callback, so an entry point can *report* a
+  block without this module knowing what reporting means.
+
+---
+
+## [Unreleased] — v1.1 admin CRUD, cost defaults, integrations, audit, budgets
+
+Branch `feat/v1.1-admin-crud-and-cost-defaults`, opened as
+[PR #2](https://github.com/harshvardhan8058/Agentforgev2/pull/2) and merged to `main` as
+[PR #3](https://github.com/harshvardhan8058/Agentforgev2/pull/3). Closes three v1.1 roadmap
+items. **Requires migrations `0013` and `0014`** (the audit trail and spend budgets; the
+admin-CRUD, cost-preset and integration-config work reuses existing tables).
 
 ### Added
 
