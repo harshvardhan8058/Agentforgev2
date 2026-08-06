@@ -34,7 +34,12 @@ from agentforge.api.schemas import BudgetStatusResponse, SetBudgetRequest
 from agentforge.enterprise.audit import Audit_Action, Audit_Service
 from agentforge.enterprise.models import Principal
 from agentforge.enterprise.rbac import Permission
-from agentforge.observability.budget import Budget_Guard, Budget_Status, Budget_Store
+from agentforge.observability.budget import (
+    Budget_Guard,
+    Budget_Status,
+    Budget_Store,
+    format_percent,
+)
 from agentforge.observability.budget_alerts import Budget_Alert_Service
 
 router = APIRouter(tags=["budget"])
@@ -50,11 +55,10 @@ def _to_response(status_: Budget_Status) -> BudgetStatusResponse:
         spent=str(status_.spent),
         limit_amount=str(status_.limit_amount) if status_.limit_amount is not None else None,
         remaining=str(remaining) if remaining is not None else None,
-        # Rounded for display only, and only here: a percentage is a presentation artefact,
-        # unlike `spent`/`limit_amount`/`remaining`, which cross verbatim.
-        percent_used=(
-            str(percent.quantize(Decimal("0.01"))) if percent is not None else None
-        ),
+        # Rounded for display: a percentage is a presentation artefact, unlike
+        # `spent`/`limit_amount`/`remaining`, which cross verbatim. Shared with the
+        # threshold-notification payload so the two never disagree.
+        percent_used=format_percent(percent),
         action=status_.action,
         exceeded=status_.exceeded,
         blocked=status_.blocked,

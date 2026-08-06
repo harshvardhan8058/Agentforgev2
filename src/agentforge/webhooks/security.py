@@ -59,6 +59,12 @@ SIGNATURE_HEADER: Final[str] = "X-AgentForge-Signature"
 EVENT_HEADER: Final[str] = "X-AgentForge-Event"
 DELIVERY_HEADER: Final[str] = "X-AgentForge-Delivery"
 SUBSCRIPTION_HEADER: Final[str] = "X-AgentForge-Webhook-Id"
+#: Which attempt this is, 1-based. Lets a consumer log "this is a retry" without diffing bodies —
+#: a retry is byte-identical to its first attempt, deliberately.
+ATTEMPT_HEADER: Final[str] = "X-AgentForge-Attempt"
+#: The logical identity of the occurrence. The header a consumer should deduplicate on: unlike
+#: the delivery id, it is also stable across a repeated occurrence that means the same thing.
+IDEMPOTENCY_HEADER: Final[str] = "X-AgentForge-Idempotency-Key"
 
 
 class WebhookUrlRejected(ValueError):

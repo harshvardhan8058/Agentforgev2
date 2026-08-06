@@ -28,7 +28,7 @@ from agentforge.api.deps import (
     get_streaming_service,
     get_trace_export_service,
     get_trace_recorder,
-    get_webhook_emitter,
+    get_webhook_dispatcher,
     require_permission,
 )
 from agentforge.api.errors import AppError, defer_after_error
@@ -51,8 +51,11 @@ from agentforge.observability.trace_export import Trace_Export_Service
 from agentforge.streaming.base import AgentRunInput
 from agentforge.streaming.sse import Completed_Run, SSE_Streaming_Service
 from agentforge.tracing.base import Trace_Recorder
-from agentforge.webhooks.emitter import Webhook_Emitter
-from agentforge.webhooks.events import emit_guardrail_blocked, emit_run_outcome
+from agentforge.webhooks.dispatcher import Webhook_Dispatcher
+from agentforge.webhooks.events import (
+    dispatch_guardrail_blocked,
+    dispatch_run_outcome,
+)
 
 router = APIRouter(tags=["agent"])
 
@@ -77,7 +80,7 @@ async def run_agent(
     store: Conversation_Store = Depends(get_conversation_store),
     pipeline: Guardrail_Pipeline | None = Depends(get_optional_guardrail_pipeline),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
-    webhooks: Webhook_Emitter = Depends(get_webhook_emitter),
+    webhooks: Webhook_Dispatcher = Depends(get_webhook_dispatcher),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> AgentRunResponse:
@@ -106,7 +109,7 @@ async def run_agent(
         """Queue the guardrail-block webhook to run after the 400 has been sent."""
         defer_after_error(
             request,
-            lambda: emit_guardrail_blocked(
+            lambda: dispatch_guardrail_blocked(
                 webhooks, org_id, surface="agent.run", reason=reason
             ),
         )
@@ -163,7 +166,7 @@ async def run_agent(
         user_id=principal.user_id,
     )
     background.add_task(
-        emit_run_outcome,
+        dispatch_run_outcome,
         webhooks,
         org_id,
         run_id=response.run_id,
@@ -181,7 +184,7 @@ async def stream_agent(
     streaming: SSE_Streaming_Service = Depends(get_streaming_service),
     store: Conversation_Store = Depends(get_conversation_store),
     trace_export: Trace_Export_Service = Depends(get_trace_export_service),
-    webhooks: Webhook_Emitter = Depends(get_webhook_emitter),
+    webhooks: Webhook_Dispatcher = Depends(get_webhook_dispatcher),
     principal: Principal = Depends(require_permission(Permission.RUN_AGENTS)),
     _budget: Principal = Depends(enforce_budget),
 ) -> StreamingResponse:
@@ -215,7 +218,7 @@ async def stream_agent(
         trace_export.export_run(
             completed.run_id, org_id=org_id, user_id=principal.user_id
         )
-        emit_run_outcome(
+        dispatch_run_outcome(
             webhooks,
             org_id,
             run_id=completed.run_id,

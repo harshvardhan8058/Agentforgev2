@@ -146,9 +146,25 @@ class Settings(BaseSettings):
     # attempts x timeout is the worst case per subscription, and per-org fan-out multiplies it
     # again. An operator who set WEBHOOK_TIMEOUT_SECONDS=600 would be configuring an outage,
     # so the value is refused at startup naming the key rather than accepted and regretted.
-    webhook_max_attempts: int = Field(default=3, ge=1, le=5)
+    # Total attempts across the whole DURABLE schedule, not retries inside one request. Eight
+    # attempts on a 60-second exponential base spans roughly a day, which is what "a consumer was
+    # broken overnight and somebody fixed it in the morning" needs.
+    webhook_max_attempts: int = Field(default=8, ge=1, le=20)
     webhook_timeout_seconds: float = Field(default=4.0, gt=0.0, le=15.0)
-    webhook_backoff_seconds: float = Field(default=0.5, ge=0.0, le=5.0)
+    # Base of the exponential retry schedule, in seconds: 60 -> 1m, 2m, 4m, 8m, ... capped at six
+    # hours. Minutes rather than the sub-second values an in-process loop needed, because the
+    # failure this actually recovers from is a consumer being redeployed or its certificate having
+    # expired, not a dropped packet.
+    webhook_backoff_seconds: float = Field(default=60.0, ge=1.0, le=3600.0)
+    # How many due entries one worker pass claims. Bounds a pass at batch x timeout.
+    webhook_batch_size: int = Field(default=20, ge=1, le=200)
+    # How long the worker sleeps when it finds nothing due. Also the floor on delivery latency for
+    # an idle deployment, so it is kept small.
+    webhook_poll_seconds: float = Field(default=2.0, ge=0.1, le=60.0)
+    # Whether this process runs the delivery worker. True by default so a single-container
+    # deployment just works; set false on instances that should only serve HTTP (a web tier
+    # scaled for requests, with delivery on its own replica).
+    webhook_worker_enabled: bool = True
     # Cap on subscriptions per organization. Bounds the fan-out of a single event, which is
     # the only unbounded quantity in the delivery path; 20 endpoints is far past any real
     # deployment's needs and far short of a way to turn one run into a minute of HTTP.

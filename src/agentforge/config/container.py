@@ -160,7 +160,14 @@ from agentforge.observability.usage.store import (
     Pg_Usage_Store,
 )
 from agentforge.webhooks.base import Webhook_Transport
+from agentforge.webhooks.dispatcher import Webhook_Dispatcher
 from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.outbox import (
+    InMemory_Webhook_Outbox,
+    Pg_Webhook_Outbox,
+    Webhook_Outbox,
+)
+from agentforge.webhooks.worker import Webhook_Delivery_Worker
 from agentforge.webhooks.store import (
     InMemory_Webhook_Delivery_Store,
     InMemory_Webhook_Subscription_Store,
@@ -1096,6 +1103,19 @@ def build_webhook_subscription_store(
     return InMemory_Webhook_Subscription_Store(deliveries)
 
 
+def build_webhook_outbox(settings: Settings) -> Webhook_Outbox:
+    """Return the Webhook_Outbox: Postgres when the domain stores persist, else memory.
+
+    This is the one store whose persistence changes a *guarantee* rather than a convenience: with
+    Postgres, delivery survives a restart and several instances can share the work; in memory it is
+    single-process and a restart drops what had not gone out yet. The keyless lane says so in
+    docs/KNOWN_LIMITATIONS.md.
+    """
+    if settings.persist_domain_stores():
+        return Pg_Webhook_Outbox(settings.database_url)
+    return InMemory_Webhook_Outbox()
+
+
 def build_webhook_transport(settings: Settings) -> Webhook_Transport:
     """Return the HTTP webhook transport, told whether loopback destinations are admissible."""
     return Httpx_Webhook_Transport(
@@ -1255,8 +1275,11 @@ class ObservabilityContext:
     budget_alert_service: Budget_Alert_Service
     webhook_subscription_store: Webhook_Subscription_Store
     webhook_delivery_store: Webhook_Delivery_Store
+    webhook_outbox: Webhook_Outbox
     webhook_transport: Webhook_Transport
     webhook_emitter: Webhook_Emitter
+    webhook_dispatcher: Webhook_Dispatcher
+    webhook_worker: Webhook_Delivery_Worker
     usage_store: Usage_Store
     cost_model: Cost_Model
     usage_recorder: Usage_Recorder
@@ -1301,8 +1324,9 @@ def build_observability_context(
     ``cost_model``, ``usage_recorder``, ``usage_sink``, ``analytics_service``,
     ``prompt_store``, ``prompt_registry``, ``guardrail_pipeline``, ``evaluation_store``,
     ``evaluators``, ``pipeline_runner``, ``evaluation_framework``,
-    ``webhook_subscription_store``, ``webhook_delivery_store``, ``webhook_transport``,
-    ``webhook_emitter``, ``budget_notification_store``, and ``budget_alert_service``.
+    ``webhook_subscription_store``, ``webhook_delivery_store``, ``webhook_outbox``,
+    ``webhook_transport``, ``webhook_emitter``, ``webhook_dispatcher``, ``webhook_worker``,
+    ``budget_notification_store``, and ``budget_alert_service``.
     """
     tracing_exporter: Tracing_Exporter = (
         overrides.get("tracing_exporter") or build_tracing_exporter(settings)
@@ -1375,12 +1399,28 @@ def build_observability_context(
     webhook_transport: Webhook_Transport = overrides.get(
         "webhook_transport"
     ) or build_webhook_transport(settings)
+    webhook_outbox: Webhook_Outbox = overrides.get(
+        "webhook_outbox"
+    ) or build_webhook_outbox(settings)
+    # The emitter performs one attempt; the outbox decides when. Retry state that lives in a
+    # process is retry state a deploy erases, which is why the schedule is not here.
     webhook_emitter: Webhook_Emitter = overrides.get("webhook_emitter") or Webhook_Emitter(
-        webhook_subscription_store,
         webhook_delivery_store,
         webhook_transport,
-        max_attempts=settings.webhook_max_attempts,
         timeout_seconds=settings.webhook_timeout_seconds,
+    )
+    webhook_dispatcher: Webhook_Dispatcher = overrides.get(
+        "webhook_dispatcher"
+    ) or Webhook_Dispatcher(webhook_subscription_store, webhook_outbox)
+    webhook_worker: Webhook_Delivery_Worker = overrides.get(
+        "webhook_worker"
+    ) or Webhook_Delivery_Worker(
+        webhook_outbox,
+        webhook_subscription_store,
+        webhook_emitter,
+        batch_size=settings.webhook_batch_size,
+        poll_seconds=settings.webhook_poll_seconds,
+        max_attempts=settings.webhook_max_attempts,
         backoff_seconds=settings.webhook_backoff_seconds,
     )
 
@@ -1392,7 +1432,14 @@ def build_observability_context(
     # needs both the claim store and the emitter to do it exactly once.
     budget_alert_service: Budget_Alert_Service = overrides.get(
         "budget_alert_service"
-    ) or Budget_Alert_Service(budget_notification_store, webhook_emitter)
+    ) or Budget_Alert_Service(
+        budget_notification_store,
+        webhook_dispatcher,
+        # The budget store as well, so an announcement re-reads the ceiling it is about to warn
+        # about: a status snapshot can be up to `budget_cache_seconds` old, and a warning citing
+        # a ceiling the owner has since raised would also claim (and so silence) the real one.
+        budget_store,
+    )
 
     return ObservabilityContext(
         settings=settings,
@@ -1404,8 +1451,11 @@ def build_observability_context(
         budget_alert_service=budget_alert_service,
         webhook_subscription_store=webhook_subscription_store,
         webhook_delivery_store=webhook_delivery_store,
+        webhook_outbox=webhook_outbox,
         webhook_transport=webhook_transport,
         webhook_emitter=webhook_emitter,
+        webhook_dispatcher=webhook_dispatcher,
+        webhook_worker=webhook_worker,
         usage_store=usage_store,
         cost_model=cost_model,
         usage_recorder=usage_recorder,

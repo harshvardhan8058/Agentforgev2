@@ -35,9 +35,23 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
     slightly. The alternative — an exact ledger with a lock per run — costs more than it buys.
   - **Metering fails open.** If spend cannot be computed, work proceeds (logged at WARNING),
     because an analytics outage must not become a total outage.
-  - **No notifications.** Crossing a threshold is visible on the dashboard and in the API, but
-    nothing emails, webhooks, or alerts. Combining this with the audit trail's SIEM export is
-    the natural follow-up.
+  - **Notifications exist, with fixed thresholds.** Crossing **80%** or **100%** emits
+    `budget.threshold_crossed` to any webhook subscribed to it (see the webhook section below).
+    The thresholds are a module constant, not a setting: making them configurable means parsing
+    and validating a list, and adding a third is a one-line change with no migration. There is
+    still no email or SMS channel — a webhook is the seam, and anything else consumes it.
+  - **A notification is at-least-once, not exactly-once.** The claim that makes it once per
+    period is released when a delivery demonstrably failed, so a consumer whose response timed
+    out after it had already processed the request can be told twice, with a different delivery
+    id. Deliberate: losing the alert is worse than repeating it. Consumers should deduplicate on
+    `(period_start, threshold_percent)`.
+  - **A zero ceiling announces both thresholds at once**, with `spent` and `limit_amount` both
+    `"0"` and `percent_used` `"100"`, since "spend nothing" is 100% used from the first request.
+    A consumer that recomputes the percentage divides by zero; the payload's `percent_used` is
+    there to be read instead.
+  - **Notification state is per process without a database.** The claim store is in-memory on
+    the keyless path, so a restart re-announces a crossed threshold once, and a multi-worker
+    keyless deployment announces once per worker. With Postgres (migration 0016) it is exact.
   - **A budget only bites where cost is priced.** With no `COST_RATE_PRESET`/rate table every
     run costs `0`, so a ceiling can never be reached — the Cost rates panel says as much.
   - **Approval decisions are deliberately not gated**, so a paused multi-agent run can always
@@ -85,6 +99,56 @@ Retrieval, citations, guardrails, RBAC, tenancy, streaming, traces, evaluations,
 - **Analytics:** costs are `0.0` until pricing is configured (`COST_RATE_PRESET`, or `COST_RATE_TABLE_JSON` for per-model rates) — the console says so explicitly rather than presenting an unpriced deployment's `$0.00` as a real total, and `GET /analytics/cost-rates` reports the effective rates. Shipped preset rates are the vendor's public list prices at the date in the preset name, so a deployment with negotiated, batch, or cached-input pricing must override the affected pairs. Meaningful charts require actual run volume.
 - **Guardrails:** the default pipeline is deterministic and simple (max-input-length + optional static blocklist) — not ML/classifier-based moderation.
 - **Evaluations:** evaluators are deterministic; dataset/run creation is gated behind `run_agents`.
+- **Outbound webhooks:** deliveries are real HTTPS requests, signed and logged, but the delivery
+  machinery is deliberately in-process. Bounds worth knowing:
+  - **Delivery is durable, and at-least-once.** Events are queued in `webhook_outbox`
+    (migration 0017) before anything is dialled and retried on an expanding schedule for about a
+    day, so a restart or a consumer outage delays rather than loses them. What that costs is
+    exactly-once: a worker that delivers and then dies before recording the success will deliver
+    again, so every envelope carries an `idempotency_key` and consumers are expected to use it.
+    Exactly-once would require a distributed transaction with an endpoint the platform does not
+    control.
+  - **The queue is only durable where the domain stores are.** With Postgres it survives restarts
+    and several application instances can drain it safely (`FOR UPDATE SKIP LOCKED`). On the
+    keyless path the outbox is in memory: single-process, and a restart drops what had not gone
+    out. That is the same trade-off every other store makes on that path.
+  - **One attempt per worker pass, and the worker is one thread.** Throughput is
+    `WEBHOOK_BATCH_SIZE` attempts per pass; a deployment with a very large fan-out and many slow
+    endpoints should run delivery on its own replica (`WEBHOOK_WORKER_ENABLED=false` on the web
+    tier) rather than expecting one process to keep up.
+  - **Abandoned events need a human.** After `WEBHOOK_MAX_ATTEMPTS` the event is marked
+    `abandoned` and stays visible on `GET /webhooks/queue` until somebody redelivers it. There is
+    no alert when that happens — the queue is a page you have to look at, which is the same gap
+    budget notifications closed for spend.
+  - **The signing secret is stored recoverably**, unlike `api_keys.secret_hash` (Argon2). A hash
+    cannot *sign* an outgoing request, which is what a webhook secret is for — the same reason
+    Stripe and GitHub do this. It is returned exactly once, at creation, and no read path in the
+    application can produce it again, but that once-only exposure is an **application** guarantee
+    rather than a cryptographic one: an operator with database access can read it. There is no
+    rotation endpoint; re-registering is the rotation.
+  - **DNS rebinding is not closed.** The URL is admitted (and re-admitted before every attempt)
+    by resolving the host and refusing anything not globally routable, but between that check and
+    the connect, DNS can change. Closing it properly means connecting to a pinned, pre-validated
+    IP with the hostname carried in SNI plus `Host`, which the HTTP client here cannot express.
+  - **A streamed run's connection stays open until its post-stream hook returns** — but that hook
+    is now one indexed read plus one INSERT per subscription, not an HTTP delivery, so the window
+    is microseconds rather than a subscriber's timeout. Trace export still runs there too.
+  - **Input guardrail blocks are emitted for the non-streaming surfaces only.** `/agent/stream`
+    and the multi-agent stream do not run input guardrails at all today, so `guardrail.blocked`
+    covers `/query`, `/agent/run`, and `/multi-agent/runs`. Output guardrails flag rather than
+    block, so they emit nothing.
+  - **The delivery log has no retention bound.** Rows accumulate with traffic and are removed only
+    when their subscription is deleted (`ON DELETE CASCADE`). The *outbox* is pruned (delivered
+    rows are swept hourly by the worker after seven days), but the attempt log it writes is not.
+    `Webhook_Delivery_Store.drop_for_subscription` is the scoped statement a retention job would
+    call.
+  - **Re-streaming a multi-agent run emits its outcome again.** `POST /multi-agent/runs/{id}/stream`
+    *re-runs* the collaboration, so it is genuinely a second run of the same id. Both deliveries
+    carry the same `idempotency_key`, so a consumer that keys on it acts once.
+  - **A delivery row can be lost in one narrow case:** if the subscription is deleted while its
+    event is in flight, the row's foreign key no longer resolves, so the event is sent but the
+    record of it is not written — for a subscription that no longer exists.
+
 - **Integrations:** connectors are deterministic stand-ins for real HTTP in this build; bounded timeout + result cap; single-write actions gated by `run_agents`; OAuth flows and webhooks are out of scope. Per-org connection config is manageable over `/integrations/connections` (and on the Integrations page) but stores **non-secret fields only** and the connectors do not yet read it; it is operator-facing configuration ahead of the live-connector work. Specific bounds worth knowing:
   - The credential admission policy refuses credential-shaped **keys** (segment- and substring-matched), recognisable credential **values** (vendor prefixes case-folded, JWTs, PEM blocks, URLs with userinfo, known webhook hosts) and non-scalar or oversized values. It is a heuristic, not a proof: a credential with no recognisable shape under an innocent key name (say a bare 32-character hex string as `identifier`) would be accepted, and listing needs only `read`, so treat the field as org-readable configuration.
   - Nothing constrains one connection per `(org_id, integration)`, and there is no per-org row cap. Neither matters while no connector reads the config; both need deciding before one does.

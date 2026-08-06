@@ -14,11 +14,11 @@ import logging
 from collections.abc import Callable
 from uuid import UUID
 
-from fastapi import BackgroundTasks, Depends, Request, status
+from fastapi import Depends, Request, status
 from fastapi.concurrency import run_in_threadpool
 
 from agentforge.agent.orchestrator import Agent_Orchestrator
-from agentforge.api.errors import AppError, defer_after_error
+from agentforge.api.errors import AppError
 from agentforge.config.container import (
     AgentContext,
     AppContext,
@@ -58,7 +58,12 @@ from agentforge.storage.base import DocumentStore
 from agentforge.streaming.sse import SSE_Streaming_Service
 from agentforge.tracing.base import Trace_Recorder
 from agentforge.vectorstore.base import Vector_Store
-from agentforge.webhooks.emitter import Webhook_Emitter, disabled_webhook_emitter
+from agentforge.webhooks.dispatcher import (
+    Webhook_Dispatcher,
+    disabled_webhook_dispatcher,
+)
+from agentforge.webhooks.emitter import Webhook_Emitter
+from agentforge.webhooks.outbox import Webhook_Outbox
 from agentforge.webhooks.store import (
     Webhook_Delivery_Store,
     Webhook_Subscription_Store,
@@ -407,7 +412,6 @@ def get_trace_export_service(request: Request) -> Trace_Export_Service:
 
 async def enforce_budget(
     request: Request,
-    background: BackgroundTasks,
     principal: Principal = Depends(get_current_principal),
 ) -> Principal:
     """Refuse new work when the org is over a **blocking** spend budget (Req 3.x, 8.x).
@@ -440,18 +444,19 @@ async def enforce_budget(
     status_ = await run_in_threadpool(ctx.budget_guard.status, principal.org_id)
 
     # Threshold notifications ride the status this dependency already computed, so warning an
-    # owner costs no extra aggregation. `pending` is pure, so the overwhelming majority of
-    # requests — no ceiling, or nowhere near it — schedule nothing at all; only a request that
-    # has actually crossed a threshold pays for a claim and a delivery, and it pays for them
-    # after the response.
-    alerts = getattr(ctx, "budget_alert_service", None)
-    if alerts is not None and alerts.pending(status_):
-        if status_.blocked:
-            # The refusal below is raised, not returned, so there is no response to attach a
-            # background task to; the deferred-work seam runs it after the 402 has been sent.
-            defer_after_error(request, lambda: alerts.announce(status_))
-        else:
-            background.add_task(alerts.announce, status_)
+    # owner costs no extra aggregation. `pending` is pure and consults an in-process memo, so the
+    # overwhelming majority of requests — no ceiling, nowhere near it, or already notified —
+    # schedule nothing at all.
+    #
+    # `dispatch` hands the work to the alert service's own small pool rather than to this
+    # request's `BackgroundTasks`. Those are shared with the routers, so an announcement would
+    # queue ahead of trace export and the `run.completed` webhook; and on a streamed response
+    # they are attached to the response, which would hold the client's connection open for a
+    # subscriber's timeout. It also bounds the blast radius: a slow endpoint occupies one
+    # dedicated worker instead of a share of the pool every store call in the platform uses.
+    alerts = ctx.budget_alert_service
+    if alerts.pending(status_):
+        alerts.dispatch(status_)
 
     if status_.blocked:
         logger.warning(
@@ -499,23 +504,32 @@ def get_webhook_delivery_store(request: Request) -> Webhook_Delivery_Store:
     return get_observability_context(request).webhook_delivery_store
 
 
+def get_webhook_outbox(request: Request) -> Webhook_Outbox:
+    """Return the wired Webhook_Outbox (delivery intent, durable)."""
+    return get_observability_context(request).webhook_outbox
+
+
 def get_webhook_emitter(request: Request) -> Webhook_Emitter:
-    """Return the wired Webhook_Emitter, or an inert one if no context is wired.
+    """Return the wired Webhook_Emitter (one signed attempt, used by the test-send endpoint)."""
+    return get_observability_context(request).webhook_emitter
+
+
+def get_webhook_dispatcher(request: Request) -> Webhook_Dispatcher:
+    """Return the wired Webhook_Dispatcher, or an inert one if no context is wired.
 
     Deliberately non-raising, exactly like :func:`get_trace_export_service` and for the same
-    reason: the emitter is consumed by the *run* endpoints, so turning a missing observability
-    context into a 500 on ``POST /agent/run`` would let a notification concern fail the work it
-    is supposed to be reporting on. A partially-wired app runs agents normally and notifies
-    nobody.
+    reason: the dispatcher is consumed by the *run* endpoints, so turning a missing observability
+    context into a 500 on ``POST /agent/run`` would let a notification concern fail the work it is
+    supposed to be reporting on. A partially-wired app runs agents normally and notifies nobody.
 
-    The webhook *management* router keeps using the raising accessors above, where a missing
-    context is a genuine misconfiguration and must fail loudly rather than silently accept
-    subscriptions into a store nothing reads.
+    The webhook *management* router uses the raising accessors above, where a missing context is a
+    genuine misconfiguration and must fail loudly rather than silently accept subscriptions into a
+    store nothing reads.
     """
     ctx = getattr(request.app.state, "observability_context", None)
     if ctx is None:
-        return disabled_webhook_emitter()
-    return ctx.webhook_emitter
+        return disabled_webhook_dispatcher()
+    return ctx.webhook_dispatcher
 
 
 def get_analytics_service(request: Request) -> Analytics_Service:

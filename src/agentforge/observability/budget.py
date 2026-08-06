@@ -83,6 +83,12 @@ class Budget_Status:
     # therefore distinguish "over budget" from "blocked", which are different conversations.
     exceeded: bool
     blocked: bool
+    # False when ``spent`` is the guard's FAIL-OPEN placeholder rather than a real figure: the
+    # guard reports zero when spend cannot be computed, so that a metering outage does not
+    # become a platform outage. Enforcement is happy to treat that as "not over budget", but
+    # anything that takes a *destructive* or *irreversible* action on the number must not:
+    # "spend is zero" and "spend is unknown" are the same value and opposite facts.
+    spend_is_authoritative: bool = True
 
     @property
     def remaining(self) -> Decimal | None:
@@ -104,6 +110,18 @@ class Budget_Status:
         if self.limit_amount == 0:
             return Decimal(100)
         return (self.spent / self.limit_amount) * 100
+
+
+def format_percent(percent: Decimal | None) -> str | None:
+    """Render a share-of-budget for a client: two decimal places, or ``None``.
+
+    One formatter, used by both ``GET /budget`` and the ``budget.threshold_crossed`` webhook,
+    because the same organization state must not read ``33.33`` in the console and
+    ``33.33333333333333333333333333`` in the notification about it. Unlike ``spent`` and
+    ``limit_amount`` — which cross verbatim, since they are money — a percentage is a
+    presentation artefact, so rounding it is correct rather than lossy.
+    """
+    return str(percent.quantize(Decimal("0.01"))) if percent is not None else None
 
 
 def current_period(now: datetime | None = None) -> tuple[datetime, datetime]:
@@ -279,7 +297,7 @@ class Budget_Guard:
         moment = now or _utcnow()
         period_start, period_end = current_period(moment)
         budget = self._store.get(org_id)
-        spent = self._spend_for_period(org_id, period_start, moment)
+        spent, authoritative = self._spend_for_period(org_id, period_start, moment)
 
         limit_amount = budget.limit_amount if budget else None
         action: BudgetAction | None = budget.action if budget else None
@@ -293,6 +311,7 @@ class Budget_Guard:
             action=action,
             exceeded=exceeded,
             blocked=exceeded and action == "block",
+            spend_is_authoritative=authoritative,
         )
 
     def invalidate(self, org_id: UUID) -> None:
@@ -312,12 +331,13 @@ class Budget_Guard:
 
     def _spend_for_period(
         self, org_id: UUID, period_start: datetime, moment: datetime
-    ) -> Decimal:
+    ) -> tuple[Decimal, bool]:
+        """Return ``(spend, is_authoritative)`` for the period. Never raises."""
         cache_key = (org_id, period_start)
         with self._lock:
             cached = self._cache.get(cache_key)
             if cached is not None and (moment - cached[0]).total_seconds() < self._cache_seconds:
-                return cached[1]
+                return cached[1], True
         try:
             report = self._analytics.usage_report(org_id, start=period_start, end=moment)
             spent = report.total_cost
@@ -329,7 +349,14 @@ class Budget_Guard:
                 org_id,
                 exc_info=True,
             )
-            return Decimal(0)
+            # NOT cached, and reported as non-authoritative: caching a fabricated zero would
+            # extend a metering blip across the whole cache window, and a caller that acts
+            # destructively on the number needs to know it is a placeholder.
+            return Decimal(0), False
         with self._lock:
+            # Only the current period is worth keeping: an entry per org per month would grow
+            # without bound and make `invalidate` a longer scan every request.
+            for key in [k for k in self._cache if k[0] == org_id and k != cache_key]:
+                del self._cache[key]
             self._cache[cache_key] = (moment, spent)
-        return spent
+        return spent, True
